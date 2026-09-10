@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --appendonly no
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: production
+    volumes:
+      - ./data/meili:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      retries: 5
+
+  api:
+    build: ../apps/api
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - /var/apps/propias-app/myfood/data/images:/data/images
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      meilisearch: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      retries: 5
+
+  worker:
+    build: ../apps/api
+    restart: unless-stopped
+    command: python -m myfood.worker
+    env_file: .env
+    volumes:
+      - /var/apps/propias-app/myfood/data/images:/data/images
+    depends_on:
+      api: { condition: service_healthy }
+
+  web:
+    build: ../apps/web
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:${APP_PORT}:3000"
+    depends_on:
+      api: { condition: service_healthy }
