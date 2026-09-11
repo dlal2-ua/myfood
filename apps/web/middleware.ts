@@ -3,7 +3,7 @@ import { SESSION_COOKIE_NAME } from "@/lib/api";
 
 // Every API endpoint these pages call requires auth, so gate them here
 // instead of letting each page render an inline 401 error.
-const PROTECTED_PREFIXES = ["/profile", "/foods", "/log"];
+const PROTECTED_PREFIXES = ["/profile", "/foods", "/log", "/scan"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -21,5 +21,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/profile/:path*", "/foods/:path*", "/log/:path*"],
+  matcher: ["/profile/:path*", "/foods/:path*", "/log/:path*", "/scan/:path*"],
 };
