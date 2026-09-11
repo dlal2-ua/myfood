@@ -58,7 +58,7 @@ jobs:
           POSTGRES_APP_PASSWORD: test
           POSTGRES_ADMIN_PASSWORD: test
           ENCRYPTION_KEY: "00000000000000000000000000000000000000000000000000000000000000"
-      - run: uv run pytest -q
+      - run: uv run pytest -q --cov=myfood.domain.formulas --cov-report=term-missing --cov-fail-under=100
         env:
           POSTGRES_HOST: localhost
           POSTGRES_APP_PASSWORD: test
