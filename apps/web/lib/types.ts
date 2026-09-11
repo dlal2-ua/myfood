@@ -168,3 +168,45 @@ export interface ShoppingListItem {
 export interface ShoppingList {
   items: ShoppingListItem[];
 }
+
+export interface Supplement {
+  id: string;
+  name: string;
+  type: string;
+  dose_amount: number;
+  dose_unit: string;
+  doses_per_container: number | null;
+  price_per_container: number | null;
+  notes: string | null;
+  is_active: boolean;
+  food_id: string | null;
+  created_at: string;
+  doses_remaining: number | null;
+  last_restock_at: string | null;
+  days_remaining: number | null;
+  low_stock: boolean;
+}
+
+export interface SupplementList {
+  items: Supplement[];
+}
+
+export interface SupplementSchedule {
+  id: string;
+  time_of_day: string;
+  days_of_week: number[];
+  with_food: boolean;
+}
+
+export interface SupplementDetail extends Supplement {
+  schedules: SupplementSchedule[];
+}
+
+export interface SupplementLogEntry {
+  id: string;
+  supplement_id: string;
+  supplement_name: string;
+  log_date: string;
+  taken_at: string;
+  skipped: boolean;
+}

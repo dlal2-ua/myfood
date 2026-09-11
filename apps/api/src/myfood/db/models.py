@@ -4,7 +4,7 @@ en la base de datos desde la migración 0001, sea cual sea la fase en curso.
 """
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from sqlalchemy import (
     Boolean,
@@ -15,9 +15,10 @@ from sqlalchemy import (
     Numeric,
     SmallInteger,
     String,
+    Time,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from myfood.db.base import Base
@@ -208,3 +209,68 @@ class ShoppingListItem(Base):
     # partir de ningún plan).
     plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Supplement(Base):
+    __tablename__ = "supplements"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    dose_amount: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False)
+    dose_unit: Mapped[str] = mapped_column(String, nullable=False)
+    doses_per_container: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price_per_container: Mapped[object | None] = mapped_column(Numeric(10, 2), nullable=True)
+    image_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Opcional (sección "Suplementación") — solo para el caso en que el
+    # suplemento (p. ej. proteína en polvo) corresponda a un alimento real del
+    # catálogo. Sin integración de macros en esta fase: se acepta y persiste,
+    # nada más.
+    food_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupplementSchedule(Base):
+    __tablename__ = "supplement_schedules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    supplement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("supplements.id", ondelete="CASCADE"), nullable=False
+    )
+    time_of_day: Mapped[time] = mapped_column(Time, nullable=False)
+    days_of_week: Mapped[list[int]] = mapped_column(
+        ARRAY(SmallInteger), nullable=False, default=lambda: [1, 2, 3, 4, 5, 6, 7]
+    )
+    with_food: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class SupplementLog(Base):
+    __tablename__ = "supplement_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    supplement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("supplements.id", ondelete="CASCADE"), nullable=False
+    )
+    taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    log_date: Mapped[date] = mapped_column(Date, nullable=False)
+    skipped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class SupplementStock(Base):
+    __tablename__ = "supplement_stock"
+
+    supplement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("supplements.id", ondelete="CASCADE"), primary_key=True
+    )
+    doses_remaining: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False, default=0)
+    last_restock_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
