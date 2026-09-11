@@ -34,6 +34,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      meilisearch:
+        image: getmeili/meilisearch:v1.11
+        env:
+          MEILI_MASTER_KEY: test
+          MEILI_NO_ANALYTICS: "true"
+        ports:
+          - 7700:7700
+        options: >-
+          --health-cmd "curl -f http://localhost:7700/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -53,6 +65,8 @@ jobs:
           POSTGRES_ADMIN_PASSWORD: test
           POSTGRES_PASSWORD: test
           REDIS_URL: redis://localhost:6379/0
+          MEILI_URL: http://localhost:7700
+          MEILI_MASTER_KEY: test
           ENCRYPTION_KEY: "00000000000000000000000000000000000000000000000000000000000000"
 
   web:
