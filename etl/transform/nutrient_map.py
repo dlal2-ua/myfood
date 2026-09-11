@@ -4,6 +4,9 @@ Mapeo explícito por ID (USDA) o por cabecera exacta (CIQUAL), nunca por
 coincidencia de nombre. Verificado contra los dumps reales el 2026-09-11:
 - USDA: `FoodData_Central_foundation_food_json_*` / `..._sr_legacy_food_json_*`
 - CIQUAL: tabla Excel 2020 (data.gouv.fr, hoja "compo")
+- BEDCA: respuestas reales de `https://www.bedca.net/bdpub/procquery.php`
+  (`getFood`, nivel 2) — código `eur_name` (nomenclatura EuroFIR), consultado
+  contra ~20 alimentos reales de distintos grupos
 """
 
 # --- USDA (Foundation + SR Legacy) ------------------------------------------
@@ -120,4 +123,52 @@ OFF_MICRO_KEYS: dict[str, str] = {
     "phosphorus_100g": "phosphorus_mg",
     "potassium_100g": "potassium_mg",
     "zinc_100g": "zinc_mg",
+}
+
+# --- BEDCA (AESAN, España — referencia nacional) ----------------------------
+# Cada nutriente de una respuesta `getFood` trae un `eur_name` (código de
+# componente de la nomenclatura EuroFIR, ej. "PROT", "FAT", "ENERC") además
+# de un `c_id` numérico interno — se mapea por `eur_name`, más estable y
+# legible que el `c_id`, verificado contra respuestas reales del servicio.
+#
+# La energía ("ENERC") solo viene en kJ en todos los alimentos muestreados
+# (nunca en kcal directamente) — se convierte dividiendo por 4.184 (factor
+# estándar kJ -> kcal), nunca se estima. Todos los valores muestreados traen
+# `mu_id == "W"` ("por 100 g de porción comestible") — ya vienen normalizados
+# por 100 g, no hace falta convertir por ración (sección 11.2).
+BEDCA_ENERGY_EUR_NAME = "ENERC"
+BEDCA_KJ_PER_KCAL = 4.184
+
+BEDCA_MACRO_EUR_NAMES: dict[str, str] = {
+    "PROT": "protein_100g",
+    "FAT": "fat_100g",
+    "FASAT": "saturated_100g",
+    "CHO": "carbs_100g",
+    "SUGAR": "sugars_100g",
+    "FIBT": "fiber_100g",
+}
+
+# BEDCA no reporta la sal directamente — solo sodio ("NA", mg). Se convierte
+# con el mismo factor que USDA (NaCl/Na = 2.5).
+BEDCA_SODIUM_EUR_NAME = "NA"
+
+BEDCA_MICRO_EUR_NAMES: dict[str, str] = {
+    "VITA": "vitamin_a_ug",
+    "VITC": "vitamin_c_mg",
+    "VITD": "vitamin_d_ug",
+    "VITE": "vitamin_e_mg",
+    # BEDCA no reporta vitamina K en los alimentos muestreados (igual que
+    # CIQUAL) — no se incluye "vitamin_k_ug" aquí.
+    "THIA": "thiamin_mg",
+    "RIBF": "riboflavin_mg",
+    "NIAEQ": "niacin_mg",
+    "VITB6": "vitamin_b6_mg",
+    "FOL": "folate_ug",
+    "VITB12": "vitamin_b12_ug",
+    "CA": "calcium_mg",
+    "FE": "iron_mg",
+    "MG": "magnesium_mg",
+    "P": "phosphorus_mg",
+    "K": "potassium_mg",
+    "ZN": "zinc_mg",
 }
