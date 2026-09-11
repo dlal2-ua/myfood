@@ -13,6 +13,9 @@ export POSTGRES_HOST=localhost POSTGRES_PASSWORD=...  # credenciales del rol sup
 uv run python -m etl.run --source usda_foundation
 uv run python -m etl.run --source usda_sr
 uv run python -m etl.run --source ciqual
+uv run python -m etl.run --source bedca
+uv run python -m etl.run --source off          # dump completo filtrado por país (referencia histórica)
+uv run python -m etl.run --source off_brands   # productos de marca, ver nota abajo
 ```
 
 ## Fuentes implementadas
@@ -22,34 +25,57 @@ uv run python -m etl.run --source ciqual
 | USDA Foundation | 1 | 95 alimentos genéricos cargados (de 395 leídos — el resto sin `kcal` reportado, p. ej. sal) | ✅ |
 | USDA SR Legacy | 2 | 7.783 alimentos genéricos | ✅ |
 | CIQUAL (ANSES) | 3 | 2.293 alimentos genéricos (de 3.186 leídos) | ✅ |
-| Open Food Facts (España) | 5 | **31** productos de marca (de 358.342 filtrados por `en:spain`) | ⚠️ ver nota abajo |
-| BEDCA | 4 | ~500 alimentos españoles de referencia | ⏳ pendiente (servicio SOAP) |
+| BEDCA (AESAN) | 4 | 429 alimentos de referencia (de 431 leídos, ver `etl/sources/bedca.py`) | ✅ |
+| Open Food Facts (España) | 5 | **11.190** productos de marca (ver nota abajo) | ✅ |
 
-Total genérico cargado tras USDA+CIQUAL: **10.171** — supera el criterio de
-aceptación de la Fase 1 (≥8.000 alimentos genéricos).
+Total genérico cargado tras USDA+CIQUAL+BEDCA: **10.600** — supera el
+criterio de aceptación de la Fase 1 (≥8.000 alimentos genéricos). Total de
+marca (OFF): **11.190** — supera el criterio de ≥10.000 productos de marca.
 
-### ⚠️ OFF-España no alcanza el criterio de ≥10.000 productos de marca
+### Open Food Facts España: de 31 a 11.190 productos de marca
 
-Verificado en profundidad el 2026-09-11, no es un bug del pipeline (descartado
-con varias comprobaciones independientes, incluida la lectura del dump crudo
-sin pasar por DuckDB para descartar corrupción en el filtrado): del dump
-completo de OFF (~13 GB, ~4M productos), **358.342 traen la etiqueta
-`en:spain`**, pero de ellos **el 94,7% no tiene ningún nutriente cargado en
-absoluto** (`nutriments` vacío en el propio dump estático, no solo tras
-filtrar) — una entrada de solo código de barras + foto, sin datos
-nutricionales nunca rellenados por ningún contribuidor. Confirmado uniforme
-en varios puntos del fichero (inicio, ~100.000 registros después), no es un
-sesgo de muestreo. Tras aplicar las reglas de descarte de la sección 11.2
-(sin `kcal_100g`, o `kcal_100g > 900`, o macros > 100 g — nunca estimadas),
-solo **31 productos** pasan la validación.
+Investigación en dos fases, documentada aquí porque el camino hasta llegar
+al número correcto no es obvio y vale la pena dejarlo por si hace falta
+repetirlo con otra fuente en el futuro.
 
-Esto es una característica real del propio dataset público, no un fallo de
-esta implementación — se deja documentado en vez de forzar el número
-relajando las reglas de descarte (lo que violaría R9). Pendiente de decisión
-del usuario: aceptar un catálogo de marca inicial pequeño (crece con
-actualizaciones incrementales de OFF y con las altas manuales de usuarios
-al escanear, sección 11.2 y Fase 2), o explorar una fuente complementaria
-para productos españoles de marca.
+**Fase 1 — por qué filtrar el dump solo por país no sirve.** El dump
+completo de OFF (~13 GB, ~4M productos) trae 358.342 productos con la
+etiqueta `en:spain`, pero el 94,7% no tiene ningún nutriente cargado en
+absoluto (`nutriments` vacío en el propio dump estático, no solo tras
+filtrar) — altas de solo código de barras + foto, nunca rellenadas por
+ningún contribuidor. Verificado que no es un bug de lectura leyendo la
+línea cruda del dump directamente con `gzip`/`json`, sin DuckDB de por
+medio, y confirmado uniforme en varios puntos del fichero (no es sesgo de
+muestreo). Tras las reglas de descarte de la sección 11.2, solo 31
+productos pasaban.
+
+**Fase 2 — la Search API pública por marca sí tiene los datos.**
+Consultando la misma API en vivo de OFF filtrando por `brands_tags` (marcas
+de supermercado con mucho tráfico de escaneo/edición comunitaria) en vez de
+solo por país, la completitud es radicalmente distinta:
+`brands_tags=hacendado&countries_tags_en=spain` da 10.807 resultados con
+nutrientes reales — confirmado con muestras reales antes de escribir
+código. Se probó primero replicar esto filtrando el dump local por
+`brands_tags` con DuckDB (sin los límites de la API), pero el dump dio una
+tasa de descarte del 97,8% para las mismas marcas — muy por encima de lo
+que da la API en vivo para las mismas marcas (~5-8%). La lectura más
+plausible es que el dump es una foto periódica y estas marcas reciben
+ediciones comunitarias continuas que tardan en llegar al siguiente volcado.
+Esa ruta (`etl/sources/off.py::load_by_brand_dump`) se deja implementada y
+testeada por si hace falta una sincronización completa sin los límites de
+paginación de la API, pero no es la fuente principal.
+
+La API pública limita la paginación anónima a los primeros 1.000
+resultados por consulta (confirmado en la práctica: 401/503 exactamente en
+la página 11 con `page_size=100`, y solo en marcas cuyo `count` supera
+1.000) — en vez de registrar una cuenta de OFF, se amplió la lista de
+marcas consultadas (`DEFAULT_TARGET_BRANDS` en `etl/sources/off.py`, 20
+cadenas de supermercado españolas) hasta superar el criterio con margen:
+cada consulta capada a 1.000 sigue dando una muestra bien poblada de esa
+marca, y las cadenas más pequeñas (Alcampo, Condis, Ahorramas, Gadis,
+Masymas, Froiz, Hipercor, Caprabo) no llegan a ese límite, así que su
+recuento es completo. Resultado real cargado: **11.190** productos de
+marca únicos (`etl/sources/off.py::load_by_brand`, `--source off_brands`).
 
 ## Reglas (sección 11.2)
 

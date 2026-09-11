@@ -3,11 +3,19 @@
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from etl.db import ParsedFood
 from etl.rejected import Rejection
-from etl.sources.off import _grade, _nova, _per_100g, parse_food
+from etl.sources.off import (
+    _grade,
+    _nova,
+    _per_100g,
+    fetch_brand_products,
+    filter_brands,
+    parse_food,
+)
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
@@ -188,3 +196,103 @@ def test_parse_food_rejects_garbage_grade_before_hitting_db():
     assert isinstance(result, ParsedFood)
     assert result.nutriscore_grade is None
     assert result.ecoscore_grade is None
+
+
+def test_fetch_brand_products_paginates_until_short_page(monkeypatch):
+    """Sigue pidiendo páginas mientras vengan llenas; para en la primera corta."""
+    monkeypatch.setattr("etl.sources.off.time.sleep", lambda _seconds: None)
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        calls.append(params)
+        page = int(params["page"])
+        if page == 1:
+            products = [{"code": str(i)} for i in range(2)]  # page_size=2, llena
+        elif page == 2:
+            products = [{"code": "99"}]  # corta -> última página
+        else:
+            products = []
+        return httpx.Response(200, json={"products": products})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    results = list(fetch_brand_products(client, "hacendado", page_size=2))
+
+    assert [r["code"] for r in results] == ["0", "1", "99"]
+    assert len(calls) == 2
+    assert calls[0]["brands_tags"] == "hacendado"
+    assert calls[0]["countries_tags_en"] == "spain"
+
+
+def test_fetch_brand_products_stops_on_empty_page():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"products": []})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    results = list(fetch_brand_products(client, "lidl", page_size=100))
+
+    assert results == []
+
+
+def test_filter_brands_matches_xx_prefixed_tag(tmp_path):
+    """Regresión: el dump trae `brands_tags` con prefijo `xx:` (p. ej.
+    `"xx:hacendado"`), no el tag pelado que devuelve la API en vivo —
+    comparar sin el prefijo daba 0 resultados en la carga real."""
+    dump = tmp_path / "dump.jsonl"
+    dump.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "code": "1",
+                        "product_name": "Producto Hacendado",
+                        "brands_tags": ["xx:hacendado", "xx:ARTE LACTICO CAPRINO S.L."],
+                        "countries_tags": ["en:spain"],
+                        "nutriments": {"energy-kcal_100g": 100},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "code": "2",
+                        "product_name": "Producto de otra marca",
+                        "brands_tags": ["xx:otra-marca"],
+                        "countries_tags": ["en:spain"],
+                        "nutriments": {"energy-kcal_100g": 100},
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.jsonl"
+
+    count = filter_brands(dump, out, ["hacendado"])
+
+    assert count == 1
+    result = json.loads(out.read_text(encoding="utf-8").strip())
+    assert result["code"] == "1"
+
+
+def test_filter_brands_rejects_non_alnum_brand_name(tmp_path):
+    """Los nombres de marca se interpolan en SQL (DuckDB no soporta parámetros
+    en `read_ndjson`/`COPY`) — se valida que sean solo alfanumérico+guion
+    antes de construir la query, nunca se confía en la lista sin comprobar."""
+    with pytest.raises(ValueError, match="nombre de marca inesperado"):
+        filter_brands(tmp_path / "dump.jsonl", tmp_path / "out.jsonl", ["hacendado'; DROP TABLE--"])
+
+
+def test_fetch_brand_products_retries_on_503(monkeypatch):
+    monkeypatch.setattr("etl.sources.off.time.sleep", lambda _seconds: None)
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            return httpx.Response(503)
+        return httpx.Response(200, json={"products": [{"code": "ok"}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    results = list(fetch_brand_products(client, "dia", page_size=100))
+
+    assert [r["code"] for r in results] == ["ok"]
+    assert attempts["n"] == 3

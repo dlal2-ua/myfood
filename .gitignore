@@ -20,3 +20,4 @@ coverage/
 .coverage
 etl/rejected/
 etl/.cache/
+.claude/worktrees/

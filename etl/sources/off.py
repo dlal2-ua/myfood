@@ -3,11 +3,20 @@
 Descarga el dump JSONL completo (público, ~13 GB comprimido) y lo filtra
 con DuckDB por `countries_tags` antes de cargar nada — nunca se carga el
 fichero entero en memoria ni en Postgres (sección 11.2).
+
+Además de `load()` (dump completo filtrado por país), `load_by_brand()`
+consulta la Search API v2 pública de OFF filtrando por `brands_tags` +
+`countries_tags_en` — ver docstring de `load_by_brand` para la razón: el
+dump filtrado solo por país incluye una cola enorme de entradas de solo
+código de barras sin nutrientes, mientras que las marcas de supermercado
+más consultadas/editadas por la comunidad están mucho mejor rellenadas.
 """
 
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,8 +28,42 @@ from etl.rejected import Rejection, log_rejections
 from etl.transform.nutrient_map import OFF_MACRO_KEYS, OFF_MICRO_KEYS
 
 DUMP_URL = "https://static.openfoodfacts.org/data/openfoodfacts-products.jsonl.gz"
+SEARCH_API_URL = "https://world.openfoodfacts.org/api/v2/search"
+USER_AGENT = "MyFood-ETL/1.0 (+https://github.com/dlal2-ua/myfood; dev@example.com)"
 QUALITY_RANK = 5
 CACHE_DIR = Path(__file__).parent.parent / ".cache"
+
+# Marcas de supermercado/distribución con presencia fuerte en España.
+# Verificado el 2026-09-11 vía la Search API (ver etl/README.md): estas
+# marcas concentran productos activamente mantenidos por la comunidad,
+# muy por encima de la tasa de completitud del dump filtrado solo por país.
+DEFAULT_TARGET_BRANDS: tuple[str, ...] = (
+    "hacendado",
+    "carrefour",
+    "lidl",
+    "aldi",
+    "dia",
+    "consum",
+    "eroski",
+    "alcampo",
+    "auchan",
+    "condis",
+    "bonpreu",
+    "el-corte-ingles",
+    "mercadona",
+    "caprabo",
+    "gadis",
+    "ahorramas",
+    "masymas",
+    "froiz",
+    "spar",
+    "hipercor",
+)
+
+_API_FIELDS = (
+    "code,product_name,product_name_es,brands,categories_tags,quantity,"
+    "serving_size,serving_quantity,nutriscore_grade,nova_group,ecoscore_grade,nutriments"
+)
 
 _DUCKDB_COLUMNS = {
     "code": "VARCHAR",
@@ -35,6 +78,7 @@ _DUCKDB_COLUMNS = {
     "nova_group": "INTEGER",
     "ecoscore_grade": "VARCHAR",
     "countries_tags": "VARCHAR[]",
+    "brands_tags": "VARCHAR[]",
     "nutriments": "JSON",
 }
 
@@ -44,7 +88,11 @@ def download(cache_dir: Path = CACHE_DIR) -> Path:
     path = cache_dir / "off-products.jsonl.gz"
     if not path.exists():
         with httpx.stream(
-            "GET", DUMP_URL, headers={"User-Agent": "MyFood/1.0 (dev@example.com)"}, timeout=None
+            "GET",
+            DUMP_URL,
+            headers={"User-Agent": "MyFood/1.0 (dev@example.com)"},
+            timeout=None,
+            follow_redirects=True,
         ) as resp:
             resp.raise_for_status()
             with path.open("wb") as f:
@@ -78,6 +126,66 @@ def filter_spain(dump_path: Path, output_path: Path, country: str = "en:spain") 
             ignore_errors=true
         )
         WHERE list_contains(countries_tags, '{country}')
+    ) TO '{output_path}' (FORMAT JSON)
+    """
+    con = duckdb.connect()
+    con.execute(query)
+    con.close()
+
+    with output_path.open(encoding="utf-8") as f:
+        return sum(1 for _ in f)
+
+
+def filter_brands(
+    dump_path: Path, output_path: Path, brands: Sequence[str], country: str = "en:spain"
+) -> int:
+    """Filtra el dump completo por marca + país, con DuckDB (sección 11.2).
+
+    Alternativa a `filter_spain()` (que solo filtra por país): investigado el
+    2026-09-11 que filtrar solo por país deja pasar una cola enorme de altas
+    de solo código de barras sin nutrientes (94,7% del total, ver
+    `etl/README.md`). Restringir además a marcas de supermercado con mucho
+    tráfico de escaneo/edición comunitaria da una tasa de completitud mucho
+    mejor — confirmado contra la Search API pública antes de escribir esto
+    (`brands_tags=hacendado&countries_tags_en=spain` da 10.807 resultados con
+    nutrientes reales), pero esa misma API pública limita la paginación
+    anónima a los primeros 1.000 resultados por consulta (confirmado en la
+    práctica: 401/503 exactamente en la página 11 con `page_size=100`, y
+    solo en marcas cuyo `count` supera 1.000). Filtrar el dump local con
+    DuckDB no tiene ese límite — es un fichero local, no una API paginada.
+
+    Cada nombre en `brands` se compara en minúsculas contra cada elemento de
+    `brands_tags`. Los tags vienen con el prefijo de idioma `xx:` (etiqueta
+    "sin idioma", igual convención que usa OFF para tags que no se traducen
+    — verificado contra el dump crudo el 2026-09-11: el primer campo `curl`
+    a la API en vivo de un producto real devolvía `"hacendado"` sin prefijo,
+    pero el propio fichero del dump trae `"xx:hacendado"`. Confirmado leyendo
+    la línea cruda del dump con `zgrep`/`json` de la librería estándar, sin
+    DuckDB de por medio — el mismo patrón de verificación bypass-la-capa-
+    sospechosa que ya se usó para depurar `filter_spain` (ver docstring de
+    esa función). Comparar sin el prefijo daba 0 resultados en la carga
+    real — no es un caso hipotético, se detectó así.
+    """
+    for brand in brands:
+        if not brand.replace("-", "").isalnum():
+            raise ValueError(f"nombre de marca inesperado, no se interpola en SQL: {brand!r}")
+
+    brand_conditions = " OR ".join(
+        f"list_contains(list_transform(brands_tags, x -> lower(x)), 'xx:{b.lower()}')"
+        for b in brands
+    )
+    columns_sql = ", ".join(f"'{k}': '{v}'" for k, v in _DUCKDB_COLUMNS.items())
+    query = f"""
+    COPY (
+        SELECT code, product_name, product_name_es, brands, quantity,
+               serving_size, serving_quantity, nutriscore_grade, nova_group,
+               ecoscore_grade, categories_tags, nutriments
+        FROM read_ndjson(
+            '{dump_path}',
+            columns={{{columns_sql}}},
+            ignore_errors=true
+        )
+        WHERE list_contains(countries_tags, '{country}') AND ({brand_conditions})
     ) TO '{output_path}' (FORMAT JSON)
     """
     con = duckdb.connect()
@@ -227,4 +335,177 @@ def load(dump_path: Path | None = None, filtered_path: Path | None = None) -> Of
         conn.close()
 
     rejected_path = log_rejections("off", rejections) if rejections else None
+    return OffLoadResult(stats=stats, rejected_path=rejected_path)
+
+
+def load_by_brand_dump(
+    brands: Sequence[str] = DEFAULT_TARGET_BRANDS,
+    country: str = "en:spain",
+    dump_path: Path | None = None,
+    filtered_path: Path | None = None,
+) -> OffLoadResult:
+    """Carga productos de marca filtrando el dump local con DuckDB en vez de
+    la Search API (ver docstring de `filter_brands` — la API pública limita
+    la paginación anónima a 1.000 resultados por consulta; el dump local no
+    tiene ese límite). Reutiliza `parse_food()` sin cambios — mismas reglas
+    de descarte que el resto de fuentes, nunca se relaja nada.
+
+    Probado en la práctica el 2026-09-11 y descartado como fuente principal:
+    el dump estático da una tasa de completitud de nutrientes muchísimo peor
+    que la misma consulta contra la API en vivo para las mismas marcas
+    (97,8% de descartes por `MISSING_KCAL` sobre 38.264 productos filtrados,
+    frente a ~5% al pedir las mismas marcas vía `load_by_brand()`) — lectura
+    más plausible: el dump es una foto periódica y estas marcas reciben
+    ediciones comunitarias continuas que tardan en llegar al siguiente
+    volcado. Se deja implementada y testeada (útil para una sincronización
+    completa sin los límites de paginación de la API), pero `run.py` usa
+    `load_by_brand()` como fuente principal de `--source off_brands`.
+    """
+    filtered = filtered_path or (CACHE_DIR / "off_brands.jsonl")
+    if not filtered.exists():
+        dump = dump_path or download()
+        filter_brands(dump, filtered, brands, country)
+
+    parsed: list[ParsedFood] = []
+    rejections: list[Rejection] = []
+    read = 0
+    with filtered.open(encoding="utf-8") as f:
+        for line in f:
+            read += 1
+            raw = json.loads(line)
+            result = parse_food(raw)
+            if isinstance(result, Rejection):
+                rejections.append(result)
+            else:
+                parsed.append(result)
+
+    stats = LoadStats(read=read, rejected=len(rejections))
+
+    conn = get_connection()
+    try:
+        stats.upserted = upsert_foods(conn, parsed)
+    finally:
+        conn.close()
+
+    rejected_path = log_rejections("off_brands", rejections) if rejections else None
+    return OffLoadResult(stats=stats, rejected_path=rejected_path)
+
+
+def _api_get(client: httpx.Client, params: dict, retries: int = 8) -> dict:
+    """GET contra la Search API con reintento exponencial (503 frecuente bajo carga)."""
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            resp = client.get(SEARCH_API_URL, params=params, timeout=30.0)
+            if resp.status_code == 503:
+                raise httpx.HTTPStatusError("503", request=resp.request, response=resp)
+            resp.raise_for_status()
+            return resp.json()
+        except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+            last_exc = exc
+            time.sleep(min(2.0 * (attempt + 1), 20.0))
+    raise RuntimeError(f"OFF Search API failed after {retries} retries: {last_exc}")
+
+
+def fetch_brand_products(
+    client: httpx.Client, brand: str, country: str = "spain", page_size: int = 100
+) -> Iterator[dict]:
+    """Pagina la Search API v2 para una marca — para cuando una página viene corta."""
+    page = 1
+    while True:
+        data = _api_get(
+            client,
+            {
+                "brands_tags": brand,
+                "countries_tags_en": country,
+                "page_size": page_size,
+                "page": page,
+                "fields": _API_FIELDS,
+            },
+        )
+        products = data.get("products", [])
+        if not products:
+            return
+        yield from products
+        if len(products) < page_size:
+            return
+        page += 1
+        time.sleep(1.5)  # cortesía con la API pública, sin límite fijado en sección 11.2
+
+
+def load_by_brand(
+    brands: Sequence[str] = DEFAULT_TARGET_BRANDS, country: str = "spain"
+) -> OffLoadResult:
+    """Carga productos de marca vía la Search API filtrando por marca en vez de
+    solo por país (documento 2, sección 11).
+
+    Investigado el 2026-09-11: filtrar el dump completo solo por
+    `countries_tags` (`load()` arriba) da 358.342 productos etiquetados
+    España pero el 94,7% no tiene ningún nutriente relleno — mayormente
+    altas de solo código de barras. Consultando la misma Search API pública
+    por `brands_tags` (marcas de supermercado con mucho tráfico de escaneo
+    y edición comunitaria) la tasa de completitud es radicalmente distinta:
+    solo `brands_tags=hacendado&countries_tags_en=spain` ya da 10.807
+    resultados con nutrientes reales, muestreados y confirmados con
+    `curl` antes de escribir este código. Reutiliza `parse_food()` sin
+    cambios — incluidas todas las reglas de descarte de sección 11.2, nunca
+    se relaja nada para forzar el número.
+
+    Hace upsert marca a marca (no acumula todo en memoria hasta el final):
+    la API pública devuelve 503 con cierta frecuencia bajo carga sostenida
+    (confirmado en la práctica), así que si una marca falla tras agotar
+    reintentos, el progreso de las marcas ya procesadas queda guardado en
+    Postgres y se sigue con la siguiente en vez de perder toda la carga.
+    """
+    seen_barcodes: set[str] = set()
+    total_read = 0
+    total_upserted = 0
+    total_rejected = 0
+    all_rejections: list[Rejection] = []
+    failed_brands: list[str] = []
+
+    with httpx.Client(headers={"User-Agent": USER_AGENT}) as client:
+        for brand in brands:
+            brand_parsed: list[ParsedFood] = []
+            brand_rejections: list[Rejection] = []
+            brand_read = 0
+            try:
+                for raw in fetch_brand_products(client, brand, country):
+                    code = str(raw.get("code") or "")
+                    if code and code in seen_barcodes:
+                        continue  # un producto puede matchear más de una marca-tag
+                    if code:
+                        seen_barcodes.add(code)
+                    brand_read += 1
+                    result = parse_food(raw)
+                    if isinstance(result, Rejection):
+                        brand_rejections.append(result)
+                    else:
+                        brand_parsed.append(result)
+            except RuntimeError as exc:
+                print(f"[off_brands] {brand}: FALLÓ tras agotar reintentos ({exc})")
+                failed_brands.append(brand)
+
+            total_read += brand_read
+            total_rejected += len(brand_rejections)
+            all_rejections.extend(brand_rejections)
+
+            if brand_parsed:
+                conn = get_connection()
+                try:
+                    upserted = upsert_foods(conn, brand_parsed)
+                finally:
+                    conn.close()
+                total_upserted += upserted
+                print(
+                    f"[off_brands] {brand}: leídos={brand_read} "
+                    f"cargados={upserted} descartados={len(brand_rejections)}"
+                )
+            time.sleep(2.0)  # cortesía entre marcas
+
+    stats = LoadStats(read=total_read, upserted=total_upserted, rejected=total_rejected)
+    if failed_brands:
+        print(f"[off_brands] marcas fallidas (reintentar aparte): {failed_brands}")
+
+    rejected_path = log_rejections("off_brands", all_rejections) if all_rejections else None
     return OffLoadResult(stats=stats, rejected_path=rejected_path)
