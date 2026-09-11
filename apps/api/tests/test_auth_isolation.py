@@ -6,6 +6,8 @@ decir, que la política RLS de Postgres (sección 22) sea la que realmente
 impide la fuga de datos, no solo la disciplina del código de la aplicación.
 """
 
+import uuid
+
 import pytest
 from sqlalchemy import text
 
@@ -51,7 +53,7 @@ async def test_register_login_logout_flow():
     # producción, ver security.py); ASGITransport no valida TLS de verdad,
     # pero httpx sí exige el esquema https para aceptar cookies Secure.
     async with AsyncClient(transport=transport, base_url="https://test") as client:
-        email = "flow-test@example.com"
+        email = f"flow-test-{uuid.uuid4()}@example.com"
         resp = await client.post(
             "/api/auth/register",
             json={"email": email, "password": "correcthorse123", "display_name": "Flujo Test"},

@@ -41,6 +41,11 @@ ignore = ["B008"]  # Depends(...) en argumentos por defecto es el idiom de FastA
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Un único event loop para toda la sesión de tests: el engine async de
+# SQLAlchemy es un singleton a nivel de módulo (db/session.py) y su pool de
+# conexiones asyncpg se rompe si distintos tests usan loops distintos.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 
 [build-system]
