@@ -84,3 +84,40 @@ CIQUAL_MICRO_HEADERS: dict[str, str] = {
     # CIQUAL no publica un RAE ya calculado y no nos corresponde inventarlo.
     "Rétinol (µg/100 g)": "vitamin_a_ug",
 }
+
+# --- Open Food Facts (España) -----------------------------------------------
+# Claves de `nutriments` verificadas contra la taxonomía oficial
+# (static.openfoodfacts.org/data/taxonomies/nutrients.json) y contra
+# productos reales de la API el 2026-09-11. OFF ya normaliza estos valores
+# a "por 100 g" cuando existen — el sufijo `_100g` es el dato ya convertido,
+# no hace falta repetir la conversión salvo que solo venga `_serving`.
+OFF_MACRO_KEYS: dict[str, str] = {
+    "energy-kcal_100g": "kcal_100g",
+    "proteins_100g": "protein_100g",
+    "fat_100g": "fat_100g",
+    "saturated-fat_100g": "saturated_100g",
+    "carbohydrates_100g": "carbs_100g",
+    "sugars_100g": "sugars_100g",
+    "fiber_100g": "fiber_100g",
+    "salt_100g": "salt_100g",
+}
+
+OFF_MICRO_KEYS: dict[str, str] = {
+    "vitamin-a_100g": "vitamin_a_ug",
+    "vitamin-c_100g": "vitamin_c_mg",
+    "vitamin-d_100g": "vitamin_d_ug",
+    "vitamin-e_100g": "vitamin_e_mg",
+    "vitamin-k_100g": "vitamin_k_ug",
+    "vitamin-b1_100g": "thiamin_mg",
+    "vitamin-b2_100g": "riboflavin_mg",
+    "vitamin-pp_100g": "niacin_mg",
+    "vitamin-b6_100g": "vitamin_b6_mg",
+    "vitamin-b9_100g": "folate_ug",
+    "vitamin-b12_100g": "vitamin_b12_ug",
+    "calcium_100g": "calcium_mg",
+    "iron_100g": "iron_mg",
+    "magnesium_100g": "magnesium_mg",
+    "phosphorus_100g": "phosphorus_mg",
+    "potassium_100g": "potassium_mg",
+    "zinc_100g": "zinc_mg",
+}
