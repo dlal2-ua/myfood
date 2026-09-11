@@ -7,7 +7,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, SmallInteger, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from myfood.db.base import Base
@@ -87,3 +87,48 @@ class BodyMeasurement(Base):
     bf_method: Mapped[str | None] = mapped_column(String, nullable=True)
     source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Food(Base):
+    __tablename__ = "foods"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    license: Mapped[str] = mapped_column(String, nullable=False)
+    attribution: Mapped[str | None] = mapped_column(String, nullable=True)
+    barcode_ean: Mapped[str | None] = mapped_column(String, nullable=True)
+    name_es: Mapped[str] = mapped_column(String, nullable=False)
+    name_en: Mapped[str | None] = mapped_column(String, nullable=True)
+    brand: Mapped[str | None] = mapped_column(String, nullable=True)
+    category: Mapped[str | None] = mapped_column(String, nullable=True)
+    serving_size_g: Mapped[object | None] = mapped_column(Numeric(8, 2), nullable=True)
+    serving_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    quality_rank: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    nutriscore_grade: Mapped[str | None] = mapped_column(String, nullable=True)
+    nova_group: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    ecoscore_grade: Mapped[str | None] = mapped_column(String, nullable=True)
+    cooking_yield_factor: Mapped[object | None] = mapped_column(Numeric(4, 2), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    nutrients: Mapped["FoodNutrient"] = relationship(back_populates="food", uselist=False)
+
+
+class FoodNutrient(Base):
+    __tablename__ = "food_nutrients"
+
+    food_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id", ondelete="CASCADE"), primary_key=True
+    )
+    kcal_100g: Mapped[object] = mapped_column(Numeric(10, 3), nullable=False)
+    protein_100g: Mapped[object] = mapped_column(Numeric(10, 3), nullable=False, default=0)
+    fat_100g: Mapped[object] = mapped_column(Numeric(10, 3), nullable=False, default=0)
+    saturated_100g: Mapped[object | None] = mapped_column(Numeric(10, 3), nullable=True)
+    carbs_100g: Mapped[object] = mapped_column(Numeric(10, 3), nullable=False, default=0)
+    sugars_100g: Mapped[object | None] = mapped_column(Numeric(10, 3), nullable=True)
+    fiber_100g: Mapped[object | None] = mapped_column(Numeric(10, 3), nullable=True)
+    salt_100g: Mapped[object | None] = mapped_column(Numeric(10, 3), nullable=True)
+    micros: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    food: Mapped["Food"] = relationship(back_populates="nutrients")
