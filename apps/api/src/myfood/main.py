@@ -12,6 +12,7 @@ from myfood.routers import (
     profile,
     push,
     shopping_list,
+    supplements,
     water,
 )
 
@@ -28,6 +29,7 @@ app.include_router(foods.router, prefix="/api")
 app.include_router(log.router, prefix="/api")
 app.include_router(favorites.router, prefix="/api")
 app.include_router(shopping_list.router, prefix="/api")
+app.include_router(supplements.router, prefix="/api")
 app.include_router(water.router, prefix="/api")
 app.include_router(push.router, prefix="/api")
 app.include_router(notification_rules.router, prefix="/api")
