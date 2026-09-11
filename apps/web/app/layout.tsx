@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { NavBar } from "@/components/NavBar";
+import { getCurrentUser } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "MyFood",
@@ -7,10 +9,15 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const user = await getCurrentUser();
+
   return (
     <html lang="es">
-      <body className="min-h-screen antialiased">{children}</body>
+      <body className="min-h-screen antialiased">
+        <NavBar user={user} />
+        <div className="mx-auto max-w-3xl px-4 py-6">{children}</div>
+      </body>
     </html>
   );
 }
