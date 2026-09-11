@@ -1,0 +1,589 @@
+{
+  "rows": [
+    {
+      "f_id": "929",
+      "f_ori_name": "Queso Camembert 20-30% MG/ES",
+      "f_eng_name": "Camembert cheese, 20-30% fidm",
+      "f_origen": "BEDCA",
+      "foodvalues": [
+        {
+          "eur_name": "PROT",
+          "best_location": "24.7",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "ALC",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "WATER",
+          "best_location": "59.7",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "ENERC",
+          "best_location": "835.71",
+          "v_unit": "kJ"
+        },
+        {
+          "eur_name": "FAT",
+          "best_location": "11.2381",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "SUGAR",
+          "best_location": "",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "FIBT",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "CHO",
+          "best_location": "",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "STARCH",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "CHORL",
+          "best_location": "30",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "FASAT",
+          "best_location": "7",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "FAMS",
+          "best_location": "3.3",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "FAPU",
+          "best_location": "0.32",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "RIBF",
+          "best_location": "0.67",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITC",
+          "best_location": "",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITE",
+          "best_location": "0.3",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "THIA",
+          "best_location": "0.05",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "FOL",
+          "best_location": "66",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "VITB12",
+          "best_location": "1.1",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "VITA",
+          "best_location": "266.667",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "NIAEQ",
+          "best_location": "1.2",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITB6",
+          "best_location": "0.28",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITD",
+          "best_location": "0.17",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "P",
+          "best_location": "286",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "ZN",
+          "best_location": "1.4",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "K",
+          "best_location": "136",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "MG",
+          "best_location": "24",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "ID",
+          "best_location": "13.8",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "CA",
+          "best_location": "315",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "NA",
+          "best_location": "891",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "SE",
+          "best_location": "8.5",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "FE",
+          "best_location": "0.2",
+          "v_unit": "mg"
+        }
+      ],
+      "category": "Lácteos y derivados"
+    },
+    {
+      "f_id": "748",
+      "f_ori_name": "Aceite de coco",
+      "f_eng_name": "Coconut oil",
+      "f_origen": "BEDCA",
+      "foodvalues": [
+        {
+          "eur_name": "FAT",
+          "best_location": "100",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "PROT",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "ALC",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "WATER",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "ENERC",
+          "best_location": "3700",
+          "v_unit": "kJ"
+        },
+        {
+          "eur_name": "FIBT",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "CHO",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "FAPU",
+          "best_location": "0.77",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F14:0",
+          "best_location": "18.29",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F18:2",
+          "best_location": "0.7",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "FASAT",
+          "best_location": "84.31",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F16:0",
+          "best_location": "8.49",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F18:3",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F18:0",
+          "best_location": "3.2",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "FAMS",
+          "best_location": "4.96",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F12:0",
+          "best_location": "47.64",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F18:1CN9",
+          "best_location": "4.96",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "CHORL",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITB6",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITD",
+          "best_location": "0",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "RIBF",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITC",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "FOL",
+          "best_location": "0",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "VITE",
+          "best_location": "0.28",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "THIA",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "NIAEQ",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITB12",
+          "best_location": "0",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "VITA",
+          "best_location": "0",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "PANTAC",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "NA",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "ZN",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "FE",
+          "best_location": "0.4",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "CU",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "P",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "K",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "ID",
+          "best_location": "0",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "MG",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "SE",
+          "best_location": "0",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "CA",
+          "best_location": "0",
+          "v_unit": "mg"
+        }
+      ],
+      "category": "Grasas y aceites"
+    },
+    {
+      "f_id": "1050",
+      "f_ori_name": "Galleta, cubierta de chocolate",
+      "f_eng_name": "Cookie, chocolate covered",
+      "f_origen": "BEDCA",
+      "foodvalues": [
+        {
+          "eur_name": "PROT",
+          "best_location": "5.7",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "ALC",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "WATER",
+          "best_location": "0",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "ENERC",
+          "best_location": "2263.9",
+          "v_unit": "kJ"
+        },
+        {
+          "eur_name": "FAT",
+          "best_location": "27.6",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "FIBT",
+          "best_location": "2.9",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "CHO",
+          "best_location": "67.4",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "FAMS",
+          "best_location": "8",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F12:0",
+          "best_location": "0.955",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F18:1CN9",
+          "best_location": "5.759",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "FAPU",
+          "best_location": "1.1",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F14:0",
+          "best_location": "0.482",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F18:2",
+          "best_location": "1.536",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "CHORL",
+          "best_location": "22",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "FASAT",
+          "best_location": "16.7",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F16:0",
+          "best_location": "4.747",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F18:3",
+          "best_location": "0.111",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "FATRS",
+          "best_location": "0.068",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "F18:0",
+          "best_location": "3.899",
+          "v_unit": "g"
+        },
+        {
+          "eur_name": "VITB12",
+          "best_location": "0",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "VITA",
+          "best_location": "",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "NIAEQ",
+          "best_location": "1.7",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITB6",
+          "best_location": "0.04",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITD",
+          "best_location": "0",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "RIBF",
+          "best_location": "0.13",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITC",
+          "best_location": "0",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "VITE",
+          "best_location": "1.43",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "THIA",
+          "best_location": "0.03",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "FOL",
+          "best_location": "6",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "K",
+          "best_location": "230",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "ID",
+          "best_location": "20.1",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "MG",
+          "best_location": "42",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "SE",
+          "best_location": "5.7",
+          "v_unit": "ug"
+        },
+        {
+          "eur_name": "CA",
+          "best_location": "110",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "NA",
+          "best_location": "160",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "ZN",
+          "best_location": "0.8",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "FE",
+          "best_location": "1.7",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "CU",
+          "best_location": "0.25",
+          "v_unit": "mg"
+        },
+        {
+          "eur_name": "P",
+          "best_location": "130",
+          "v_unit": "mg"
+        }
+      ],
+      "category": "Cereales y derivados"
+    },
+    {
+      "f_id": null,
+      "f_ori_name": null,
+      "f_eng_name": null,
+      "f_origen": null,
+      "foodvalues": [],
+      "category": "Legumbres, semillas, frutos secos y derivados"
+    }
+  ]
+}
