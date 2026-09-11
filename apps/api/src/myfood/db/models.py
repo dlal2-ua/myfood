@@ -4,9 +4,9 @@ en la base de datos desde la migración 0001, sea cual sea la fase en curso.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, SmallInteger, String, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, SmallInteger, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -56,9 +56,34 @@ class Profile(Base):
 
     activity_level: Mapped[str] = mapped_column(String, nullable=False, default="moderate")
     goal: Mapped[str] = mapped_column(String, nullable=False, default="maintain")
+    goal_rate_kg_week: Mapped[object | None] = mapped_column(Numeric(3, 2), default=0.5)
     bmr_formula: Mapped[str] = mapped_column(String, nullable=False, default="mifflin")
     meals_per_day: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=4)
+    budget_eur_week: Mapped[object | None] = mapped_column(Numeric(10, 2), nullable=True)
+    max_cook_minutes: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     diet_style: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="profile")
+
+
+class BodyMeasurement(Base):
+    __tablename__ = "body_measurements"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    measured_on: Mapped[date] = mapped_column(Date, nullable=False)
+    # Datos de salud (R4) — cifrados en reposo, ver db/types.py.
+    weight_kg: Mapped[object | None] = mapped_column(EncryptedNumeric, nullable=True)
+    body_fat_pct: Mapped[object | None] = mapped_column(EncryptedNumeric, nullable=True)
+    neck_cm: Mapped[object | None] = mapped_column(EncryptedNumeric, nullable=True)
+    waist_cm: Mapped[object | None] = mapped_column(EncryptedNumeric, nullable=True)
+    hip_cm: Mapped[object | None] = mapped_column(EncryptedNumeric, nullable=True)
+    chest_cm: Mapped[object | None] = mapped_column(EncryptedNumeric, nullable=True)
+    arm_cm: Mapped[object | None] = mapped_column(EncryptedNumeric, nullable=True)
+    thigh_cm: Mapped[object | None] = mapped_column(EncryptedNumeric, nullable=True)
+    bf_method: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

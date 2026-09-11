@@ -57,7 +57,7 @@ jobs:
           POSTGRES_PASSWORD: test
           POSTGRES_APP_PASSWORD: test
           POSTGRES_ADMIN_PASSWORD: test
-          ENCRYPTION_KEY: "00000000000000000000000000000000000000000000000000000000000000"
+          ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
       - run: uv run pytest -q --cov=myfood.domain.formulas --cov-report=term-missing --cov-fail-under=100
         env:
           POSTGRES_HOST: localhost
@@ -67,7 +67,7 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           MEILI_URL: http://localhost:7700
           MEILI_MASTER_KEY: test
-          ENCRYPTION_KEY: "00000000000000000000000000000000000000000000000000000000000000"
+          ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
 
   web:
     runs-on: ubuntu-latest

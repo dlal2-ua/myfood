@@ -1,6 +1,7 @@
 import uuid
 
 import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -51,4 +52,24 @@ async def two_users(superuser_conn):
         text("DELETE FROM users WHERE id IN (:a, :b)"),
         {"a": str(user_a), "b": str(user_b)},
     )
+    await superuser_conn.commit()
+
+
+@pytest_asyncio.fixture
+async def registered_client(superuser_conn):
+    """Cliente HTTP real con sesión ya iniciada — para tests de endpoints
+    autenticados (profile, calc, log...) sin repetir el flujo de registro."""
+    from myfood.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="https://test") as client:
+        email = f"test-{uuid.uuid4()}@test.myfood"
+        resp = await client.post(
+            "/api/auth/register",
+            json={"email": email, "password": "correcthorse123", "display_name": "Test User"},
+        )
+        user_id = resp.json()["id"]
+        yield client, uuid.UUID(user_id)
+
+    await superuser_conn.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
     await superuser_conn.commit()
