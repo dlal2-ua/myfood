@@ -73,3 +73,36 @@ async def registered_client(superuser_conn):
 
     await superuser_conn.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
     await superuser_conn.commit()
+
+
+@pytest_asyncio.fixture
+async def test_food(superuser_conn):
+    """Alimento real en BD (sin pasar por Meilisearch) para tests de /log."""
+    food_id = uuid.uuid4()
+    await superuser_conn.execute(
+        text(
+            "INSERT INTO foods (id, kind, source, source_id, license, name_es, quality_rank) "
+            "VALUES (:id, 'generic', 'test', :sid, 'CC0', 'Pechuga de pollo de prueba', 1)"
+        ),
+        {"id": str(food_id), "sid": str(food_id)},
+    )
+    await superuser_conn.execute(
+        text(
+            "INSERT INTO food_nutrients "
+            "(food_id, kcal_100g, protein_100g, fat_100g, carbs_100g, micros) "
+            "VALUES (:id, 165, 31, 3.6, 0, '{\"iron_mg\": 0.7}'::jsonb)"
+        ),
+        {"id": str(food_id)},
+    )
+    await superuser_conn.commit()
+    yield food_id
+    # food_log puede referenciar este alimento (creado por el propio test) y
+    # su teardown puede correr después o antes que el de registered_client
+    # según el orden de los fixtures — se borra explícitamente aquí para no
+    # depender de ese orden ni de la CASCADE de food_log_food_id_fkey (que no
+    # existe: solo food_log.user_id tiene ON DELETE CASCADE, no food_id).
+    await superuser_conn.execute(
+        text("DELETE FROM food_log WHERE food_id = :id"), {"id": str(food_id)}
+    )
+    await superuser_conn.execute(text("DELETE FROM foods WHERE id = :id"), {"id": str(food_id)})
+    await superuser_conn.commit()
