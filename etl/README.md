@@ -19,14 +19,37 @@ uv run python -m etl.run --source ciqual
 
 | Fuente | `quality_rank` | Alcance | Estado |
 |---|---|---|---|
-| USDA Foundation | 1 | ~95 alimentos genéricos cargados (de 395 leídos — el resto sin `kcal` reportado, p. ej. sal) | ✅ |
-| USDA SR Legacy | 2 | ~7.783 alimentos genéricos | ✅ |
-| CIQUAL (ANSES) | 3 | ~2.293 alimentos genéricos (de 3.186 leídos) | ✅ |
+| USDA Foundation | 1 | 95 alimentos genéricos cargados (de 395 leídos — el resto sin `kcal` reportado, p. ej. sal) | ✅ |
+| USDA SR Legacy | 2 | 7.783 alimentos genéricos | ✅ |
+| CIQUAL (ANSES) | 3 | 2.293 alimentos genéricos (de 3.186 leídos) | ✅ |
+| Open Food Facts (España) | 5 | **31** productos de marca (de 358.342 filtrados por `en:spain`) | ⚠️ ver nota abajo |
 | BEDCA | 4 | ~500 alimentos españoles de referencia | ⏳ pendiente (servicio SOAP) |
-| Open Food Facts (España) | 5 | Productos de marca | ⏳ pendiente (dump JSONL + DuckDB) |
 
-Total generic cargado tras USDA+CIQUAL: **10.171** — supera el criterio de
-aceptación de la Fase 1 (≥8.000) sin necesitar BEDCA todavía.
+Total genérico cargado tras USDA+CIQUAL: **10.171** — supera el criterio de
+aceptación de la Fase 1 (≥8.000 alimentos genéricos).
+
+### ⚠️ OFF-España no alcanza el criterio de ≥10.000 productos de marca
+
+Verificado en profundidad el 2026-09-11, no es un bug del pipeline (descartado
+con varias comprobaciones independientes, incluida la lectura del dump crudo
+sin pasar por DuckDB para descartar corrupción en el filtrado): del dump
+completo de OFF (~13 GB, ~4M productos), **358.342 traen la etiqueta
+`en:spain`**, pero de ellos **el 94,7% no tiene ningún nutriente cargado en
+absoluto** (`nutriments` vacío en el propio dump estático, no solo tras
+filtrar) — una entrada de solo código de barras + foto, sin datos
+nutricionales nunca rellenados por ningún contribuidor. Confirmado uniforme
+en varios puntos del fichero (inicio, ~100.000 registros después), no es un
+sesgo de muestreo. Tras aplicar las reglas de descarte de la sección 11.2
+(sin `kcal_100g`, o `kcal_100g > 900`, o macros > 100 g — nunca estimadas),
+solo **31 productos** pasan la validación.
+
+Esto es una característica real del propio dataset público, no un fallo de
+esta implementación — se deja documentado en vez de forzar el número
+relajando las reglas de descarte (lo que violaría R9). Pendiente de decisión
+del usuario: aceptar un catálogo de marca inicial pequeño (crece con
+actualizaciones incrementales de OFF y con las altas manuales de usuarios
+al escanear, sección 11.2 y Fase 2), o explorar una fuente complementaria
+para productos españoles de marca.
 
 ## Reglas (sección 11.2)
 

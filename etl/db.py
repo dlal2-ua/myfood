@@ -61,16 +61,18 @@ class LoadStats:
     rejected: int = 0
 
 
-_UPSERT_FOOD_SQL = """
+_FOOD_TEMPLATE = (
+    "(%(kind)s, %(source)s, %(source_id)s, %(license)s, %(attribution)s, %(barcode_ean)s, "
+    "%(name_es)s, %(name_en)s, %(brand)s, %(category)s, %(serving_size_g)s, %(serving_label)s, "
+    "%(quality_rank)s, %(nutriscore_grade)s, %(nova_group)s, %(ecoscore_grade)s)"
+)
+
+_UPSERT_FOOD_BATCH_SQL = """
 INSERT INTO foods (
     kind, source, source_id, license, attribution, barcode_ean,
     name_es, name_en, brand, category, serving_size_g, serving_label,
     quality_rank, nutriscore_grade, nova_group, ecoscore_grade
-) VALUES (
-    %(kind)s, %(source)s, %(source_id)s, %(license)s, %(attribution)s, %(barcode_ean)s,
-    %(name_es)s, %(name_en)s, %(brand)s, %(category)s, %(serving_size_g)s, %(serving_label)s,
-    %(quality_rank)s, %(nutriscore_grade)s, %(nova_group)s, %(ecoscore_grade)s
-)
+) VALUES %s
 ON CONFLICT (source, source_id) WHERE source_id IS NOT NULL DO UPDATE SET
     license = EXCLUDED.license,
     attribution = EXCLUDED.attribution,
@@ -85,17 +87,19 @@ ON CONFLICT (source, source_id) WHERE source_id IS NOT NULL DO UPDATE SET
     nutriscore_grade = EXCLUDED.nutriscore_grade,
     nova_group = EXCLUDED.nova_group,
     ecoscore_grade = EXCLUDED.ecoscore_grade
-RETURNING id
+RETURNING id, source, source_id
 """
 
-_UPSERT_NUTRIENTS_SQL = """
+_NUTRIENT_TEMPLATE = (
+    "(%(food_id)s, %(kcal_100g)s, %(protein_100g)s, %(fat_100g)s, %(saturated_100g)s, "
+    "%(carbs_100g)s, %(sugars_100g)s, %(fiber_100g)s, %(salt_100g)s, %(micros)s)"
+)
+
+_UPSERT_NUTRIENTS_BATCH_SQL = """
 INSERT INTO food_nutrients (
     food_id, kcal_100g, protein_100g, fat_100g, saturated_100g,
     carbs_100g, sugars_100g, fiber_100g, salt_100g, micros
-) VALUES (
-    %(food_id)s, %(kcal_100g)s, %(protein_100g)s, %(fat_100g)s, %(saturated_100g)s,
-    %(carbs_100g)s, %(sugars_100g)s, %(fiber_100g)s, %(salt_100g)s, %(micros)s
-)
+) VALUES %s
 ON CONFLICT (food_id) DO UPDATE SET
     kcal_100g = EXCLUDED.kcal_100g,
     protein_100g = EXCLUDED.protein_100g,
@@ -108,19 +112,39 @@ ON CONFLICT (food_id) DO UPDATE SET
     micros = EXCLUDED.micros
 """
 
+_BATCH_SIZE = 1000
 
-def upsert_foods(conn, foods: Iterable[ParsedFood]) -> int:
-    """Upsert por lotes, clave (source, source_id) — idempotente (sección 11.2)."""
+
+def upsert_foods(conn, foods: Iterable[ParsedFood], batch_size: int = _BATCH_SIZE) -> int:
+    """Upsert por lotes, clave (source, source_id) — idempotente (sección 11.2).
+
+    Usa `execute_values` (pipeline de varias filas por round-trip) en vez de
+    una sentencia por fila — a la escala de OFF-España (cientos de miles de
+    filas) un round-trip por fila tarda demasiado.
+    """
     count = 0
-    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        for food in foods:
+    batch: list[ParsedFood] = []
+
+    def flush(cur, batch: list[ParsedFood]) -> None:
+        if not batch:
+            return
+        food_rows = []
+        for food in batch:
             row = asdict(food)
-            micros = row.pop("micros")
-            row["micros"] = None  # placeholder, no se usa en _UPSERT_FOOD_SQL
-            cur.execute(_UPSERT_FOOD_SQL, row)
-            food_id: UUID = cur.fetchone()["id"]
-            cur.execute(
-                _UPSERT_NUTRIENTS_SQL,
+            row.pop("micros")
+            food_rows.append(row)
+
+        returned = psycopg2.extras.execute_values(
+            cur, _UPSERT_FOOD_BATCH_SQL, food_rows, template=_FOOD_TEMPLATE, fetch=True
+        )
+        id_by_key: dict[tuple[str, str], UUID] = {
+            (r["source"], r["source_id"]): r["id"] for r in returned
+        }
+
+        nutrient_rows = []
+        for food in batch:
+            food_id = id_by_key[(food.source, food.source_id)]
+            nutrient_rows.append(
                 {
                     "food_id": food_id,
                     "kcal_100g": food.kcal_100g,
@@ -131,9 +155,21 @@ def upsert_foods(conn, foods: Iterable[ParsedFood]) -> int:
                     "sugars_100g": food.sugars_100g,
                     "fiber_100g": food.fiber_100g,
                     "salt_100g": food.salt_100g,
-                    "micros": json.dumps(micros),
-                },
+                    "micros": json.dumps(food.micros),
+                }
             )
+        psycopg2.extras.execute_values(
+            cur, _UPSERT_NUTRIENTS_BATCH_SQL, nutrient_rows, template=_NUTRIENT_TEMPLATE
+        )
+
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        for food in foods:
+            batch.append(food)
             count += 1
+            if len(batch) >= batch_size:
+                flush(cur, batch)
+                conn.commit()
+                batch = []
+        flush(cur, batch)
         conn.commit()
     return count
