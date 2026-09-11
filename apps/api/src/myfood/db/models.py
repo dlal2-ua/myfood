@@ -211,6 +211,66 @@ class ShoppingListItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class WaterSettings(Base):
+    __tablename__ = "water_settings"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    mode: Mapped[str] = mapped_column(String, nullable=False, default="auto")
+    daily_target_ml: Mapped[int] = mapped_column(Integer, nullable=False, default=2500)
+    containers: Mapped[list] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=lambda: [{"label": "Vaso", "ml": 200}, {"label": "Botella", "ml": 500}],
+    )
+
+
+class WaterLog(Base):
+    __tablename__ = "water_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    logged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    log_date: Mapped[date] = mapped_column(Date, nullable=False)
+    ml: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class NotificationRule(Base):
+    __tablename__ = "notification_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Forma libre por `kind` (sección 9): para 'water', p.ej.
+    # {"times": ["10:00", "13:00", "16:00", "19:00"]}; para 'supplement',
+    # {"time": "09:00", "message": "Toca la creatina"}. No se modela como
+    # columnas propias porque cada `kind` trae una forma distinta y añadir
+    # más tipos de recordatorio no debe tocar el esquema.
+    schedule: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    quiet_from: Mapped[time] = mapped_column(Time, nullable=False, default=time(23, 0))
+    quiet_to: Mapped[time] = mapped_column(Time, nullable=False, default=time(8, 0))
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    endpoint: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    p256dh: Mapped[str] = mapped_column(String, nullable=False)
+    auth: Mapped[str] = mapped_column(String, nullable=False)
+    device: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Supplement(Base):
     __tablename__ = "supplements"
 

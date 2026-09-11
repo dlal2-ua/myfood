@@ -8,9 +8,12 @@ from myfood.routers import (
     foods,
     health,
     log,
+    notification_rules,
     profile,
+    push,
     shopping_list,
     supplements,
+    water,
 )
 
 app = FastAPI(title="MyFood API", version="0.1.0")
@@ -27,3 +30,6 @@ app.include_router(log.router, prefix="/api")
 app.include_router(favorites.router, prefix="/api")
 app.include_router(shopping_list.router, prefix="/api")
 app.include_router(supplements.router, prefix="/api")
+app.include_router(water.router, prefix="/api")
+app.include_router(push.router, prefix="/api")
+app.include_router(notification_rules.router, prefix="/api")

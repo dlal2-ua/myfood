@@ -30,3 +30,28 @@ self.addEventListener("fetch", (event) => {
     caches.match(event.request).then((cached) => cached || fetch(event.request)),
   );
 });
+
+// Web Push autoalojado con VAPID (Fase 3, sección 10) — el payload ya viene
+// listo para mostrar (título/cuerpo), lo construye el worker del backend.
+self.addEventListener("push", (event) => {
+  let payload = { title: "MyFood", body: "Tienes un recordatorio pendiente." };
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch {
+      payload.body = event.data.text();
+    }
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(self.clients.openWindow("/"));
+});
