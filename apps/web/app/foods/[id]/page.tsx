@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AddToLogForm } from "@/components/AddToLogForm";
 import { apiFetch, errorMessage } from "@/lib/api";
-import type { FoodDetail } from "@/lib/types";
+import type { Favorite, FoodDetail } from "@/lib/types";
 
 export default function FoodDetailPage() {
   const params = useParams<{ id: string }>();
@@ -15,13 +15,45 @@ export default function FoodDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!foodId) return;
     apiFetch<FoodDetail>(`/api/foods/${foodId}`)
       .then(setFood)
       .catch((err) => setError(errorMessage(err)))
       .finally(() => setLoading(false));
+    apiFetch<{ items: Favorite[] }>("/api/favorites?limit=1000")
+      .then((res) => setIsFavorite(res.items.some((f) => f.food_id === foodId)))
+      .catch(() => {
+        // el estado de favorito es un detalle secundario — si falla, se
+        // muestra el botón como "no favorito" y el usuario puede reintentar
+      });
   }, [foodId]);
+
+  async function onToggleFavorite() {
+    if (!foodId) return;
+    setFavoriteBusy(true);
+    setFavoriteError(null);
+    try {
+      if (isFavorite) {
+        await apiFetch(`/api/favorites/${foodId}`, { method: "DELETE" });
+        setIsFavorite(false);
+      } else {
+        await apiFetch("/api/favorites", {
+          method: "POST",
+          body: JSON.stringify({ food_id: foodId }),
+        });
+        setIsFavorite(true);
+      }
+    } catch (err) {
+      setFavoriteError(errorMessage(err));
+    } finally {
+      setFavoriteBusy(false);
+    }
+  }
 
   if (loading) return <p className="text-sm text-neutral-500">Cargando…</p>;
   if (error || !food) {
@@ -34,8 +66,22 @@ export default function FoodDetailPage() {
         <Link href="/foods" className="text-sm text-neutral-500 underline">
           ← Volver a la búsqueda
         </Link>
-        <h1 className="mt-2 text-xl font-semibold">{food.name_es}</h1>
+        <div className="mt-2 flex items-center gap-2">
+          <h1 className="text-xl font-semibold">{food.name_es}</h1>
+          <button
+            type="button"
+            onClick={onToggleFavorite}
+            disabled={favoriteBusy}
+            aria-pressed={isFavorite}
+            aria-label={isFavorite ? "Quitar de favoritos" : "Añadir a favoritos"}
+            className="text-xl leading-none disabled:opacity-60"
+            title={isFavorite ? "Quitar de favoritos" : "Añadir a favoritos"}
+          >
+            {isFavorite ? "★" : "☆"}
+          </button>
+        </div>
         {food.brand && <p className="text-sm text-neutral-500">{food.brand}</p>}
+        {favoriteError && <p className="text-sm text-red-600">{favoriteError}</p>}
       </div>
 
       <table className="w-full max-w-sm text-sm">

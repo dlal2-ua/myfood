@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from myfood.errors import AppError, app_error_handler, unhandled_exception_handler
-from myfood.routers import auth, calc, foods, health, log, profile
+from myfood.routers import auth, calc, favorites, foods, health, log, profile, shopping_list
 
 app = FastAPI(title="MyFood API", version="0.1.0")
 
@@ -14,3 +14,5 @@ app.include_router(profile.router, prefix="/api")
 app.include_router(calc.router, prefix="/api")
 app.include_router(foods.router, prefix="/api")
 app.include_router(log.router, prefix="/api")
+app.include_router(favorites.router, prefix="/api")
+app.include_router(shopping_list.router, prefix="/api")

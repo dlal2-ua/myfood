@@ -96,13 +96,17 @@ async def test_food(superuser_conn):
     )
     await superuser_conn.commit()
     yield food_id
-    # food_log puede referenciar este alimento (creado por el propio test) y
-    # su teardown puede correr después o antes que el de registered_client
-    # según el orden de los fixtures — se borra explícitamente aquí para no
-    # depender de ese orden ni de la CASCADE de food_log_food_id_fkey (que no
-    # existe: solo food_log.user_id tiene ON DELETE CASCADE, no food_id).
+    # food_log y shopping_list_items pueden referenciar este alimento (creado
+    # por el propio test) y su teardown puede correr después o antes que el
+    # de registered_client según el orden de los fixtures — se borra
+    # explícitamente aquí para no depender de ese orden ni de una CASCADE que
+    # no existe en ninguna de las dos tablas (solo *.user_id tiene ON DELETE
+    # CASCADE, no *.food_id).
     await superuser_conn.execute(
         text("DELETE FROM food_log WHERE food_id = :id"), {"id": str(food_id)}
+    )
+    await superuser_conn.execute(
+        text("DELETE FROM shopping_list_items WHERE food_id = :id"), {"id": str(food_id)}
     )
     await superuser_conn.execute(text("DELETE FROM foods WHERE id = :id"), {"id": str(food_id)})
     await superuser_conn.commit()
