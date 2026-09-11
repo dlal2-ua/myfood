@@ -11,11 +11,32 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: myfood
+          POSTGRES_USER: myfood
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U myfood -d myfood"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - run: uv sync
       - run: uv run ruff check .
+      - run: uv run alembic upgrade head
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PASSWORD: test
+          POSTGRES_APP_PASSWORD: test
+          POSTGRES_ADMIN_PASSWORD: test
+          ENCRYPTION_KEY: "00000000000000000000000000000000000000000000000000000000000000"
       - run: uv run pytest -q
         env:
           POSTGRES_HOST: localhost
