@@ -1,0 +1,35 @@
+[project]
+name = "myfood-etl"
+version = "0.1.0"
+description = "ETL de datos nutricionales de MyFood — ejecutado como `python -m etl.run` (documento 2, sección 11)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "duckdb>=1.0",
+  "psycopg2-binary>=2.9",
+  "httpx>=0.27",
+  "xlrd>=2.0.2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["apps/", "etl/rejected"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["etl/tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["etl"]

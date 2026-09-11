@@ -19,3 +19,4 @@ build/
 coverage/
 .coverage
 etl/rejected/
+etl/.cache/

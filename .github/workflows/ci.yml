@@ -69,6 +69,15 @@ jobs:
           MEILI_MASTER_KEY: test
           ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
 
+  etl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      - run: uv run ruff check etl
+      - run: uv run pytest -q
+
   web:
     runs-on: ubuntu-latest
     defaults:
