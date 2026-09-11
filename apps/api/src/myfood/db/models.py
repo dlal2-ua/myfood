@@ -132,3 +132,28 @@ class FoodNutrient(Base):
     micros: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     food: Mapped["Food"] = relationship(back_populates="nutrients")
+
+
+class FoodLog(Base):
+    __tablename__ = "food_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    logged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    log_date: Mapped[date] = mapped_column(Date, nullable=False)
+    meal_type: Mapped[str] = mapped_column(String, nullable=False)
+    food_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id"), nullable=True
+    )
+    recipe_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    grams: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False)
+    entry_source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    # Snapshot nutricional congelado en el momento del registro (sección 6.5)
+    # — si el catálogo cambia después, el histórico del usuario no cambia.
+    kcal: Mapped[object] = mapped_column(Numeric(9, 2), nullable=False)
+    protein_g: Mapped[object] = mapped_column(Numeric(9, 2), nullable=False)
+    fat_g: Mapped[object] = mapped_column(Numeric(9, 2), nullable=False)
+    carbs_g: Mapped[object] = mapped_column(Numeric(9, 2), nullable=False)
+    micros: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
