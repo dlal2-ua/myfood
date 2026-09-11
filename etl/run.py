@@ -20,7 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--source",
         required=True,
-        choices=[*_USDA_SOURCES, "bedca", "ciqual", "off"],
+        choices=[*_USDA_SOURCES, "bedca", "ciqual", "off", "off_brands"],
     )
     parser.add_argument("--country", default=None, help="Solo aplica a --source off")
     args = parser.parse_args(argv)
@@ -49,6 +49,16 @@ def main(argv: list[str] | None = None) -> int:
         result = off.load()
         print(
             f"[off] leídos={result.stats.read} "
+            f"cargados={result.stats.upserted} descartados={result.stats.rejected}"
+        )
+        if result.rejected_path:
+            print(f"  descartes registrados en {result.rejected_path}")
+        return 0
+
+    if args.source == "off_brands":
+        result = off.load_by_brand()
+        print(
+            f"[off_brands] leídos={result.stats.read} "
             f"cargados={result.stats.upserted} descartados={result.stats.rejected}"
         )
         if result.rejected_path:
