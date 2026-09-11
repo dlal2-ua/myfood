@@ -1,0 +1,307 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { apiFetch, errorMessage } from "@/lib/api";
+import { FoodSearchBox } from "@/components/FoodSearchBox";
+import {
+  MEAL_TYPES,
+  MEAL_TYPE_LABELS,
+  type FoodSearchItem,
+  type LogDay,
+  type LogFoodEntry,
+  type MealType,
+} from "@/lib/types";
+
+const inputClass =
+  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export default function LogPage() {
+  const [logDate, setLogDate] = useState(todayIso());
+  const [day, setDay] = useState<LogDay | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [foodNames, setFoodNames] = useState<Record<string, string>>({});
+
+  const [selectedFood, setSelectedFood] = useState<FoodSearchItem | null>(null);
+  const [mealType, setMealType] = useState<MealType>("lunch");
+  const [grams, setGrams] = useState("100");
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editGrams, setEditGrams] = useState("");
+  const [editMealType, setEditMealType] = useState<MealType>("lunch");
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void loadDay(logDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logDate]);
+
+  async function loadDay(date: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiFetch<LogDay>(`/api/log?date=${date}`);
+      setDay(data);
+      await loadFoodNames(data.food);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadFoodNames(entries: LogFoodEntry[]) {
+    const missing = [...new Set(entries.map((e) => e.food_id).filter((id): id is string => !!id))].filter(
+      (id) => !(id in foodNames),
+    );
+    if (missing.length === 0) return;
+    const pairs = await Promise.all(
+      missing.map(async (id) => {
+        try {
+          const food = await apiFetch<{ name_es: string }>(`/api/foods/${id}`);
+          return [id, food.name_es] as const;
+        } catch {
+          return [id, "Alimento"] as const;
+        }
+      }),
+    );
+    setFoodNames((prev) => ({ ...prev, ...Object.fromEntries(pairs) }));
+  }
+
+  async function onAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedFood) {
+      setAddError("Elige un alimento en el buscador.");
+      return;
+    }
+    setAdding(true);
+    setAddError(null);
+    try {
+      await apiFetch("/api/log/food", {
+        method: "POST",
+        body: JSON.stringify({
+          log_date: logDate,
+          meal_type: mealType,
+          food_id: selectedFood.id,
+          grams: Number(grams),
+        }),
+      });
+      setSelectedFood(null);
+      setGrams("100");
+      await loadDay(logDate);
+    } catch (err) {
+      setAddError(errorMessage(err));
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  function startEdit(entry: LogFoodEntry) {
+    setEditingId(entry.id);
+    setEditGrams(String(entry.grams));
+    setEditMealType(entry.meal_type);
+    setRowError(null);
+  }
+
+  async function onSaveEdit(entryId: string) {
+    setRowBusy(entryId);
+    setRowError(null);
+    try {
+      await apiFetch(`/api/log/food/${entryId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ grams: Number(editGrams), meal_type: editMealType }),
+      });
+      setEditingId(null);
+      await loadDay(logDate);
+    } catch (err) {
+      setRowError(errorMessage(err));
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function onDelete(entryId: string) {
+    setRowBusy(entryId);
+    setRowError(null);
+    try {
+      await apiFetch(`/api/log/food/${entryId}`, { method: "DELETE" });
+      await loadDay(logDate);
+    } catch (err) {
+      setRowError(errorMessage(err));
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  return (
+    <main className="flex flex-col gap-8">
+      <div className="flex items-center gap-3">
+        <h1 className="text-xl font-semibold">Registro diario</h1>
+        <input
+          type="date"
+          className={inputClass}
+          value={logDate}
+          onChange={(e) => setLogDate(e.target.value)}
+        />
+      </div>
+
+      <section>
+        <h2 className="mb-3 text-lg font-semibold">Registrar alimento</h2>
+        <FoodSearchBox onSelect={setSelectedFood} />
+        {selectedFood && (
+          <form onSubmit={onAdd} className="mt-3 flex flex-wrap items-end gap-3">
+            <p className="text-sm">
+              Elegido: <span className="font-medium">{selectedFood.name_es}</span>
+            </p>
+            <label className="flex flex-col gap-1 text-sm">
+              Comida
+              <select
+                className={inputClass}
+                value={mealType}
+                onChange={(e) => setMealType(e.target.value as MealType)}
+              >
+                {MEAL_TYPES.map((mt) => (
+                  <option key={mt} value={mt}>
+                    {MEAL_TYPE_LABELS[mt]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Cantidad (g)
+              <input
+                type="number"
+                required
+                min={1}
+                max={5000}
+                className={inputClass}
+                value={grams}
+                onChange={(e) => setGrams(e.target.value)}
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={adding}
+              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            >
+              {adding ? "Guardando…" : "Añadir"}
+            </button>
+          </form>
+        )}
+        {addError && <p className="mt-2 text-sm text-red-600">{addError}</p>}
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-lg font-semibold">Entradas del {logDate}</h2>
+        {loading && <p className="text-sm text-neutral-500">Cargando…</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        {day && (
+          <>
+            {day.food.length === 0 ? (
+              <p className="text-sm text-neutral-500">Todavía no hay entradas para este día.</p>
+            ) : (
+              <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                {day.food.map((entry) => (
+                  <li key={entry.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
+                    {editingId === entry.id ? (
+                      <div className="flex flex-wrap items-end gap-3">
+                        <span className="text-sm font-medium">
+                          {(entry.food_id && foodNames[entry.food_id]) || "Alimento"}
+                        </span>
+                        <select
+                          className={inputClass}
+                          value={editMealType}
+                          onChange={(e) => setEditMealType(e.target.value as MealType)}
+                        >
+                          {MEAL_TYPES.map((mt) => (
+                            <option key={mt} value={mt}>
+                              {MEAL_TYPE_LABELS[mt]}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          min={1}
+                          max={5000}
+                          className={inputClass}
+                          value={editGrams}
+                          onChange={(e) => setEditGrams(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => onSaveEdit(entry.id)}
+                          disabled={rowBusy === entry.id}
+                          className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm text-white disabled:opacity-60"
+                        >
+                          Guardar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingId(null)}
+                          className="text-sm text-neutral-500 underline"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <p className="text-sm font-medium">
+                            {(entry.food_id && foodNames[entry.food_id]) || "Alimento"}
+                          </p>
+                          <p className="text-xs text-neutral-500">
+                            {MEAL_TYPE_LABELS[entry.meal_type]} · {entry.grams} g · {entry.kcal} kcal
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm">
+                          <button type="button" onClick={() => startEdit(entry)} className="underline">
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDelete(entry.id)}
+                            disabled={rowBusy === entry.id}
+                            className="text-red-600 underline disabled:opacity-60"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {rowError && <p className="mt-2 text-sm text-red-600">{rowError}</p>}
+
+            <div className="mt-4 flex gap-6 rounded-lg border border-neutral-200 p-4 text-sm dark:border-neutral-800">
+              <div>
+                <p className="text-neutral-500">Kcal</p>
+                <p className="font-semibold">{day.totals.kcal}</p>
+              </div>
+              <div>
+                <p className="text-neutral-500">Proteína</p>
+                <p className="font-semibold">{day.totals.protein_g} g</p>
+              </div>
+              <div>
+                <p className="text-neutral-500">Grasa</p>
+                <p className="font-semibold">{day.totals.fat_g} g</p>
+              </div>
+              <div>
+                <p className="text-neutral-500">Carbos</p>
+                <p className="font-semibold">{day.totals.carbs_g} g</p>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+    </main>
+  );
+}

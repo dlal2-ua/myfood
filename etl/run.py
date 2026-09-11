@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from etl.sources import ciqual, off, usda
+from etl.sources import bedca, ciqual, off, usda
 
 _USDA_SOURCES = ("usda_foundation", "usda_sr")
 
@@ -59,6 +59,16 @@ def main(argv: list[str] | None = None) -> int:
         result = off.load_by_brand()
         print(
             f"[off_brands] leídos={result.stats.read} "
+            f"cargados={result.stats.upserted} descartados={result.stats.rejected}"
+        )
+        if result.rejected_path:
+            print(f"  descartes registrados en {result.rejected_path}")
+        return 0
+
+    if args.source == "bedca":
+        result = bedca.load()
+        print(
+            f"[bedca] leídos={result.stats.read} "
             f"cargados={result.stats.upserted} descartados={result.stats.rejected}"
         )
         if result.rejected_path:

@@ -25,7 +25,7 @@ uv run python -m etl.run --source off_brands   # productos de marca, ver nota ab
 | USDA Foundation | 1 | 95 alimentos genéricos cargados (de 395 leídos — el resto sin `kcal` reportado, p. ej. sal) | ✅ |
 | USDA SR Legacy | 2 | 7.783 alimentos genéricos | ✅ |
 | CIQUAL (ANSES) | 3 | 2.293 alimentos genéricos (de 3.186 leídos) | ✅ |
-| BEDCA (AESAN) | 4 | 429 alimentos de referencia (de 431 leídos, ver `etl/sources/bedca.py`) | ✅ |
+| BEDCA (AESAN) | 4 | 429 alimentos de referencia cargados (de 431 leídos — 431 es el total real con `f_origen == "BEDCA"` exacto, filtrado de >2.300 registros de toda la red BEDCA que incluye aportaciones de universidades colaboradoras bajo otros orígenes) | ✅ |
 | Open Food Facts (España) | 5 | **11.190** productos de marca (ver nota abajo) | ✅ |
 
 Total genérico cargado tras USDA+CIQUAL+BEDCA: **10.600** — supera el
@@ -77,6 +77,30 @@ Masymas, Froiz, Hipercor, Caprabo) no llegan a ese límite, así que su
 recuento es completo. Resultado real cargado: **11.190** productos de
 marca únicos (`etl/sources/off.py::load_by_brand`, `--source off_brands`).
 
+### Nota sobre BEDCA: no es SOAP/WSDL, es HTTP+XML propio
+
+La WSDL histórica (`bdpub/procedure_call.php?wsdl`) ya no existe (404).
+Verificado en vivo el 2026-09-11: el servicio real es
+`https://www.bedca.net/bdpub/procquery.php`, que recibe una petición XML
+(`<foodquery>`) por HTTP POST (`Content-Type: text/xml`) y devuelve una
+respuesta XML (`<foodresponse>`) — no hay envoltorio SOAP real, así que no
+hizo falta añadir `zeep` (cliente SOAP) como dependencia; `httpx` (ya en
+`pyproject.toml`) más `xml.etree.ElementTree` (stdlib) bastan. Los tres tipos
+de consulta (grupos, alimentos de un grupo, detalle de un alimento) se
+confirmaron contra el servicio real y contra un cliente PHP de terceros ya
+existente (`github.com/statickidz/bedca-api`, MIT).
+
+La red BEDCA agrega datos de más de 2.300 alimentos entre el propio equipo
+BEDCA y universidades colaboradoras (UCM, UGR, UCO, CESNID y otras, cada una
+con su propio `f_origen`). Se cargan solo los 431 alimentos con
+`f_origen == "BEDCA"` exacto — el conjunto de referencia oficial que
+describe el README original del proyecto (~500) — filtrando en cliente,
+porque el propio filtro de condición del servicio hace coincidencia por
+subcadena y devolvía también `BEDCA2` (91+59=150 resultados pidiendo solo
+"BEDCA" en el grupo de lácteos, verificado). BEDCA ya normaliza todo "por
+100 g de porción comestible" (no hace falta convertir por ración), pero solo
+reporta la energía en kJ — se convierte a kcal dividiendo por 4.184.
+
 ## Reglas (sección 11.2)
 
 - Conversión a 100 g obligatoria — USDA y CIQUAL ya vienen normalizados así,
@@ -87,7 +111,8 @@ marca únicos (`etl/sources/off.py::load_by_brand`, `--source off_brands`).
 - Idempotencia: upsert por `(source, source_id)` — reejecutar no duplica
   (índice único `foods_source_source_id_idx`, migración 0003).
 - Mapeo de nutrientes explícito en `transform/nutrient_map.py` — por ID
-  (USDA) o cabecera exacta (CIQUAL), nunca por coincidencia de nombre.
+  (USDA), cabecera exacta (CIQUAL) o código `eur_name` de componente
+  (BEDCA), nunca por coincidencia de nombre.
 
 ## Tests
 
