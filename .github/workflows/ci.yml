@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dani, develop, main]
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_APP_PASSWORD: test
+          POSTGRES_ADMIN_PASSWORD: test
+          POSTGRES_PASSWORD: test
+          ENCRYPTION_KEY: "00000000000000000000000000000000000000000000000000000000000000"
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install
+      - run: pnpm lint
+      - run: pnpm typecheck
