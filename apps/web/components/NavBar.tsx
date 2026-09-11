@@ -32,6 +32,7 @@ export function NavBar({ user }: { user: CurrentUser | null }) {
             <Link href="/profile">Perfil</Link>
             <Link href="/foods">Alimentos</Link>
             <Link href="/log">Registro</Link>
+            <Link href="/shopping-list">Lista de la compra</Link>
             <button
               type="button"
               onClick={onLogout}

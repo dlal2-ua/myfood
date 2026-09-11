@@ -6,6 +6,7 @@ import { FoodSearchBox } from "@/components/FoodSearchBox";
 import {
   MEAL_TYPES,
   MEAL_TYPE_LABELS,
+  type Favorite,
   type FoodSearchItem,
   type LogDay,
   type LogFoodEntry,
@@ -31,6 +32,9 @@ export default function LogPage() {
   const [grams, setGrams] = useState("100");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [quickAddFoodId, setQuickAddFoodId] = useState<string | null>(null);
+
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editGrams, setEditGrams] = useState("");
@@ -42,6 +46,34 @@ export default function LogPage() {
     void loadDay(logDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logDate]);
+
+  useEffect(() => {
+    apiFetch<{ items: Favorite[] }>("/api/favorites?limit=8")
+      .then((res) => setFavorites(res.items))
+      .catch(() => {
+        // los favoritos son un atajo opcional — si falla la carga, el
+        // formulario de registro normal sigue funcionando
+      });
+  }, []);
+
+  function onQuickAddFromFavorite(fav: Favorite) {
+    setSelectedFood({
+      id: fav.food_id,
+      name_es: fav.name_es,
+      brand: fav.brand,
+      kcal_100g: fav.kcal_100g,
+      protein_100g: null,
+      image_url: null,
+      source: "favorite",
+    });
+    setGrams("100");
+    setQuickAddFoodId(fav.food_id);
+  }
+
+  function onSelectFromSearch(item: FoodSearchItem) {
+    setSelectedFood(item);
+    setQuickAddFoodId(null);
+  }
 
   async function loadDay(date: string) {
     setLoading(true);
@@ -93,7 +125,12 @@ export default function LogPage() {
           grams: Number(grams),
         }),
       });
+      if (quickAddFoodId === selectedFood.id) {
+        // registra el uso del favorito (no bloquea el flujo si falla)
+        apiFetch(`/api/favorites/${selectedFood.id}/use`, { method: "POST" }).catch(() => {});
+      }
       setSelectedFood(null);
+      setQuickAddFoodId(null);
       setGrams("100");
       await loadDay(logDate);
     } catch (err) {
@@ -152,9 +189,27 @@ export default function LogPage() {
         />
       </div>
 
+      {favorites.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-lg font-semibold">Favoritos</h2>
+          <div className="flex flex-wrap gap-2">
+            {favorites.map((fav) => (
+              <button
+                key={fav.id}
+                type="button"
+                onClick={() => onQuickAddFromFavorite(fav)}
+                className="rounded-full border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
+              >
+                ★ {fav.name_es}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section>
         <h2 className="mb-3 text-lg font-semibold">Registrar alimento</h2>
-        <FoodSearchBox onSelect={setSelectedFood} />
+        <FoodSearchBox onSelect={onSelectFromSearch} />
         {selectedFood && (
           <form onSubmit={onAdd} className="mt-3 flex flex-wrap items-end gap-3">
             <p className="text-sm">

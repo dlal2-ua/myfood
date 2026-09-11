@@ -4,7 +4,14 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
-import { MEAL_TYPES, MEAL_TYPE_LABELS, type FoodDetail, type LogFoodEntry, type MealType } from "@/lib/types";
+import {
+  MEAL_TYPES,
+  MEAL_TYPE_LABELS,
+  type Favorite,
+  type FoodDetail,
+  type LogFoodEntry,
+  type MealType,
+} from "@/lib/types";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -29,13 +36,45 @@ export default function FoodDetailPage() {
   const [logError, setLogError] = useState<string | null>(null);
   const [logged, setLogged] = useState<LogFoodEntry | null>(null);
 
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!foodId) return;
     apiFetch<FoodDetail>(`/api/foods/${foodId}`)
       .then(setFood)
       .catch((err) => setError(errorMessage(err)))
       .finally(() => setLoading(false));
+    apiFetch<{ items: Favorite[] }>("/api/favorites?limit=1000")
+      .then((res) => setIsFavorite(res.items.some((f) => f.food_id === foodId)))
+      .catch(() => {
+        // el estado de favorito es un detalle secundario — si falla, se
+        // muestra el botón como "no favorito" y el usuario puede reintentar
+      });
   }, [foodId]);
+
+  async function onToggleFavorite() {
+    if (!foodId) return;
+    setFavoriteBusy(true);
+    setFavoriteError(null);
+    try {
+      if (isFavorite) {
+        await apiFetch(`/api/favorites/${foodId}`, { method: "DELETE" });
+        setIsFavorite(false);
+      } else {
+        await apiFetch("/api/favorites", {
+          method: "POST",
+          body: JSON.stringify({ food_id: foodId }),
+        });
+        setIsFavorite(true);
+      }
+    } catch (err) {
+      setFavoriteError(errorMessage(err));
+    } finally {
+      setFavoriteBusy(false);
+    }
+  }
 
   async function onLog(e: React.FormEvent) {
     e.preventDefault();
@@ -53,6 +92,10 @@ export default function FoodDetailPage() {
         }),
       });
       setLogged(entry);
+      if (isFavorite) {
+        // registra el uso del favorito (no bloquea el flujo si falla)
+        apiFetch(`/api/favorites/${foodId}/use`, { method: "POST" }).catch(() => {});
+      }
     } catch (err) {
       setLogError(errorMessage(err));
     } finally {
@@ -71,8 +114,22 @@ export default function FoodDetailPage() {
         <Link href="/foods" className="text-sm text-neutral-500 underline">
           ← Volver a la búsqueda
         </Link>
-        <h1 className="mt-2 text-xl font-semibold">{food.name_es}</h1>
+        <div className="mt-2 flex items-center gap-2">
+          <h1 className="text-xl font-semibold">{food.name_es}</h1>
+          <button
+            type="button"
+            onClick={onToggleFavorite}
+            disabled={favoriteBusy}
+            aria-pressed={isFavorite}
+            aria-label={isFavorite ? "Quitar de favoritos" : "Añadir a favoritos"}
+            className="text-xl leading-none disabled:opacity-60"
+            title={isFavorite ? "Quitar de favoritos" : "Añadir a favoritos"}
+          >
+            {isFavorite ? "★" : "☆"}
+          </button>
+        </div>
         {food.brand && <p className="text-sm text-neutral-500">{food.brand}</p>}
+        {favoriteError && <p className="text-sm text-red-600">{favoriteError}</p>}
       </div>
 
       <table className="w-full max-w-sm text-sm">

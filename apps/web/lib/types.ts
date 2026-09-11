@@ -140,3 +140,31 @@ export interface LogDay {
   food: LogFoodEntry[];
   totals: DayTotals;
 }
+
+export interface Favorite {
+  id: string;
+  food_id: string;
+  name_es: string;
+  brand: string | null;
+  kcal_100g: number | null;
+  use_count: number;
+  last_used_at: string | null;
+}
+
+export interface FavoriteList {
+  items: Favorite[];
+}
+
+export interface ShoppingListItem {
+  id: string;
+  food_id: string | null;
+  food_name: string | null;
+  free_text: string | null;
+  quantity_g: number | null;
+  category: string | null;
+  is_checked: boolean;
+}
+
+export interface ShoppingList {
+  items: ShoppingListItem[];
+}

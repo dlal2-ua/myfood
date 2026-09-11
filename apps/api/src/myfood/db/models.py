@@ -6,7 +6,17 @@ en la base de datos desde la migración 0001, sea cual sea la fase en curso.
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, SmallInteger, String, func
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    SmallInteger,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -157,3 +167,44 @@ class FoodLog(Base):
     fat_g: Mapped[object] = mapped_column(Numeric(9, 2), nullable=False)
     carbs_g: Mapped[object] = mapped_column(Numeric(9, 2), nullable=False)
     micros: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class UserFavoriteFood(Base):
+    __tablename__ = "user_favorite_foods"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    food_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id", ondelete="CASCADE"), nullable=True
+    )
+    # `recipes` no existe todavía como feature de producto (llega en una fase
+    # posterior) — la columna ya vive en el esquema (migración 0001) pero los
+    # favoritos solo usan food_id por ahora; recipe_id se deja sin exponer en
+    # los endpoints/Pydantic models (código muerto intencionado).
+    recipe_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ShoppingListItem(Base):
+    __tablename__ = "shopping_list_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    food_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id"), nullable=True
+    )
+    free_text: Mapped[str | None] = mapped_column(String, nullable=True)
+    quantity_g: Mapped[object | None] = mapped_column(Numeric(10, 2), nullable=True)
+    category: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Reservado para el futuro feature de planes de comida (Fase 4) — sin uso
+    # todavía: esta lista de la compra es manual y autónoma (no se genera a
+    # partir de ningún plan).
+    plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
