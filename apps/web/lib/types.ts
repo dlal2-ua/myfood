@@ -168,3 +168,38 @@ export interface ShoppingListItem {
 export interface ShoppingList {
   items: ShoppingListItem[];
 }
+
+export type WaterMode = "auto" | "manual";
+
+export interface WaterContainer {
+  label: string;
+  ml: number;
+}
+
+export interface WaterSettings {
+  mode: WaterMode;
+  daily_target_ml: number;
+  containers: WaterContainer[];
+}
+
+export interface WaterLogEntry {
+  id: string;
+  log_date: string;
+  ml: number;
+}
+
+export interface WaterDay {
+  date: string;
+  entries: WaterLogEntry[];
+  total_ml: number;
+  target_ml: number;
+}
+
+export interface NotificationRule {
+  id: string;
+  kind: "water" | "supplement" | "meal" | "weigh_in";
+  is_enabled: boolean;
+  schedule: Record<string, unknown>;
+  quiet_from: string;
+  quiet_to: string;
+}
