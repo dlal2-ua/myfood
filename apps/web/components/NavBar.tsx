@@ -31,6 +31,7 @@ export function NavBar({ user }: { user: CurrentUser | null }) {
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <Link href="/profile">Perfil</Link>
             <Link href="/foods">Alimentos</Link>
+            <Link href="/scan">Escanear</Link>
             <Link href="/log">Registro</Link>
             <button
               type="button"
