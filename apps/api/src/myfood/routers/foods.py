@@ -4,13 +4,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.cache import get_cached_barcode_lookup, set_cached_barcode_lookup
 from myfood.db.models import Food, FoodNutrient
 from myfood.db.session import get_session
-from myfood.deps import get_current_user_id
+from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
 from myfood.off_client import fetch_product
 from myfood.search import search_foods
@@ -220,6 +220,98 @@ async def get_by_barcode(
     session.add(nutrients)
     await session.commit()
     return _to_detail(food, nutrients)
+
+
+class SimilarFoodItem(BaseModel):
+    id: str
+    name_es: str
+    brand: str | None
+    kcal_100g: float | None
+    distance: float
+
+
+class SimilarFoodsResponse(BaseModel):
+    items: list[SimilarFoodItem]
+
+
+# Excluye alimentos que el usuario no puede/quiere comer (sección
+# "Alimentos similares (sustituciones)"): los que llevan un alérgeno que el
+# usuario tiene marcado como restricción de tipo 'allergen' (vía
+# `food_allergens`), y los que el propio usuario ha marcado como
+# 'disliked_food'/'banned_food' por `food_id`. `kind='intolerance'` no se
+# usa aquí a propósito — el enunciado de esta feature solo pide excluir por
+# alérgeno y por prohibido/no-me-gusta; una intolerancia no siempre implica
+# que el alimento sea inapto como sustituto (p. ej. en cantidades pequeñas),
+# así que se deja fuera de este filtro y queda para el motor de dietas.
+_SIMILAR_FOODS_SQL = text("""
+    SELECT f.id, f.name_es, f.brand, n.kcal_100g,
+           fv.vec <-> (SELECT vec FROM food_vectors WHERE food_id = :food_id) AS distance
+    FROM food_vectors fv
+    JOIN foods f ON f.id = fv.food_id
+    JOIN food_nutrients n ON n.food_id = f.id
+    WHERE fv.food_id != :food_id
+      AND fv.food_id NOT IN (
+          SELECT fa.food_id
+          FROM food_allergens fa
+          JOIN user_restrictions ur ON ur.allergen_code = fa.allergen_code
+          WHERE ur.user_id = :user_id AND ur.kind = 'allergen'
+      )
+      AND fv.food_id NOT IN (
+          SELECT ur2.food_id
+          FROM user_restrictions ur2
+          WHERE ur2.user_id = :user_id
+            AND ur2.kind IN ('disliked_food', 'banned_food')
+            AND ur2.food_id IS NOT NULL
+      )
+    ORDER BY distance
+    LIMIT :limit
+""")
+
+
+@router.get("/{food_id}/similar")
+async def get_similar_foods(
+    food_id: UUID,
+    limit: int = Query(default=3, ge=1, le=20),
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> SimilarFoodsResponse:
+    """Alimentos nutricionalmente similares para sustitución (distancia L2
+    sobre `food_vectors`, ver `domain/food_vector.py`) — usado por el
+    frontend en la sección "Alimentos similares (sustituciones)" y, más
+    adelante, por el motor de dietas para proponer alternativas
+    (`plan_item_alternatives.distance`, que este endpoint no escribe)."""
+    food = await session.get(Food, food_id)
+    if food is None:
+        raise AppError("FOOD_NOT_FOUND", "No existe ese alimento.", status_code=404)
+
+    has_vector = await session.scalar(
+        text("SELECT 1 FROM food_vectors WHERE food_id = :food_id"), {"food_id": str(food_id)}
+    )
+    if has_vector is None:
+        raise AppError(
+            "FOOD_VECTOR_NOT_FOUND",
+            "Este alimento todavía no tiene un vector nutricional calculado.",
+            status_code=404,
+        )
+
+    rows = (
+        await session.execute(
+            _SIMILAR_FOODS_SQL,
+            {"food_id": str(food_id), "user_id": str(user_id), "limit": limit},
+        )
+    ).all()
+    return SimilarFoodsResponse(
+        items=[
+            SimilarFoodItem(
+                id=str(row.id),
+                name_es=row.name_es,
+                brand=row.brand,
+                kcal_100g=_f(row.kcal_100g),
+                distance=float(row.distance),
+            )
+            for row in rows
+        ]
+    )
 
 
 class ManualFoodIn(BaseModel):
