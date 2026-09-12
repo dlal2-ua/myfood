@@ -15,6 +15,7 @@ from myfood.routers import (
     notification_rules,
     profile,
     push,
+    recipes,
     restrictions,
     shopping_list,
     supplements,
@@ -43,3 +44,4 @@ app.include_router(notification_rules.router, prefix="/api")
 app.include_router(diet_plans.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
+app.include_router(recipes.router, prefix="/api")

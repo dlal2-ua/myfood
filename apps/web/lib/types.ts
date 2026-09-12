@@ -369,3 +369,56 @@ export interface SmartLogResult {
   items: SmartLogItem[];
   warning: string | null;
 }
+
+export interface RecipeIngredient {
+  id: string;
+  food_id: string;
+  name_es: string;
+  grams: number;
+  kcal: number;
+  protein_g: number;
+  fat_g: number;
+  carbs_g: number;
+}
+
+export interface RecipeNutritionTotals {
+  kcal: number;
+  protein_g: number;
+  fat_g: number;
+  carbs_g: number;
+}
+
+export interface Recipe {
+  id: string;
+  name: string;
+  servings: number;
+  prep_minutes: number | null;
+  instructions: string | null;
+  ingredients: RecipeIngredient[];
+  totals: RecipeNutritionTotals;
+  totals_per_serving: RecipeNutritionTotals;
+}
+
+export interface RecipeSummary {
+  id: string;
+  name: string;
+  servings: number;
+  prep_minutes: number | null;
+}
+
+export interface RecipeImportIngredient {
+  food_id: string;
+  name_es: string;
+  grams: number;
+  approx_quantity_text: string;
+  original_line: string;
+}
+
+export interface RecipeImportDraft {
+  name: string;
+  servings: number;
+  prep_minutes: number | null;
+  instructions: string | null;
+  ingredients: RecipeImportIngredient[];
+  unresolved_lines: string[];
+}

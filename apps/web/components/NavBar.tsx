@@ -37,6 +37,7 @@ export function NavBar({ user }: { user: CurrentUser | null }) {
             <Link href="/shopping-list">Lista de la compra</Link>
             <Link href="/supplements">Suplementos</Link>
             <Link href="/diet-plans">Planes</Link>
+            <Link href="/recipes">Recetas</Link>
             {user.role === "admin" && <Link href="/admin">Admin</Link>}
             <button
               type="button"

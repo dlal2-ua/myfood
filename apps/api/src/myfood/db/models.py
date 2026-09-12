@@ -524,3 +524,45 @@ class AiProposal(Base):
     rationale: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Recipe(Base):
+    """Sección 6.4 / 20. Sin columnas de nutrición propias a propósito: el
+    desglose nutricional siempre sale de sumar `food_nutrients` de sus
+    `RecipeIngredient` (R9 — nunca un valor guardado que pueda desincronizarse
+    si cambian los ingredientes)."""
+
+    __tablename__ = "recipes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    servings: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    prep_minutes: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    instructions: Mapped[str | None] = mapped_column(String, nullable=True)
+    food_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id", ondelete="SET NULL"), nullable=True
+    )
+    internal_ean: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    ingredients: Mapped[list["RecipeIngredient"]] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan"
+    )
+
+
+class RecipeIngredient(Base):
+    __tablename__ = "recipe_ingredients"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    recipe_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("recipes.id", ondelete="CASCADE"), nullable=False
+    )
+    food_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id"), nullable=False
+    )
+    grams: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False)
+
+    recipe: Mapped["Recipe"] = relationship(back_populates="ingredients")

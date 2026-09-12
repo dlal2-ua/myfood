@@ -14,8 +14,13 @@ import redis.asyncio as redis
 from sqlalchemy import select
 
 from myfood.ai.flows.diet_plan import process_diet_plan_job
+from myfood.ai.flows.recipe_import import process_recipe_import_job
 from myfood.ai.flows.smart_log import process_smart_log_job
-from myfood.ai.queue import dequeue_diet_plan_job, dequeue_smart_log_job
+from myfood.ai.queue import (
+    dequeue_diet_plan_job,
+    dequeue_recipe_import_job,
+    dequeue_smart_log_job,
+)
 from myfood.config import get_settings
 from myfood.db.models import NotificationRule, PushSubscription
 from myfood.db.session import AdminSessionLocal
@@ -124,12 +129,29 @@ async def _smart_log_jobs_loop() -> None:
             )
 
 
+async def _recipe_import_jobs_loop() -> None:
+    while True:
+        try:
+            ai_session_id = await dequeue_recipe_import_job(_AI_QUEUE_POLL_TIMEOUT_SECONDS)
+            if ai_session_id is None:
+                continue
+            await process_recipe_import_job(ai_session_id)
+        except Exception:
+            logger.exception(
+                "fallo procesando un trabajo de importación de receta — se reintenta "
+                "con el siguiente"
+            )
+
+
 async def main() -> None:
     logger.info(
         "MyFood worker arrancado — recordatorios cada %ss + colas de iafood", _TICK_SECONDS
     )
     await asyncio.gather(
-        _notifications_loop(), _diet_plan_jobs_loop(), _smart_log_jobs_loop()
+        _notifications_loop(),
+        _diet_plan_jobs_loop(),
+        _smart_log_jobs_loop(),
+        _recipe_import_jobs_loop(),
     )
 
 

@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from myfood.ai import client as ai_client
 from myfood.ai.agent import AgentResult, AiAgentError
+from myfood.ai.flows import food_resolution
 from myfood.ai.flows import smart_log as flow
 from myfood.db.models import AiSession
 from myfood.db.session import AdminSessionLocal
@@ -103,7 +104,9 @@ async def test_success_path_resolves_alias_to_real_food_with_default_grams(
     running_smart_log_session, one_real_food, configured_credential, monkeypatch
 ):
     monkeypatch.setattr(
-        flow, "run_agent", _fake_agent_call([{"alias": "c1", "approx_quantity_text": "dos"}])
+        food_resolution,
+        "run_agent",
+        _fake_agent_call([{"alias": "c1", "approx_quantity_text": "dos"}]),
     )
 
     await flow.process_smart_log_job(str(running_smart_log_session))
@@ -125,7 +128,9 @@ async def test_unknown_alias_is_silently_dropped_not_invented(
     running_smart_log_session, configured_credential, monkeypatch
 ):
     monkeypatch.setattr(
-        flow, "run_agent", _fake_agent_call([{"alias": "ghost", "approx_quantity_text": "uno"}])
+        food_resolution,
+        "run_agent",
+        _fake_agent_call([{"alias": "ghost", "approx_quantity_text": "uno"}]),
     )
 
     await flow.process_smart_log_job(str(running_smart_log_session))
@@ -144,7 +149,7 @@ async def test_no_tool_call_still_succeeds_with_no_match_warning(
     ):
         return AgentResult(text="no encuentro nada parecido", input_tokens=1, output_tokens=1)
 
-    monkeypatch.setattr(flow, "run_agent", _fake_run_agent)
+    monkeypatch.setattr(food_resolution, "run_agent", _fake_run_agent)
 
     await flow.process_smart_log_job(str(running_smart_log_session))
 
@@ -161,7 +166,7 @@ async def test_agent_error_marks_session_failed(
     ):
         raise AiAgentError("boom", code="AI_TIMEOUT")
 
-    monkeypatch.setattr(flow, "run_agent", _fake_run_agent)
+    monkeypatch.setattr(food_resolution, "run_agent", _fake_run_agent)
 
     await flow.process_smart_log_job(str(running_smart_log_session))
 
@@ -213,7 +218,7 @@ async def test_request_raises_no_candidate_foods_when_search_finds_nothing(
     async def _fake_search_foods(query, kind, limit, offset):
         return [], 0
 
-    monkeypatch.setattr(flow, "search_foods", _fake_search_foods)
+    monkeypatch.setattr(food_resolution, "search_foods", _fake_search_foods)
 
     async with AdminSessionLocal() as session:
         with pytest.raises(AppError) as exc_info:
@@ -236,7 +241,7 @@ async def test_request_creates_running_session_and_enqueues_job(
     async def _fake_enqueue(ai_session_id: str) -> None:
         enqueued.append(ai_session_id)
 
-    monkeypatch.setattr(flow, "search_foods", _fake_search_foods)
+    monkeypatch.setattr(food_resolution, "search_foods", _fake_search_foods)
     monkeypatch.setattr(flow, "enqueue_smart_log_job", _fake_enqueue)
 
     async with AdminSessionLocal() as session:
