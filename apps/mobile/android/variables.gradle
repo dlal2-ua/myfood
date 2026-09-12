@@ -1,5 +1,7 @@
 ext {
-    minSdkVersion = 24
+    // 26 (no 24, la plantilla por defecto de Capacitor): mínimo real que
+    // exige androidx.health.connect:connect-client.
+    minSdkVersion = 26
     compileSdkVersion = 36
     targetSdkVersion = 36
     androidxActivityVersion = '1.11.0'

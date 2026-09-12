@@ -22,6 +22,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Health Connect exige una pantalla que explique el uso de
+                 los datos de salud ("rationale") antes de conceder
+                 permisos — Android 14+ la busca con este intent-filter;
+                 versiones anteriores (con Health Connect como app aparte)
+                 usan la acción de androidx.health de abajo. MainActivity
+                 redirige ambas a una página estática del propio MyFood. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+
         </activity>
 
         <provider
@@ -35,7 +49,23 @@
         </provider>
     </application>
 
+    <!-- Health Connect anterior a Android 14 vive en una app aparte; sin
+         esta declaración de <queries>, el paquete no sería visible para
+         comprobar si está instalada (restricción de visibilidad de
+         paquetes desde Android 11). -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
+
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Health Connect (Fase 6 — sección de wearables) -->
+    <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+    <uses-permission android:name="android.permission.health.READ_BODY_FAT" />
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
+    <uses-permission android:name="android.permission.health.WRITE_HYDRATION" />
+    <uses-permission android:name="android.permission.health.WRITE_NUTRITION" />
 </manifest>
