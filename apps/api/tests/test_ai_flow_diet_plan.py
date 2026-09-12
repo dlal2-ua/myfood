@@ -269,7 +269,7 @@ async def test_agent_error_marks_session_failed(
     async def _fake_run_agent(
         *, token, prompt, system_prompt, mcp_tools, max_turns, timeout_seconds
     ):
-        raise AiAgentError("boom")
+        raise AiAgentError("boom", code="AI_TIMEOUT")
 
     monkeypatch.setattr(flow, "run_agent", _fake_run_agent)
 
@@ -278,6 +278,28 @@ async def test_agent_error_marks_session_failed(
     ai_session = await _reload_session(running_session)
     assert ai_session.status == "failed"
     assert ai_session.validation_errors[0]["code"] == "AI_TIMEOUT"
+    assert ai_session.validation_errors[0]["message"] == "boom"
+
+
+async def test_agent_error_default_code_is_provider_error(
+    running_session, configured_credential, monkeypatch
+):
+    """`AiAgentError` sin `code` explícito (p. ej. un fallo del SDK que no
+    encaja en ninguna categoría concreta) usa un código genérico, nunca
+    "AI_TIMEOUT" a secas — ese código es específico de un timeout real."""
+
+    async def _fake_run_agent(
+        *, token, prompt, system_prompt, mcp_tools, max_turns, timeout_seconds
+    ):
+        raise AiAgentError("algo salió mal")
+
+    monkeypatch.setattr(flow, "run_agent", _fake_run_agent)
+
+    await flow.process_diet_plan_job(str(running_session))
+
+    ai_session = await _reload_session(running_session)
+    assert ai_session.status == "failed"
+    assert ai_session.validation_errors[0]["code"] == "AI_PROVIDER_ERROR"
 
 
 async def test_missing_credential_marks_session_failed(running_session):

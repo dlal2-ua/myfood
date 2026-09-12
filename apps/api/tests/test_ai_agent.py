@@ -1,5 +1,5 @@
 import pytest
-from claude_agent_sdk import ResultMessage
+from claude_agent_sdk import ResultError, ResultMessage
 
 from myfood.ai import agent as ai_agent
 from myfood.ai.tools import build_propose_meal_plan_tool
@@ -177,6 +177,28 @@ async def test_run_agent_raises_when_no_result_message_ever_arrives(monkeypatch)
 
     with pytest.raises(ai_agent.AiAgentError):
         await ai_agent.run_agent(token="x", prompt="p", system_prompt="s")
+
+
+async def test_run_agent_wraps_sdk_errors_as_ai_agent_error(monkeypatch):
+    """Bug real encontrado en vivo: un token inválido hace que el SDK
+    lance `ResultError` (subclase de `ClaudeSDKError`), no `TimeoutError` —
+    sin capturarlo aquí, se propagaba tal cual y `process_diet_plan_job`
+    (que solo atrapa `AiAgentError`) nunca marcaba la sesión como
+    `failed`; se quedaba en `running` para siempre."""
+
+    async def fake_query(*, prompt, options):
+        raise ResultError(
+            "Claude Code returned an error result: Failed to authenticate. "
+            "API Error: 401 Invalid bearer token",
+            data={"result": "API Error: 401 Invalid bearer token"},
+            exit_code=1,
+        )
+        yield  # pragma: no cover - hace de fake_query un generador asíncrono
+
+    monkeypatch.setattr(ai_agent, "query", fake_query)
+
+    with pytest.raises(ai_agent.AiAgentError, match="401 Invalid bearer token"):
+        await ai_agent.run_agent(token="bad-token", prompt="p", system_prompt="s")
 
 
 async def test_run_agent_wraps_timeout(monkeypatch):
