@@ -60,10 +60,13 @@ async def _clean_ai_credential_and_queue(registered_client):
 
 
 @pytest_asyncio.fixture
-async def ready_user(registered_client):
-    """Perfil completo + peso + credencial configurada — todo lo que hace
-    falta para que `POST /ai/diet-plan` llegue a encolar un trabajo (sin
-    consentimiento todavía, cada test lo concede si lo necesita)."""
+async def ready_user(registered_client, diet_candidates):
+    """Perfil completo + peso + credencial configurada + candidatos
+    garantizados (`diet_candidates`, ver conftest.py — sin ellos
+    `select_candidates` devuelve vacío en un entorno sin el catálogo real,
+    como CI) — todo lo que hace falta para que `POST /ai/diet-plan` llegue
+    a encolar un trabajo (sin consentimiento todavía, cada test lo concede
+    si lo necesita)."""
     client, user_id = registered_client
     async with AdminSessionLocal() as session:
         profile = await session.get(Profile, user_id)

@@ -66,7 +66,7 @@ async def test_raises_profile_incomplete_even_with_credential(two_users):
         await _clear_credential()
 
 
-async def test_creates_running_session_and_enqueues_job(two_users, monkeypatch):
+async def test_creates_running_session_and_enqueues_job(two_users, diet_candidates, monkeypatch):
     user_id, admin_id = two_users
     await _set_complete_profile(user_id)
     await _configure_credential(admin_id)
