@@ -1,7 +1,12 @@
 """Tests HTTP de `POST /log/smart` (sección 10.8). `request_smart_log` en
 sí ya está probado en `test_smart_log_flow.py` — aquí solo se ejercita el
 cableado del endpoint (consentimiento, cuotas, credencial) igual que
-`test_ai_router.py` hace para `/ai/diet-plan`."""
+`test_ai_router.py` hace para `/ai/diet-plan`.
+
+`search_foods` se simula en los tests que necesitan que la petición llegue
+a 202: Meilisearch puede estar vacío en este entorno (CI no ejecuta el
+ETL, igual que el problema ya resuelto para `diet_candidates` en
+conftest.py) y ningún test HTTP debería depender de qué haya indexado."""
 
 from datetime import date
 
@@ -9,11 +14,18 @@ import pytest_asyncio
 from sqlalchemy import text
 
 from myfood.ai import client as ai_client
+from myfood.ai.flows import smart_log as smart_log_flow
 from myfood.ai.queue import DIET_PLAN_QUEUE_KEY, SMART_LOG_QUEUE_KEY
 from myfood.ai.queue import _redis as queue_redis
 from myfood.config import get_settings
 from myfood.db.models import Profile
 from myfood.db.session import AdminSessionLocal
+
+
+async def _fake_search_foods(query, kind, limit, offset):
+    return [
+        {"id": "11111111-1111-1111-1111-111111111111", "name_es": "Huevo", "category": None}
+    ], 1
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -64,8 +76,11 @@ async def test_smart_log_requires_credential(registered_client):
     assert resp.json()["error"]["code"] == "AI_NOT_CONFIGURED"
 
 
-async def test_smart_log_succeeds_with_consent_and_credential_and_can_be_polled(ready_user):
+async def test_smart_log_succeeds_with_consent_and_credential_and_can_be_polled(
+    ready_user, monkeypatch
+):
     client, _ = ready_user
+    monkeypatch.setattr(smart_log_flow, "search_foods", _fake_search_foods)
     await client.post("/api/consents", json={"kind": "ai_processing", "version": "v1"})
 
     resp = await client.post("/api/log/smart", json={"text": "dos huevos fritos"})
@@ -88,6 +103,7 @@ async def test_smart_log_uses_its_own_quota_scope_separate_from_diet_plan(
     from myfood.ai.limits import IafoodLimits
 
     client, user_id = ready_user
+    monkeypatch.setattr(smart_log_flow, "search_foods", _fake_search_foods)
     await client.post("/api/consents", json={"kind": "ai_processing", "version": "v1"})
     monkeypatch.setattr(
         "myfood.ai.quota.load_limits",
