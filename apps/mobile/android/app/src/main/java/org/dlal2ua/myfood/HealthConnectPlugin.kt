@@ -78,13 +78,27 @@ class HealthConnectPlugin : Plugin() {
         call.resolve(result)
     }
 
+    // Health Connect concede permisos de forma granular — el usuario puede
+    // aceptar lectura y rechazar escritura (o al revés) en el mismo diálogo.
+    // Un único booleano "granted" escondería eso: alguien que solo rechace
+    // escritura vería el importador (que no la necesita) como bloqueado sin
+    // motivo. `canRead`/`canWrite` se exponen por separado; `granted` queda
+    // como atajo de "las dos cosas a la vez" para quien no distinga.
+    private fun permissionsResult(granted: Set<String>): JSObject {
+        val canRead = granted.containsAll(readPermissions)
+        val canWrite = granted.containsAll(writePermissions)
+        return JSObject().apply {
+            put("granted", canRead && canWrite)
+            put("canRead", canRead)
+            put("canWrite", canWrite)
+        }
+    }
+
     @PluginMethod
     fun checkHealthPermissions(call: PluginCall) {
         scope.launch {
             val granted = client().permissionController.getGrantedPermissions()
-            val result = JSObject()
-            result.put("granted", granted.containsAll(allPermissions))
-            call.resolve(result)
+            call.resolve(permissionsResult(granted))
         }
     }
 
@@ -104,9 +118,7 @@ class HealthConnectPlugin : Plugin() {
         if (call == null) return
         val contract = PermissionController.createRequestPermissionResultContract()
         val granted = contract.parseResult(result.resultCode, result.data)
-        val response = JSObject()
-        response.put("granted", granted.containsAll(allPermissions))
-        call.resolve(response)
+        call.resolve(permissionsResult(granted))
     }
 
     @PluginMethod
