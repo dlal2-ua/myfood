@@ -370,3 +370,96 @@ class SupplementStock(Base):
     )
     doses_remaining: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False, default=0)
     last_restock_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DietPlan(Base):
+    __tablename__ = "diet_plans"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
+    target_kcal: Mapped[object] = mapped_column(Numeric(7, 1), nullable=False)
+    target_protein_g: Mapped[object] = mapped_column(Numeric(7, 1), nullable=False)
+    target_fat_g: Mapped[object] = mapped_column(Numeric(7, 1), nullable=False)
+    target_carbs_g: Mapped[object] = mapped_column(Numeric(7, 1), nullable=False)
+    generated_by: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    days: Mapped[list["PlanDay"]] = relationship(
+        back_populates="plan", order_by="PlanDay.day_index", cascade="all, delete-orphan"
+    )
+
+
+class PlanDay(Base):
+    __tablename__ = "plan_days"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("diet_plans.id", ondelete="CASCADE"), nullable=False
+    )
+    day_index: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+
+    plan: Mapped["DietPlan"] = relationship(back_populates="days")
+    meals: Mapped[list["PlanMeal"]] = relationship(
+        back_populates="plan_day", order_by="PlanMeal.sort_order", cascade="all, delete-orphan"
+    )
+
+
+class PlanMeal(Base):
+    __tablename__ = "plan_meals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    plan_day_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("plan_days.id", ondelete="CASCADE"), nullable=False
+    )
+    meal_type: Mapped[str] = mapped_column(String, nullable=False)
+    sort_order: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+
+    plan_day: Mapped["PlanDay"] = relationship(back_populates="meals")
+    items: Mapped[list["PlanItem"]] = relationship(
+        back_populates="plan_meal", cascade="all, delete-orphan"
+    )
+
+
+class PlanItem(Base):
+    __tablename__ = "plan_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    plan_meal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("plan_meals.id", ondelete="CASCADE"), nullable=False
+    )
+    food_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id"), nullable=True
+    )
+    recipe_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    grams: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False)
+    is_substitutable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    plan_meal: Mapped["PlanMeal"] = relationship(back_populates="items")
+    alternatives: Mapped[list["PlanItemAlternative"]] = relationship(
+        back_populates="plan_item",
+        order_by="PlanItemAlternative.rank",
+        cascade="all, delete-orphan",
+    )
+
+
+class PlanItemAlternative(Base):
+    __tablename__ = "plan_item_alternatives"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    plan_item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("plan_items.id", ondelete="CASCADE"), nullable=False
+    )
+    food_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id"), nullable=False
+    )
+    grams: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False)
+    rank: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    distance: Mapped[object] = mapped_column(Numeric(8, 4), nullable=False)
+
+    plan_item: Mapped["PlanItem"] = relationship(back_populates="alternatives")
