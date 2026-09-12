@@ -26,7 +26,11 @@ function startOfTodayIso(): string {
 export default function WearablesPage() {
   const [native, setNative] = useState(false);
   const [availability, setAvailability] = useState<HealthConnectAvailability | null>(null);
-  const [granted, setGranted] = useState(false);
+  // Health Connect concede lectura y escritura por separado (el usuario
+  // puede aceptar una y rechazar la otra en el mismo diálogo) — de ahí dos
+  // banderas en vez de un único "granted" que ocultaría esa diferencia.
+  const [canRead, setCanRead] = useState(false);
+  const [canWrite, setCanWrite] = useState(false);
   const [recent, setRecent] = useState<HealthConnectRecent | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +44,10 @@ export default function WearablesPage() {
       .then(setAvailability)
       .catch((err) => setError(errorMessage(err)));
     HealthConnect.checkHealthPermissions()
-      .then((r) => setGranted(r.granted))
+      .then((r) => {
+        setCanRead(r.canRead);
+        setCanWrite(r.canWrite);
+      })
       .catch(() => {});
   }, []);
 
@@ -49,7 +56,8 @@ export default function WearablesPage() {
     setError(null);
     try {
       const result = await HealthConnect.requestHealthPermissions();
-      setGranted(result.granted);
+      setCanRead(result.canRead);
+      setCanWrite(result.canWrite);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -173,9 +181,11 @@ export default function WearablesPage() {
         {availability?.available && (
           <div className="flex items-center gap-3">
             <p className="text-sm">
-              Permisos: <span className="font-medium">{granted ? "concedidos" : "pendientes"}</span>
+              Lectura: <span className="font-medium">{canRead ? "concedida" : "pendiente"}</span>
+              {" · "}
+              Escritura: <span className="font-medium">{canWrite ? "concedida" : "pendiente"}</span>
             </p>
-            {!granted && (
+            {!(canRead && canWrite) && (
               <button
                 type="button"
                 disabled={busy}
@@ -189,7 +199,7 @@ export default function WearablesPage() {
         )}
       </section>
 
-      {granted && (
+      {canRead && (
         <>
           <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
             <h2 className="mb-3 text-lg font-semibold">Importar desde Health Connect</h2>
@@ -263,23 +273,25 @@ export default function WearablesPage() {
               </div>
             )}
           </section>
-
-          <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
-            <h2 className="mb-3 text-lg font-semibold">Exportar a Health Connect</h2>
-            <p className="mb-3 text-sm text-neutral-500">
-              Envía el agua y la comida ya registradas hoy en MyFood a Health Connect, para
-              que otras apps conectadas (p. ej. Samsung Health) también las vean.
-            </p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void onExportToday()}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
-            >
-              Exportar hoy
-            </button>
-          </section>
         </>
+      )}
+
+      {canWrite && (
+        <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+          <h2 className="mb-3 text-lg font-semibold">Exportar a Health Connect</h2>
+          <p className="mb-3 text-sm text-neutral-500">
+            Envía el agua y la comida ya registradas hoy en MyFood a Health Connect, para
+            que otras apps conectadas (p. ej. Samsung Health) también las vean.
+          </p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void onExportToday()}
+            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+          >
+            Exportar hoy
+          </button>
+        </section>
       )}
     </main>
   );

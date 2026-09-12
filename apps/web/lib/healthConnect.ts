@@ -13,7 +13,12 @@ export interface HealthConnectAvailability {
 }
 
 export interface HealthConnectPermissionResult {
+  /** Atajo de "lectura Y escritura concedidas" — Health Connect permite
+   * conceder cada bloque por separado, así que para la UI conviene mirar
+   * `canRead`/`canWrite` en vez de este campo. */
   granted: boolean;
+  canRead: boolean;
+  canWrite: boolean;
 }
 
 export interface HealthConnectWeightSample {
