@@ -145,6 +145,42 @@ class FoodNutrient(Base):
     food: Mapped["Food"] = relationship(back_populates="nutrients")
 
 
+class Allergen(Base):
+    __tablename__ = "allergens"
+
+    code: Mapped[str] = mapped_column(String, primary_key=True)
+    name_es: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class FoodAllergen(Base):
+    __tablename__ = "food_allergens"
+
+    food_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id", ondelete="CASCADE"), primary_key=True
+    )
+    allergen_code: Mapped[str] = mapped_column(
+        String, ForeignKey("allergens.code"), primary_key=True
+    )
+
+
+class UserRestriction(Base):
+    __tablename__ = "user_restrictions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    allergen_code: Mapped[str | None] = mapped_column(
+        String, ForeignKey("allergens.code"), nullable=True
+    )
+    # Sin FK (ver migración 0001): `food_id` puede apuntar a cualquier alimento
+    # del catálogo y no se declaró referencia en el esquema — la existencia se
+    # valida en la capa de aplicación (routers/restrictions.py) en su lugar.
+    food_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 class FoodLog(Base):
     __tablename__ = "food_log"
 
