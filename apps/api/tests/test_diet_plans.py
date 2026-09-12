@@ -287,7 +287,7 @@ async def test_substitute_item_updates_food_and_recomputes_alternatives(
     async def _fake_select_candidates(session, user_id):
         return fixed_candidates
 
-    monkeypatch.setattr("myfood.routers.diet_plans._select_candidates", _fake_select_candidates)
+    monkeypatch.setattr("myfood.routers.diet_plans.select_candidates", _fake_select_candidates)
 
     created = await client.post("/api/diet-plans/generate", json={"num_days": 1})
     plan = created.json()

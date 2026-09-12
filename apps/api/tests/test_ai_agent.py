@@ -2,6 +2,7 @@ import pytest
 from claude_agent_sdk import ResultMessage
 
 from myfood.ai import agent as ai_agent
+from myfood.ai.tools import build_propose_meal_plan_tool
 
 
 class _FakeAsyncIterator:
@@ -83,6 +84,67 @@ async def test_run_agent_builds_options_without_tools_or_secrets(monkeypatch):
     # el os.environ del proceso llamante — ver docstring de agent.py).
     for leaked_key in ("POSTGRES_PASSWORD", "SECRET_KEY", "ENCRYPTION_KEY", "MEILI_MASTER_KEY"):
         assert leaked_key not in options.env
+
+
+async def test_run_agent_succeeds_with_empty_text_when_only_a_tool_was_called(monkeypatch):
+    """Un turno donde el modelo solo llama a una herramienta (sin texto de
+    cierre) no es un error — el llamador mira el sink de la herramienta,
+    no `AgentResult.text`, para saber si hubo respuesta útil."""
+
+    def fake_query(*, prompt, options):
+        return _FakeAsyncIterator(
+            [
+                ResultMessage(
+                    subtype="success",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=False,
+                    num_turns=1,
+                    session_id="s1",
+                    result=None,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(ai_agent, "query", fake_query)
+
+    result = await ai_agent.run_agent(token="x", prompt="p", system_prompt="s")
+
+    assert result.text == ""
+
+
+async def test_run_agent_registers_mcp_tools_and_allows_them(monkeypatch):
+    captured = {}
+    sink: list[dict] = []
+    tool_obj = build_propose_meal_plan_tool(sink)
+
+    def fake_query(*, prompt, options):
+        captured["options"] = options
+        return _FakeAsyncIterator(
+            [
+                ResultMessage(
+                    subtype="success",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=False,
+                    num_turns=1,
+                    session_id="s1",
+                    result="",
+                )
+            ]
+        )
+
+    monkeypatch.setattr(ai_agent, "query", fake_query)
+
+    await ai_agent.run_agent(
+        token="x", prompt="p", system_prompt="s", mcp_tools=[tool_obj]
+    )
+
+    options = captured["options"]
+    # Ninguna herramienta nativa del CLI, ni siquiera con mcp_tools presente.
+    assert options.tools == []
+    assert options.allowed_tools == ["propose_meal_plan"]
+    assert "myfood" in options.mcp_servers
 
 
 async def test_run_agent_raises_on_error_result(monkeypatch):

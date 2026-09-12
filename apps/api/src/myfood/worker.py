@@ -1,6 +1,8 @@
 """Worker de tareas de fondo (sección 19) — nunca corre en el hilo que
 atiende la petición del usuario. Desde la Fase 3: bucle de recordatorios
-push (agua/suplementos) según `notification_rules`.
+push (agua/suplementos) según `notification_rules`. Desde la Fase 5: cola
+de trabajos de iafood (sección 10.6) — la única llamada real al Claude
+Agent SDK de todo el proyecto corre aquí, nunca en el proceso `api`.
 """
 
 import asyncio
@@ -11,6 +13,8 @@ from zoneinfo import ZoneInfo
 import redis.asyncio as redis
 from sqlalchemy import select
 
+from myfood.ai.flows.diet_plan import process_diet_plan_job
+from myfood.ai.queue import dequeue_diet_plan_job
 from myfood.config import get_settings
 from myfood.db.models import NotificationRule, PushSubscription
 from myfood.db.session import AdminSessionLocal
@@ -74,8 +78,10 @@ async def run_tick(now: datetime) -> int:
     return sent
 
 
-async def main() -> None:
-    logger.info("MyFood worker arrancado — bucle de recordatorios cada %ss", _TICK_SECONDS)
+_AI_QUEUE_POLL_TIMEOUT_SECONDS = 5
+
+
+async def _notifications_loop() -> None:
     tz = ZoneInfo(settings.tz)
     while True:
         try:
@@ -85,6 +91,30 @@ async def main() -> None:
         except Exception:
             logger.exception("fallo en el tick del worker — se reintenta en el siguiente ciclo")
         await asyncio.sleep(_TICK_SECONDS)
+
+
+async def _ai_jobs_loop() -> None:
+    """`BRPOP` con timeout corto: deja el bucle libre para volver a
+    comprobar la cola sin quedarse bloqueado indefinidamente si nunca llega
+    ningún trabajo (no hay nada más que hacer aquí, a diferencia del bucle
+    de recordatorios que sí tiene un tick periódico propio)."""
+    while True:
+        try:
+            ai_session_id = await dequeue_diet_plan_job(_AI_QUEUE_POLL_TIMEOUT_SECONDS)
+            if ai_session_id is None:
+                continue
+            await process_diet_plan_job(ai_session_id)
+        except Exception:
+            logger.exception(
+                "fallo procesando un trabajo de iafood — se reintenta con el siguiente"
+            )
+
+
+async def main() -> None:
+    logger.info(
+        "MyFood worker arrancado — recordatorios cada %ss + cola de iafood", _TICK_SECONDS
+    )
+    await asyncio.gather(_notifications_loop(), _ai_jobs_loop())
 
 
 if __name__ == "__main__":

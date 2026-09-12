@@ -3,8 +3,10 @@ from fastapi import FastAPI
 from myfood.errors import AppError, app_error_handler, unhandled_exception_handler
 from myfood.routers import (
     admin,
+    ai,
     auth,
     calc,
+    consents,
     diet_plans,
     favorites,
     foods,
@@ -26,6 +28,7 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(consents.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(calc.router, prefix="/api")
 app.include_router(foods.router, prefix="/api")
@@ -39,3 +42,4 @@ app.include_router(push.router, prefix="/api")
 app.include_router(notification_rules.router, prefix="/api")
 app.include_router(diet_plans.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(ai.router, prefix="/api")
