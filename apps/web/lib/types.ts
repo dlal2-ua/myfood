@@ -302,3 +302,15 @@ export interface DietPlan {
 export interface DietPlanDetail extends DietPlan {
   days: PlanDay[];
 }
+
+export interface AiCredentialStatus {
+  configured: boolean;
+  provider: string | null;
+  updated_at: string | null;
+}
+
+export interface IafoodLimits {
+  per_profile_daily: number;
+  instance_daily: number;
+  max_tokens_per_call: number;
+}

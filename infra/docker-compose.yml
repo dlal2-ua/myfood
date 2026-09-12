@@ -43,6 +43,7 @@ services:
     env_file: .env
     volumes:
       - /var/apps/propias-app/myfood/data/images:/data/images
+      - /var/apps/propias-app/myfood/data/config:/data/config
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -59,6 +60,7 @@ services:
     env_file: .env
     volumes:
       - /var/apps/propias-app/myfood/data/images:/data/images
+      - /var/apps/propias-app/myfood/data/config:/data/config
     depends_on:
       api: { condition: service_healthy }
 

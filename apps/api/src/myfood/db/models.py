@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     Numeric,
     SmallInteger,
     String,
@@ -463,3 +464,19 @@ class PlanItemAlternative(Base):
     distance: Mapped[object] = mapped_column(Numeric(8, 4), nullable=False)
 
     plan_item: Mapped["PlanItem"] = relationship(back_populates="alternatives")
+
+
+class AiCredential(Base):
+    """Fila única (`id=1`) con la credencial de iafood, cifrada con `ENCRYPTION_KEY`
+    (sección 6.7/10.1). Sin `user_id`: no lleva RLS, se gestiona solo desde `/admin/*`
+    con el rol de conexión `myfood_admin`."""
+
+    __tablename__ = "ai_credentials"
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, default=1)
+    provider: Mapped[str] = mapped_column(String, nullable=False, default="anthropic")
+    token_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
