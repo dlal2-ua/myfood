@@ -54,6 +54,9 @@ class CandidateFood:
     protein_100g: float
     fat_100g: float
     carbs_100g: float
+    # Solo la usa `ai/anonymize.py` (sección 10.2) para dar contexto de
+    # categoría al LLM — el solver de este módulo nunca la lee.
+    category: str | None = None
 
 
 @dataclass
@@ -163,6 +166,76 @@ def solve_day(
         meals_out.append(PlannedMeal(meal_type=meal, items=items))
 
     feasible = any(m.items for m in meals_out)
+    totals = _actual_totals(meals_out, food_by_id) if feasible else DayTargets(0, 0, 0, 0)
+    return DayPlan(feasible=feasible, meals=meals_out, totals=totals)
+
+
+def solve_day_with_fixed_items(
+    items_by_meal: dict[str, list[CandidateFood]],
+    targets: DayTargets,
+    *,
+    min_grams_per_item: float = MIN_GRAMS_PER_ITEM,
+    max_grams_per_item: float = MAX_GRAMS_PER_ITEM,
+) -> DayPlan:
+    """Variante para iafood (sección 10.6): a diferencia de `solve_day`, aquí
+    QUÉ alimentos van en cada comida ya lo decidió la IA (function calling,
+    R1 — nunca decide cantidades). No hay variables binarias de selección
+    ni penalización de variedad ni conjunto candidato compartido entre
+    comidas: cada alimento que la IA puso en una comida aparece siempre en
+    ESA comida (nunca se reasigna a otra), con un gramaje entre
+    `min_grams_per_item` y `max_grams_per_item` que el solver ajusta para
+    acercarse a los objetivos del día — la misma función objetivo de
+    desviaciones relativas que `solve_day`, sin el término de variedad (la
+    variedad entre días ya la razona la IA en el prompt, sección 10.4)."""
+    if not items_by_meal or not any(items_by_meal.values()):
+        return DayPlan(feasible=False, meals=[], totals=DayTargets(0, 0, 0, 0))
+
+    food_by_id: dict[str, CandidateFood] = {
+        food.id: food for foods in items_by_meal.values() for food in foods
+    }
+    prob = pulp.LpProblem("myfood_day_plan_fixed", pulp.LpMinimize)
+
+    x: dict[tuple[str, str], pulp.LpVariable] = {}
+    for meal, foods in items_by_meal.items():
+        for food in foods:
+            x[meal, food.id] = pulp.LpVariable(
+                f"x_{meal}_{food.id}", lowBound=min_grams_per_item, upBound=max_grams_per_item
+            )
+
+    def _total(attr: str) -> pulp.LpAffineExpression:
+        return pulp.lpSum(
+            x[meal, food.id] * getattr(food, attr) / 100
+            for meal, foods in items_by_meal.items()
+            for food in foods
+        )
+
+    deviation_terms = []
+    for name, total_expr, target_value in (
+        ("kcal", _total("kcal_100g"), targets.kcal),
+        ("protein", _total("protein_100g"), targets.protein_g),
+        ("fat", _total("fat_100g"), targets.fat_g),
+        ("carbs", _total("carbs_100g"), targets.carbs_g),
+    ):
+        pos = pulp.LpVariable(f"dev_{name}_pos", lowBound=0)
+        neg = pulp.LpVariable(f"dev_{name}_neg", lowBound=0)
+        prob += total_expr - target_value == pos - neg
+        scale = max(target_value, 1.0)
+        deviation_terms.append((pos + neg) / scale)
+
+    prob += pulp.lpSum(deviation_terms)
+    prob.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=SOLVER_TIME_LIMIT_SECONDS))
+
+    meals_out = [
+        PlannedMeal(
+            meal_type=meal,
+            items=[
+                PlannedItem(food_id=food.id, grams=round(x[meal, food.id].value(), 1))
+                for food in foods
+            ],
+        )
+        for meal, foods in items_by_meal.items()
+    ]
+    feasible = bool(meals_out) and all(m.items for m in meals_out)
     totals = _actual_totals(meals_out, food_by_id) if feasible else DayTargets(0, 0, 0, 0)
     return DayPlan(feasible=feasible, meals=meals_out, totals=totals)
 

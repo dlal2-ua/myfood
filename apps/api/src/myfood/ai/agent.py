@@ -21,8 +21,15 @@ import asyncio
 import os
 import tempfile
 from dataclasses import dataclass
+from typing import Any
 
-from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+from claude_agent_sdk import (
+    ClaudeAgentOptions,
+    ResultMessage,
+    SdkMcpTool,
+    create_sdk_mcp_server,
+    query,
+)
 
 _ALLOWED_ENV_PASSTHROUGH = ("PATH",)
 
@@ -67,19 +74,30 @@ async def run_agent(
     model: str | None = None,
     max_turns: int = 1,
     timeout_seconds: float = 30.0,
+    mcp_tools: list[SdkMcpTool[Any]] | None = None,
 ) -> AgentResult:
-    """Llamada de un solo turno, sin herramientas propias del CLI (R1/R2: la
-    IA nunca ejecuta código ni toca disco/red por su cuenta) y sin sesión
-    persistida. Las herramientas de function calling de cada flujo concreto
-    (`propose_meal_plan`, etc.) se añaden como MCP server dedicado cuando
-    ese flujo se construya — no existen todavía en esta infraestructura base.
+    """Llamada de un solo turno, sin herramientas nativas del CLI (Bash,
+    Read, etc. — R1/R2: la IA nunca ejecuta código ni toca disco/red por su
+    cuenta) y sin sesión persistida. `mcp_tools`, si se pasa, son las ÚNICAS
+    herramientas que el modelo puede llamar — se registran como un servidor
+    MCP en proceso (`create_sdk_mcp_server`) y se auto-aprueban vía
+    `allowed_tools` (mismo patrón que el ejemplo del propio SDK), nunca vía
+    un callback de permisos. Ninguna herramienta nativa queda disponible
+    aunque `mcp_tools` esté vacío.
     """
     with tempfile.TemporaryDirectory(prefix="myfood-iafood-") as home_dir:
+        mcp_servers: dict[str, Any] = {}
+        allowed_tools: list[str] = []
+        if mcp_tools:
+            mcp_servers = {"myfood": create_sdk_mcp_server(name="myfood", tools=mcp_tools)}
+            allowed_tools = [t.name for t in mcp_tools]
+
         options = ClaudeAgentOptions(
             tools=[],
+            allowed_tools=allowed_tools,
             permission_mode="dontAsk",
             strict_mcp_config=True,
-            mcp_servers={},
+            mcp_servers=mcp_servers,
             cwd=home_dir,
             model=model,
             max_turns=max_turns,
@@ -94,12 +112,16 @@ async def run_agent(
                     result_message = message
             if result_message is None:
                 raise AiAgentError("El Agent SDK no devolvió ningún resultado.")
-            if result_message.is_error or result_message.result is None:
+            if result_message.is_error:
                 detail = "; ".join(result_message.errors or []) or result_message.subtype
                 raise AiAgentError(f"El Agent SDK terminó con error: {detail}")
             usage = result_message.usage or {}
             return AgentResult(
-                text=result_message.result,
+                # `result` puede venir vacío cuando el único "trabajo" del
+                # turno fue llamar a una herramienta (mcp_tools) sin texto
+                # de cierre — no es un error, el llamador mira el sink de la
+                # herramienta, no este texto, para saber si hubo respuesta.
+                text=result_message.result or "",
                 input_tokens=usage.get("input_tokens"),
                 output_tokens=usage.get("output_tokens"),
             )

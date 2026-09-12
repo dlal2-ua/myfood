@@ -480,3 +480,47 @@ class AiCredential(Base):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiSession(Base):
+    """Una llamada al Claude Agent SDK (sección 6.7/10). `request_payload` es
+    el JSON YA anonimizado (R5) que se envió; nunca contiene datos
+    identificativos. RLS propia (sección 22, tiene `user_id`)."""
+
+    __tablename__ = "ai_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="running")
+    request_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    response_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    validation_errors: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiProposal(Base):
+    """Cambio propuesto por iafood pendiente de aprobación (R1/sección 10.6
+    — nada se aplica solo). `payload` lleva todo lo necesario para
+    materializar la propuesta si se aprueba (p. ej. `diet_plan_id` +
+    estructura de un día para `scope='meal'`)."""
+
+    __tablename__ = "ai_proposals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ai_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ai_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    scope: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    rationale: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -314,3 +314,46 @@ export interface IafoodLimits {
   instance_daily: number;
   max_tokens_per_call: number;
 }
+
+export type AiSessionStatus = "running" | "succeeded" | "failed" | "rejected_validation";
+
+export interface AiValidationError {
+  code: string;
+  message: string;
+}
+
+export interface AiSession {
+  id: string;
+  kind: string;
+  status: AiSessionStatus;
+  attempts: number;
+  response_payload: Record<string, unknown> | null;
+  validation_errors: AiValidationError[] | null;
+}
+
+export interface AiProposalMealItem {
+  food_id: string;
+  grams: number;
+}
+
+export interface AiProposalMeal {
+  meal_type: MealType;
+  items: AiProposalMealItem[];
+}
+
+export interface AiProposalPayload {
+  diet_plan_id: string;
+  day_index: number;
+  meals: AiProposalMeal[];
+}
+
+export type AiProposalStatus = "pending" | "approved" | "rejected" | "expired";
+
+export interface AiProposal {
+  id: string;
+  ai_session_id: string;
+  scope: string;
+  payload: AiProposalPayload;
+  rationale: string | null;
+  status: AiProposalStatus;
+}
