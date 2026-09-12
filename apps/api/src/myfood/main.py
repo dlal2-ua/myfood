@@ -4,6 +4,7 @@ from myfood.errors import AppError, app_error_handler, unhandled_exception_handl
 from myfood.routers import (
     auth,
     calc,
+    diet_plans,
     favorites,
     foods,
     health,
@@ -33,3 +34,4 @@ app.include_router(supplements.router, prefix="/api")
 app.include_router(water.router, prefix="/api")
 app.include_router(push.router, prefix="/api")
 app.include_router(notification_rules.router, prefix="/api")
+app.include_router(diet_plans.router, prefix="/api")

@@ -11,6 +11,7 @@ const PROTECTED_PREFIXES = [
   "/shopping-list",
   "/water",
   "/supplements",
+  "/diet-plans",
 ];
 
 export function middleware(request: NextRequest) {
@@ -37,5 +38,6 @@ export const config = {
     "/shopping-list/:path*",
     "/water/:path*",
     "/supplements/:path*",
+    "/diet-plans/:path*",
   ],
 };

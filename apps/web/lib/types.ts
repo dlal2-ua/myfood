@@ -245,3 +245,60 @@ export interface SupplementLogEntry {
   taken_at: string;
   skipped: boolean;
 }
+
+export interface DayMacroTotals {
+  kcal: number;
+  protein_g: number;
+  fat_g: number;
+  carbs_g: number;
+}
+
+export interface PlanItemAlternative {
+  id: string;
+  food_id: string;
+  name_es: string;
+  grams: number;
+  rank: number;
+  distance: number;
+}
+
+export interface PlanItem {
+  id: string;
+  food_id: string | null;
+  name_es: string | null;
+  grams: number;
+  is_substitutable: boolean;
+  alternatives: PlanItemAlternative[];
+}
+
+export interface PlanMeal {
+  id: string;
+  meal_type: MealType;
+  items: PlanItem[];
+}
+
+export interface PlanDay {
+  id: string;
+  day_index: number;
+  meals: PlanMeal[];
+  totals: DayMacroTotals;
+}
+
+export type DietPlanStatus = "draft" | "active" | "archived";
+
+export interface DietPlan {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string | null;
+  status: DietPlanStatus;
+  target_kcal: number;
+  target_protein_g: number;
+  target_fat_g: number;
+  target_carbs_g: number;
+  generated_by: string;
+}
+
+export interface DietPlanDetail extends DietPlan {
+  days: PlanDay[];
+}
