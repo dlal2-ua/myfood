@@ -11,7 +11,16 @@ from myfood.config import get_settings
 
 DIET_PLAN_QUEUE_KEY = "iafood:jobs:diet_plan"
 
-_redis = redis.from_url(get_settings().redis_url, decode_responses=True)
+# `socket_timeout` explícito a `None`: redis-py (desde 8.x) pone un
+# `socket_timeout=5` por defecto en el cliente async, que compite con el
+# propio timeout de `BRPOP` (bloqueante en el servidor) — con ambos en 5s,
+# el cliente puede cortar la lectura del socket antes de que el propio
+# BRPOP termine su espera, lanzando un `redis.exceptions.TimeoutError` que
+# no tiene nada que ver con "no había trabajos" (encontrado en vivo:
+# el bucle del worker fallaba en cada vuelta con ese error). `BRPOP` ya
+# tiene su propio parámetro de timeout — el socket debe esperar más que
+# eso, no menos.
+_redis = redis.from_url(get_settings().redis_url, decode_responses=True, socket_timeout=None)
 
 
 async def enqueue_diet_plan_job(ai_session_id: str) -> None:

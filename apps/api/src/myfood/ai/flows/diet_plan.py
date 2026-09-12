@@ -279,7 +279,7 @@ async def process_diet_plan_job(ai_session_id: str) -> None:
             except AiAgentError as exc:
                 ai_session.status = "failed"
                 ai_session.attempts = attempts
-                ai_session.validation_errors = [{"code": "AI_TIMEOUT", "message": str(exc)}]
+                ai_session.validation_errors = [{"code": exc.code, "message": str(exc)}]
                 await session.commit()
                 return
 

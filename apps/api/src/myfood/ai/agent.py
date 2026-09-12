@@ -13,8 +13,8 @@ puede invocarse desde el `worker` (sección 19: "no llames a APIs externas
 desde el hilo que atiende la petición del usuario"), nunca desde una ruta
 de `api/routers/*` que sirve una petición de usuario — el proceso `api`
 lleva en su entorno las contraseñas de Postgres, `SECRET_KEY`, etc., y el
-del `worker` es el único que debe mantenerse mínimo antes de que este
-módulo se use de verdad en un flujo (Fase 5, próxima entrega).
+del `worker` (que es quien realmente llama a esta función, desde
+`ai/flows/diet_plan.py`) es el único que debe mantenerse mínimo.
 """
 
 import asyncio
@@ -25,6 +25,8 @@ from typing import Any
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
+    ClaudeSDKError,
+    ResultError,
     ResultMessage,
     SdkMcpTool,
     create_sdk_mcp_server,
@@ -35,9 +37,14 @@ _ALLOWED_ENV_PASSTHROUGH = ("PATH",)
 
 
 class AiAgentError(Exception):
-    """El Agent SDK terminó sin un resultado utilizable (timeout, error del
-    proveedor, token inválido...). El llamador decide el código HTTP/estado
-    de `ai_sessions` según el contexto (tabla de errores, sección 10.1)."""
+    """El Agent SDK terminó sin un resultado utilizable. `code` distingue
+    las situaciones de la tabla de errores (sección 10.1) para que el
+    llamador pueda reaccionar distinto (p. ej. avisar en el panel de admin
+    que la credencial hay que renovarla, no solo "algo falló")."""
+
+    def __init__(self, message: str, *, code: str = "AI_PROVIDER_ERROR"):
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass
@@ -129,4 +136,22 @@ async def run_agent(
         try:
             return await asyncio.wait_for(_collect(), timeout=timeout_seconds)
         except TimeoutError as exc:
-            raise AiAgentError("Tiempo de espera agotado con el proveedor de IA.") from exc
+            raise AiAgentError(
+                "Tiempo de espera agotado con el proveedor de IA.", code="AI_TIMEOUT"
+            ) from exc
+        except ClaudeSDKError as exc:
+            # Sin este catch, un fallo real del SDK (token inválido, CLI no
+            # encontrado, JSON corrupto...) se propagaba tal cual — nunca
+            # como `AiAgentError` — y el `except AiAgentError` de
+            # `process_diet_plan_job` no lo atrapaba: la `ai_session` se
+            # quedaba en `running` para siempre (encontrado en vivo, con un
+            # token de prueba inválido: `ResultError` con "401 Invalid
+            # bearer token" no marcado nunca como `failed`).
+            detail = str(exc)
+            code = "AI_PROVIDER_ERROR"
+            if isinstance(exc, ResultError):
+                if exc.result:
+                    detail = exc.result
+                if exc.api_error_status in (401, 403):
+                    code = "AI_CREDENTIAL_INVALID"
+            raise AiAgentError(f"El Agent SDK falló: {detail}", code=code) from exc
