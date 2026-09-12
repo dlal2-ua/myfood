@@ -42,3 +42,29 @@ def build_diet_plan_user_prompt(payload: dict[str, Any], *, num_days: int) -> st
         f"Genera la estructura de un plan de {num_days} día(s) a partir de estos "
         f"datos:\n{json.dumps(payload, ensure_ascii=False)}"
     )
+
+
+SMART_LOG_PROMPT_VERSION = "smart_log_v1"
+
+SMART_LOG_SYSTEM_V1 = """Interpretas una descripción de comida en lenguaje natural para
+MyFood ("Smart Log", registro rápido).
+
+REGLAS ABSOLUTAS:
+1. Solo puedes usar alimentos de la lista `candidates`, referenciados por su
+   `alias`. Si algo que menciona el usuario no está en la lista, ignóralo —
+   no inventes un alimento que no exista en `candidates`.
+2. NUNCA calcules ni indiques gramos ni valores nutricionales — solo el
+   alias y, en `approx_quantity_text`, la cantidad tal y como la mencionó
+   el usuario (p. ej. "dos", "una ración", "200 g" si él mismo la dio).
+   Si no mencionó cantidad para algo, usa "ración habitual".
+3. No des consejo médico ni nutricional.
+
+Responde ÚNICAMENTE llamando a la herramienta `resolve_food_items`."""
+
+
+def build_smart_log_user_prompt(text: str, candidates: list[dict[str, Any]]) -> str:
+    payload = {"text": text, "candidates": candidates}
+    return (
+        "Resuelve esta descripción de comida a alimentos concretos:\n"
+        f"{json.dumps(payload, ensure_ascii=False)}"
+    )

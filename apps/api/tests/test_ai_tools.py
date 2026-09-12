@@ -1,4 +1,9 @@
-from myfood.ai.tools import PROPOSE_MEAL_PLAN_TOOL_NAME, build_propose_meal_plan_tool
+from myfood.ai.tools import (
+    PROPOSE_MEAL_PLAN_TOOL_NAME,
+    RESOLVE_FOOD_ITEMS_TOOL_NAME,
+    build_propose_meal_plan_tool,
+    build_resolve_food_items_tool,
+)
 
 
 def test_tool_has_expected_name_and_schema():
@@ -43,3 +48,25 @@ async def test_different_sinks_are_independent():
 
     assert len(sink_a) == 1
     assert len(sink_b) == 0
+
+
+def test_resolve_food_items_tool_has_expected_name_and_schema():
+    tool_obj = build_resolve_food_items_tool([])
+    assert tool_obj.name == RESOLVE_FOOD_ITEMS_TOOL_NAME
+    assert tool_obj.input_schema["required"] == ["items"]
+    schema_str = str(tool_obj.input_schema)
+    assert "approx_quantity_text" in schema_str
+    # R1: la IA nunca calcula gramos ni valores nutricionales.
+    assert "grams" not in schema_str
+    assert "kcal" not in schema_str
+
+
+async def test_resolve_food_items_handler_appends_args_to_sink():
+    sink: list[dict] = []
+    tool_obj = build_resolve_food_items_tool(sink)
+    args = {"items": [{"alias": "c1", "approx_quantity_text": "dos"}]}
+
+    result = await tool_obj.handler(args)
+
+    assert sink == [args]
+    assert result["content"][0]["type"] == "text"

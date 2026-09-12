@@ -1,0 +1,172 @@
+"""Flujo de registro por lenguaje natural, "Smart Log" (sección 10.8).
+
+Mismo patrón de dos mitades que `ai/flows/diet_plan.py` (regla 19):
+`request_smart_log` corre en el proceso `api` (RAG vía Meilisearch, encola
+el trabajo) y `process_smart_log_job` corre en el `worker` (la única que
+llama al Agent SDK). El resultado NUNCA se guarda solo — `response_payload`
+son alimentos propuestos que el usuario revisa, ajusta gramos y confirma
+llamando a `POST /log/food` normal por cada uno (sección 10.8: "responde
+200 con la lista de items propuestos, SIN guardar nada todavía" — aquí,
+como en el resto de iafood, la respuesta llega vía `ai_sessions`/polling en
+vez de en la propia petición, por la regla 19).
+"""
+
+from __future__ import annotations
+
+import uuid
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from myfood.ai import client as ai_client
+from myfood.ai import tools
+from myfood.ai.agent import AiAgentError, run_agent
+from myfood.ai.prompts import (
+    SMART_LOG_PROMPT_VERSION,
+    SMART_LOG_SYSTEM_V1,
+    build_smart_log_user_prompt,
+)
+from myfood.ai.queue import enqueue_smart_log_job
+from myfood.db.models import AiSession, Food
+from myfood.db.session import AdminSessionLocal
+from myfood.domain.food_mentions import split_into_food_mentions
+from myfood.domain.quantity_text import resolve_grams
+from myfood.errors import AppError
+from myfood.search import search_foods
+
+# Alimentos por mención (ver `domain/food_mentions.py`) y tope total tras
+# fusionar — una frase con muchas menciones no debe inflar sin límite el
+# payload que se envía al LLM.
+_HITS_PER_MENTION = 8
+_CANDIDATE_LIMIT = 20
+_AGENT_TIMEOUT_SECONDS = 30.0
+
+
+async def _search_candidates(text: str) -> list[dict]:
+    """RAG de Smart Log: la frase completa casi nunca coincide con ningún
+    alimento real en Meilisearch (comprobado contra el catálogo real — ver
+    `domain/food_mentions.py`), así que se busca cada mención por separado
+    y se fusionan los resultados, deduplicados por id."""
+    seen: dict[str, dict] = {}
+    for mention in split_into_food_mentions(text):
+        hits, _total = await search_foods(mention, kind=None, limit=_HITS_PER_MENTION, offset=0)
+        for hit in hits:
+            seen.setdefault(hit["id"], hit)
+    return list(seen.values())[:_CANDIDATE_LIMIT]
+
+
+async def request_smart_log(session: AsyncSession, user_id: UUID, *, text: str) -> AiSession:
+    """Corre en el proceso `api`. El RAG (Meilisearch) y la creación de la
+    sesión son deterministas y locales; la llamada real al proveedor queda
+    para el worker (regla 19)."""
+    credential_status = await ai_client.get_credential_status(session)
+    if not credential_status.configured:
+        raise AppError(
+            "AI_NOT_CONFIGURED",
+            "El administrador todavía no ha configurado la credencial de iafood.",
+            status_code=503,
+        )
+
+    hits = await _search_candidates(text)
+    if not hits:
+        raise AppError(
+            "NO_CANDIDATE_FOODS",
+            "No se ha encontrado ningún alimento parecido en el catálogo para ese texto.",
+            status_code=422,
+        )
+
+    alias_to_food_id: dict[str, str] = {}
+    candidates_out = []
+    for index, hit in enumerate(hits, start=1):
+        alias = f"c{index}"
+        alias_to_food_id[alias] = hit["id"]
+        candidates_out.append(
+            {"id": alias, "name": hit["name_es"], "category": hit.get("category")}
+        )
+
+    ai_session = AiSession(
+        user_id=user_id,
+        kind="smart_log",
+        status="running",
+        request_payload={
+            "prompt_version": SMART_LOG_PROMPT_VERSION,
+            "text": text,
+            "candidates": candidates_out,
+            "alias_to_food_id": alias_to_food_id,
+        },
+    )
+    session.add(ai_session)
+    await session.commit()
+    await session.refresh(ai_session)
+
+    await enqueue_smart_log_job(str(ai_session.id))
+    return ai_session
+
+
+async def process_smart_log_job(ai_session_id: str) -> None:
+    """Corre en el `worker` (regla 19)."""
+    async with AdminSessionLocal() as session:
+        ai_session = await session.get(AiSession, uuid.UUID(ai_session_id))
+        if ai_session is None or ai_session.status != "running":
+            return  # ya procesado, o no existe (defensivo)
+
+        request_payload = ai_session.request_payload
+        text: str = request_payload["text"]
+        candidates: list[dict] = request_payload["candidates"]
+        alias_to_food_id: dict[str, str] = request_payload["alias_to_food_id"]
+
+        token = await ai_client.get_decrypted_token(session)
+        if token is None:
+            ai_session.status = "failed"
+            ai_session.validation_errors = [
+                {"code": "AI_NOT_CONFIGURED", "message": "La credencial se retiró tras encolar."}
+            ]
+            await session.commit()
+            return
+
+        sink: list[dict] = []
+        tool_obj = tools.build_resolve_food_items_tool(sink)
+
+        try:
+            agent_result = await run_agent(
+                token=token,
+                prompt=build_smart_log_user_prompt(text, candidates),
+                system_prompt=SMART_LOG_SYSTEM_V1,
+                mcp_tools=[tool_obj],
+                max_turns=2,
+                timeout_seconds=_AGENT_TIMEOUT_SECONDS,
+            )
+        except AiAgentError as exc:
+            ai_session.status = "failed"
+            ai_session.validation_errors = [{"code": exc.code, "message": str(exc)}]
+            await session.commit()
+            return
+
+        items_out: list[dict] = []
+        if sink:
+            for item in sink[-1].get("items", []):
+                food_id = alias_to_food_id.get(item.get("alias"))
+                if food_id is None:
+                    continue  # alias inventado por el LLM (R1) — se descarta, no se inventa
+                food = await session.get(Food, uuid.UUID(food_id))
+                if food is None:
+                    continue
+                serving_size_g = float(food.serving_size_g) if food.serving_size_g else None
+                grams = resolve_grams(item.get("approx_quantity_text", ""), serving_size_g)
+                items_out.append(
+                    {
+                        "food_id": food_id,
+                        "name_es": food.name_es,
+                        "grams": grams,
+                        "approx_quantity_text": item.get("approx_quantity_text", ""),
+                    }
+                )
+
+        ai_session.status = "succeeded"
+        ai_session.response_payload = {
+            "items": items_out,
+            "warning": None if items_out else "NO_MATCH",
+        }
+        ai_session.input_tokens = agent_result.input_tokens
+        ai_session.output_tokens = agent_result.output_tokens
+        await session.commit()
