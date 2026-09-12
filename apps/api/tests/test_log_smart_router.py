@@ -14,7 +14,7 @@ import pytest_asyncio
 from sqlalchemy import text
 
 from myfood.ai import client as ai_client
-from myfood.ai.flows import smart_log as smart_log_flow
+from myfood.ai.flows import food_resolution
 from myfood.ai.queue import DIET_PLAN_QUEUE_KEY, SMART_LOG_QUEUE_KEY
 from myfood.ai.queue import _redis as queue_redis
 from myfood.config import get_settings
@@ -80,7 +80,7 @@ async def test_smart_log_succeeds_with_consent_and_credential_and_can_be_polled(
     ready_user, monkeypatch
 ):
     client, _ = ready_user
-    monkeypatch.setattr(smart_log_flow, "search_foods", _fake_search_foods)
+    monkeypatch.setattr(food_resolution, "search_foods", _fake_search_foods)
     await client.post("/api/consents", json={"kind": "ai_processing", "version": "v1"})
 
     resp = await client.post("/api/log/smart", json={"text": "dos huevos fritos"})
@@ -103,7 +103,7 @@ async def test_smart_log_uses_its_own_quota_scope_separate_from_diet_plan(
     from myfood.ai.limits import IafoodLimits
 
     client, user_id = ready_user
-    monkeypatch.setattr(smart_log_flow, "search_foods", _fake_search_foods)
+    monkeypatch.setattr(food_resolution, "search_foods", _fake_search_foods)
     await client.post("/api/consents", json={"kind": "ai_processing", "version": "v1"})
     monkeypatch.setattr(
         "myfood.ai.quota.load_limits",

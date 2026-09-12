@@ -1,0 +1,312 @@
+"""Recetas propias (sección 6.4/20). `recipes` tiene RLS propia (tiene
+`user_id`, migración 0002); `recipe_ingredients` NO (sin `user_id`) — su
+aislamiento multiusuario pasa por `_get_recipe` (RLS + comprobación
+explícita sobre `recipes`) y de ahí para abajo, mismo patrón R3 ya usado
+para `plan_items`/`plan_item_alternatives` en `diet_plans.py`.
+
+Sin columnas de nutrición propias por diseño: los totales siempre se
+calculan sumando `food_nutrients` de cada ingrediente × gramos/100 (R9 —
+nunca un valor guardado que pueda desincronizarse si cambian los
+ingredientes)."""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from myfood.ai.consent import require_ai_processing_consent
+from myfood.ai.flows.recipe_import import request_recipe_import
+from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
+from myfood.ai.schemas import AiSessionOut, ai_session_to_out
+from myfood.db.models import Food, FoodNutrient, Recipe, RecipeIngredient
+from myfood.deps import get_current_user_id, get_db
+from myfood.errors import AppError
+
+router = APIRouter(prefix="/recipes", tags=["recipes"])
+
+
+class RecipeIngredientIn(BaseModel):
+    food_id: UUID
+    grams: float = Field(gt=0, le=10000)
+
+
+class RecipeIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    servings: int = Field(default=1, ge=1, le=50)
+    prep_minutes: int | None = Field(default=None, ge=0, le=1440)
+    instructions: str | None = None
+    ingredients: list[RecipeIngredientIn] = Field(default_factory=list)
+
+
+class RecipePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    servings: int | None = Field(default=None, ge=1, le=50)
+    prep_minutes: int | None = Field(default=None, ge=0, le=1440)
+    instructions: str | None = None
+
+
+class RecipeIngredientOut(BaseModel):
+    id: UUID
+    food_id: UUID
+    name_es: str
+    grams: float
+    kcal: float
+    protein_g: float
+    fat_g: float
+    carbs_g: float
+
+
+class NutritionTotals(BaseModel):
+    kcal: float
+    protein_g: float
+    fat_g: float
+    carbs_g: float
+
+
+class RecipeOut(BaseModel):
+    id: UUID
+    name: str
+    servings: int
+    prep_minutes: int | None
+    instructions: str | None
+    ingredients: list[RecipeIngredientOut]
+    totals: NutritionTotals
+    totals_per_serving: NutritionTotals
+
+
+class RecipeSummaryOut(BaseModel):
+    id: UUID
+    name: str
+    servings: int
+    prep_minutes: int | None
+
+
+def _scale(nutrient_100g, grams: float) -> float:
+    return round(float(nutrient_100g or 0) * grams / 100, 2)
+
+
+async def _get_recipe(session: AsyncSession, user_id: UUID, recipe_id: UUID) -> Recipe:
+    recipe = await session.get(Recipe, recipe_id)
+    if recipe is None or recipe.user_id != user_id:
+        raise AppError("RECIPE_NOT_FOUND", "No existe esa receta.", status_code=404)
+    return recipe
+
+
+async def _load_ingredients(session: AsyncSession, recipe_id: UUID) -> list[RecipeIngredient]:
+    return list(
+        await session.scalars(
+            select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe_id)
+        )
+    )
+
+
+async def _to_out(session: AsyncSession, recipe: Recipe) -> RecipeOut:
+    ingredients = await _load_ingredients(session, recipe.id)
+
+    ingredients_out: list[RecipeIngredientOut] = []
+    totals = {"kcal": 0.0, "protein_g": 0.0, "fat_g": 0.0, "carbs_g": 0.0}
+    for ingredient in ingredients:
+        food = await session.get(Food, ingredient.food_id)
+        nutrients = await session.get(FoodNutrient, ingredient.food_id)
+        grams = float(ingredient.grams)
+        kcal = _scale(nutrients.kcal_100g, grams) if nutrients else 0.0
+        protein_g = _scale(nutrients.protein_100g, grams) if nutrients else 0.0
+        fat_g = _scale(nutrients.fat_100g, grams) if nutrients else 0.0
+        carbs_g = _scale(nutrients.carbs_100g, grams) if nutrients else 0.0
+        totals["kcal"] += kcal
+        totals["protein_g"] += protein_g
+        totals["fat_g"] += fat_g
+        totals["carbs_g"] += carbs_g
+        ingredients_out.append(
+            RecipeIngredientOut(
+                id=ingredient.id,
+                food_id=ingredient.food_id,
+                name_es=food.name_es if food else "",
+                grams=grams,
+                kcal=kcal,
+                protein_g=protein_g,
+                fat_g=fat_g,
+                carbs_g=carbs_g,
+            )
+        )
+
+    totals = {k: round(v, 2) for k, v in totals.items()}
+    servings = max(recipe.servings, 1)
+    per_serving = {k: round(v / servings, 2) for k, v in totals.items()}
+
+    return RecipeOut(
+        id=recipe.id,
+        name=recipe.name,
+        servings=recipe.servings,
+        prep_minutes=recipe.prep_minutes,
+        instructions=recipe.instructions,
+        ingredients=ingredients_out,
+        totals=NutritionTotals(**totals),
+        totals_per_serving=NutritionTotals(**per_serving),
+    )
+
+
+@router.post("", status_code=201)
+async def create_recipe(
+    body: RecipeIn,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> RecipeOut:
+    recipe = Recipe(
+        user_id=user_id,
+        name=body.name,
+        servings=body.servings,
+        prep_minutes=body.prep_minutes,
+        instructions=body.instructions,
+    )
+    session.add(recipe)
+    await session.flush()
+
+    for item in body.ingredients:
+        session.add(
+            RecipeIngredient(recipe_id=recipe.id, food_id=item.food_id, grams=item.grams)
+        )
+
+    await session.commit()
+    await session.refresh(recipe)
+    return await _to_out(session, recipe)
+
+
+@router.get("")
+async def list_recipes(
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> list[RecipeSummaryOut]:
+    recipes = await session.scalars(
+        select(Recipe).where(Recipe.user_id == user_id).order_by(Recipe.created_at.desc())
+    )
+    return [
+        RecipeSummaryOut(
+            id=r.id, name=r.name, servings=r.servings, prep_minutes=r.prep_minutes
+        )
+        for r in recipes
+    ]
+
+
+@router.get("/{recipe_id}")
+async def get_recipe(
+    recipe_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> RecipeOut:
+    recipe = await _get_recipe(session, user_id, recipe_id)
+    return await _to_out(session, recipe)
+
+
+@router.patch("/{recipe_id}")
+async def update_recipe(
+    recipe_id: UUID,
+    body: RecipePatch,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> RecipeOut:
+    recipe = await _get_recipe(session, user_id, recipe_id)
+    if body.name is not None:
+        recipe.name = body.name
+    if body.servings is not None:
+        recipe.servings = body.servings
+    if body.prep_minutes is not None:
+        recipe.prep_minutes = body.prep_minutes
+    if body.instructions is not None:
+        recipe.instructions = body.instructions
+    await session.commit()
+    await session.refresh(recipe)
+    return await _to_out(session, recipe)
+
+
+@router.delete("/{recipe_id}", status_code=204)
+async def delete_recipe(
+    recipe_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    recipe = await _get_recipe(session, user_id, recipe_id)
+    await session.delete(recipe)
+    await session.commit()
+
+
+@router.post("/{recipe_id}/ingredients", status_code=201)
+async def add_ingredient(
+    recipe_id: UUID,
+    body: RecipeIngredientIn,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> RecipeOut:
+    recipe = await _get_recipe(session, user_id, recipe_id)
+    session.add(RecipeIngredient(recipe_id=recipe.id, food_id=body.food_id, grams=body.grams))
+    await session.commit()
+    await session.refresh(recipe)
+    return await _to_out(session, recipe)
+
+
+@router.patch("/{recipe_id}/ingredients/{ingredient_id}")
+async def update_ingredient(
+    recipe_id: UUID,
+    ingredient_id: UUID,
+    body: RecipeIngredientIn,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> RecipeOut:
+    recipe = await _get_recipe(session, user_id, recipe_id)
+    ingredient = await session.get(RecipeIngredient, ingredient_id)
+    if ingredient is None or ingredient.recipe_id != recipe.id:
+        raise AppError(
+            "RECIPE_INGREDIENT_NOT_FOUND", "No existe ese ingrediente.", status_code=404
+        )
+    ingredient.food_id = body.food_id
+    ingredient.grams = body.grams
+    await session.commit()
+    await session.refresh(recipe)
+    return await _to_out(session, recipe)
+
+
+@router.delete("/{recipe_id}/ingredients/{ingredient_id}", status_code=204)
+async def remove_ingredient(
+    recipe_id: UUID,
+    ingredient_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    recipe = await _get_recipe(session, user_id, recipe_id)
+    ingredient = await session.get(RecipeIngredient, ingredient_id)
+    if ingredient is None or ingredient.recipe_id != recipe.id:
+        raise AppError(
+            "RECIPE_INGREDIENT_NOT_FOUND", "No existe ese ingrediente.", status_code=404
+        )
+    await session.delete(ingredient)
+    await session.commit()
+
+
+class RecipeImportIn(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/import-url", status_code=202)
+async def create_recipe_import_request(
+    body: RecipeImportIn,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> AiSessionOut:
+    """Importación de recetas desde URL (sección 20). No guarda nada
+    todavía — el resultado (vía `GET /ai/sessions/{id}`, mismo patrón de
+    polling que el resto de iafood) es una receta EN BORRADOR; el usuario
+    la revisa y la confirma llamando a `POST /recipes` normal."""
+    await require_ai_processing_consent(session, user_id)
+    try:
+        await check_and_consume_quota(user_id, scope="recipe_import")
+    except QuotaExceeded as exc:
+        raise AppError(
+            exc.code, exc.message, status_code=429, details={"reset_at": reset_at_iso()}
+        ) from exc
+
+    ai_session = await request_recipe_import(session, user_id, url=body.url)
+    return ai_session_to_out(ai_session)

@@ -13,6 +13,7 @@ from myfood.config import get_settings
 
 DIET_PLAN_QUEUE_KEY = "iafood:jobs:diet_plan"
 SMART_LOG_QUEUE_KEY = "iafood:jobs:smart_log"
+RECIPE_IMPORT_QUEUE_KEY = "iafood:jobs:recipe_import"
 
 # `socket_timeout` explícito a `None`: redis-py (desde 8.x) pone un
 # `socket_timeout=5` por defecto en el cliente async, que compite con el
@@ -55,3 +56,11 @@ async def enqueue_smart_log_job(ai_session_id: str) -> None:
 
 async def dequeue_smart_log_job(timeout_seconds: int = 5) -> str | None:
     return await dequeue_job(SMART_LOG_QUEUE_KEY, timeout_seconds)
+
+
+async def enqueue_recipe_import_job(ai_session_id: str) -> None:
+    await enqueue_job(RECIPE_IMPORT_QUEUE_KEY, ai_session_id)
+
+
+async def dequeue_recipe_import_job(timeout_seconds: int = 5) -> str | None:
+    return await dequeue_job(RECIPE_IMPORT_QUEUE_KEY, timeout_seconds)

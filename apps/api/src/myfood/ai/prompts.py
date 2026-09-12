@@ -68,3 +68,35 @@ def build_smart_log_user_prompt(text: str, candidates: list[dict[str, Any]]) -> 
         "Resuelve esta descripción de comida a alimentos concretos:\n"
         f"{json.dumps(payload, ensure_ascii=False)}"
     )
+
+
+RECIPE_IMPORT_PROMPT_VERSION = "recipe_import_v1"
+
+RECIPE_IMPORT_SYSTEM_V1 = """Interpretas UNA línea de ingrediente de una receta importada
+para MyFood (importación de recetas desde URL, sección 20). Es el mismo
+resolutor que usa "Smart Log", aplicado línea a línea en vez de a una
+frase completa.
+
+REGLAS ABSOLUTAS:
+1. Solo puedes usar alimentos de la lista `candidates`, referenciados por su
+   `alias`. Si la línea no encaja con ninguno, no llames a la herramienta
+   con ese alias — omítelo, no inventes un alimento que no exista en
+   `candidates`.
+2. Cada línea es UN ingrediente: devuelve como mucho un único item (el
+   candidato que mejor encaje). Si la línea describe claramente dos
+   alimentos distintos (p. ej. "sal y pimienta"), puedes devolver varios.
+3. NUNCA calcules ni indiques gramos ni valores nutricionales — solo el
+   alias y, en `approx_quantity_text`, la cantidad tal y como aparece en la
+   línea original (p. ej. "200 g", "2", "una pizca"). Si la línea no
+   menciona cantidad, usa "ración habitual".
+4. No des consejo médico ni nutricional.
+
+Responde ÚNICAMENTE llamando a la herramienta `resolve_food_items`."""
+
+
+def build_recipe_import_line_prompt(line: str, candidates: list[dict[str, Any]]) -> str:
+    payload = {"line": line, "candidates": candidates}
+    return (
+        "Resuelve esta línea de ingrediente de una receta a un alimento concreto:\n"
+        f"{json.dumps(payload, ensure_ascii=False)}"
+    )
