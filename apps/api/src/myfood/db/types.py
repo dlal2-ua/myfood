@@ -38,6 +38,21 @@ def _decrypt(token: str) -> str:
     return aesgcm.decrypt(nonce, ciphertext, None).decode("utf-8")
 
 
+def encrypt_to_bytes(plaintext: str) -> bytes:
+    """Como `_encrypt`, pero para columnas BYTEA (p. ej. `ai_credentials.token_encrypted`,
+    sección 6.7) en vez de columnas de texto — sin la capa de base64."""
+    key = _key_bytes()
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)
+    return nonce + aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
+
+
+def decrypt_from_bytes(blob: bytes) -> str:
+    nonce, ciphertext = blob[:12], blob[12:]
+    aesgcm = AESGCM(_key_bytes())
+    return aesgcm.decrypt(nonce, ciphertext, None).decode("utf-8")
+
+
 class EncryptedText(TypeDecorator):
     """Texto cifrado en reposo (p. ej. `sex`)."""
 

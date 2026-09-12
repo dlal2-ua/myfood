@@ -41,6 +41,10 @@ class Settings(BaseSettings):
 
     iafood_enabled: bool = True
     iafood_model: str = "claude-sonnet-4-6"
+    # Límites de uso (10.1/24.5) — fichero mutable vía /admin/ai/limits,
+    # mismo patrón que `coach.json` en openGym. No es la credencial (esa
+    # vive cifrada en `ai_credentials`, nunca en disco).
+    iafood_config_path: str = "/data/config/iafood.json"
 
     whisper_base_url: str = "http://whisper:9000"
     whisper_model: str = "medium"
