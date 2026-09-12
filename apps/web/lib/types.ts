@@ -357,3 +357,15 @@ export interface AiProposal {
   rationale: string | null;
   status: AiProposalStatus;
 }
+
+export interface SmartLogItem {
+  food_id: string;
+  name_es: string;
+  grams: number;
+  approx_quantity_text: string;
+}
+
+export interface SmartLogResult {
+  items: SmartLogItem[];
+  warning: string | null;
+}

@@ -17,9 +17,12 @@ de `BRPOP` que ya usaba este módulo."""
 
 from myfood.ai.queue import (
     DIET_PLAN_QUEUE_KEY,
+    SMART_LOG_QUEUE_KEY,
     _redis,
     dequeue_diet_plan_job,
+    dequeue_smart_log_job,
     enqueue_diet_plan_job,
+    enqueue_smart_log_job,
 )
 
 
@@ -67,3 +70,32 @@ async def test_dequeue_returns_none_when_brpop_times_out(monkeypatch):
     result = await dequeue_diet_plan_job(timeout_seconds=1)
 
     assert result is None
+
+
+async def test_smart_log_queue_uses_its_own_key(monkeypatch):
+    """Cada tipo de sesión tiene su propia cola — un trabajo de Smart Log
+    no debe acabar en la cola de planes de dieta ni viceversa."""
+    captured = {}
+
+    async def _fake_lpush(key, value):
+        captured["key"] = key
+        captured["value"] = value
+
+    monkeypatch.setattr(_redis, "lpush", _fake_lpush)
+
+    await enqueue_smart_log_job("test-smart-log-id")
+
+    assert captured == {"key": SMART_LOG_QUEUE_KEY, "value": "test-smart-log-id"}
+    assert SMART_LOG_QUEUE_KEY != DIET_PLAN_QUEUE_KEY
+
+
+async def test_dequeue_smart_log_parses_a_real_brpop_result(monkeypatch):
+    async def _fake_brpop(keys, timeout):
+        assert keys == [SMART_LOG_QUEUE_KEY]
+        return (SMART_LOG_QUEUE_KEY, "some-smart-log-id")
+
+    monkeypatch.setattr(_redis, "brpop", _fake_brpop)
+
+    result = await dequeue_smart_log_job(timeout_seconds=1)
+
+    assert result == "some-smart-log-id"

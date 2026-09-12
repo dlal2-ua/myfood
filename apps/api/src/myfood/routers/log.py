@@ -7,6 +7,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from myfood.ai.consent import require_ai_processing_consent
+from myfood.ai.flows.smart_log import request_smart_log
+from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
+from myfood.ai.schemas import AiSessionOut, ai_session_to_out
 from myfood.db.models import Food, FoodLog, FoodNutrient
 from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
@@ -212,3 +216,30 @@ async def copy_day(
     for c in copies:
         await session.refresh(c)
     return [_to_out(c) for c in copies]
+
+
+class SmartLogIn(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/smart", status_code=202)
+async def create_smart_log_request(
+    body: SmartLogIn,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> AiSessionOut:
+    """Registro por lenguaje natural, "Smart Log" (sección 10.8). No guarda
+    nada todavía — el resultado (vía `GET /ai/sessions/{id}`, mismo patrón
+    de polling que el resto de iafood) es una lista de alimentos
+    propuestos; el usuario los revisa, ajusta gramos y confirma llamando a
+    `POST /log/food` normal por cada uno."""
+    await require_ai_processing_consent(session, user_id)
+    try:
+        await check_and_consume_quota(user_id, scope="smart_log")
+    except QuotaExceeded as exc:
+        raise AppError(
+            exc.code, exc.message, status_code=429, details={"reset_at": reset_at_iso()}
+        ) from exc
+
+    ai_session = await request_smart_log(session, user_id, text=body.text)
+    return ai_session_to_out(ai_session)

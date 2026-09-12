@@ -12,57 +12,20 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from myfood.ai.consent import require_ai_processing_consent
 from myfood.ai.flows.diet_plan import request_diet_plan
 from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
-from myfood.db.models import AiProposal, AiSession, Consent, DietPlan, PlanDay, PlanItem, PlanMeal
+from myfood.ai.schemas import AiSessionOut, ai_session_to_out
+from myfood.db.models import AiProposal, AiSession, DietPlan, PlanDay, PlanItem, PlanMeal
 from myfood.deps import get_current_user_id, get_db
 from myfood.domain.food_candidates import compute_alternatives_for_item
 from myfood.errors import AppError
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
-AI_PROCESSING_CONSENT_KIND = "ai_processing"
-
-
-async def _require_ai_processing_consent(session: AsyncSession, user_id: UUID) -> None:
-    consent = await session.scalar(
-        select(Consent).where(
-            Consent.user_id == user_id,
-            Consent.kind == AI_PROCESSING_CONSENT_KIND,
-            Consent.revoked_at.is_(None),
-        )
-    )
-    if consent is None:
-        raise AppError(
-            "AI_CONSENT_REQUIRED",
-            "Debes aceptar el consentimiento de procesamiento con IA "
-            "(POST /consents con kind='ai_processing') antes de usar iafood.",
-            status_code=403,
-        )
-
 
 class RequestDietPlanIn(BaseModel):
     num_days: int = Field(default=7, ge=1, le=7)
-
-
-class AiSessionOut(BaseModel):
-    id: UUID
-    kind: str
-    status: str
-    attempts: int
-    response_payload: dict | None
-    validation_errors: list | None
-
-
-def _session_to_out(ai_session: AiSession) -> AiSessionOut:
-    return AiSessionOut(
-        id=ai_session.id,
-        kind=ai_session.kind,
-        status=ai_session.status,
-        attempts=ai_session.attempts,
-        response_payload=ai_session.response_payload,
-        validation_errors=ai_session.validation_errors,
-    )
 
 
 @router.post("/diet-plan", status_code=202)
@@ -71,7 +34,7 @@ async def create_diet_plan_request(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> AiSessionOut:
-    await _require_ai_processing_consent(session, user_id)
+    await require_ai_processing_consent(session, user_id)
     try:
         await check_and_consume_quota(user_id)
     except QuotaExceeded as exc:
@@ -80,7 +43,7 @@ async def create_diet_plan_request(
         ) from exc
 
     ai_session = await request_diet_plan(session, user_id, num_days=body.num_days)
-    return _session_to_out(ai_session)
+    return ai_session_to_out(ai_session)
 
 
 async def _get_owned_session(session: AsyncSession, user_id: UUID, session_id: UUID) -> AiSession:
@@ -97,7 +60,7 @@ async def get_session_status(
     session: AsyncSession = Depends(get_db),
 ) -> AiSessionOut:
     ai_session = await _get_owned_session(session, user_id, session_id)
-    return _session_to_out(ai_session)
+    return ai_session_to_out(ai_session)
 
 
 class AiProposalOut(BaseModel):
