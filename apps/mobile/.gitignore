@@ -1,0 +1,9 @@
+node_modules/
+
+# Android (patrón oficial de plantillas de Capacitor)
+android/**/build/
+android/.gradle/
+android/local.properties
+android/captures/
+android/*.iml
+android/.idea/
