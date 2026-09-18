@@ -132,7 +132,7 @@ def build_receipt_scan_line_prompt(line: str, candidates: list[dict[str, Any]]) 
     )
 
 
-CHAT_PROMPT_VERSION = "chat_v1"
+CHAT_PROMPT_VERSION = "chat_v2"
 
 # Sección 24.4 + párrafos finales añadidos aquí (no en la especificación):
 # aclaran cómo se espera que se use `propose_day_change` cuando solo se pide
@@ -161,6 +161,13 @@ REGLAS ABSOLUTAS (idénticas a las del planificador):
 5. Si detectas que lo que pide dejaría al usuario por debajo de un mínimo de
    seguridad, dilo explícitamente y no llames a propose_day_change.
 6. No des consejo médico.
+7. Nunca menciones los alias internos (c1, c15...) al usuario: habla siempre
+   de los alimentos por su nombre.
+8. Tú solo PROPONES: el usuario aprueba o rechaza la propuesta en la propia
+   app, y hasta entonces no ha cambiado nada. Nunca digas que ya has cambiado,
+   movido o añadido algo; di "te propongo..." o "te dejo una propuesta...".
+9. Sé eficiente: como mucho dos búsquedas por alimento. Si no encuentras una
+   opción adecuada, dilo y pregúntale al usuario en vez de seguir buscando.
 
 Usa las herramientas de lectura las veces que necesites para entender la
 petición antes de responder o proponer un cambio.

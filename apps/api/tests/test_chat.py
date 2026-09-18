@@ -1055,3 +1055,13 @@ async def test_day_change_is_refused_when_the_day_has_a_batch_cooking_recipe(
         )
         await session.execute(text("DELETE FROM recipes WHERE id = :r"), {"r": str(recipe_id)})
         await session.commit()
+
+
+def test_system_prompt_forbids_leaking_aliases_and_claiming_changes_are_applied():
+    """Encontrado en las pruebas reales: el modelo decía «(c15)» al usuario y
+    «He movido el pollo a la cena» cuando solo había una propuesta pendiente."""
+    from myfood.ai.prompts import CHAT_SYSTEM_V1
+
+    assert "Nunca menciones los alias internos" in CHAT_SYSTEM_V1
+    assert "Tú solo PROPONES" in CHAT_SYSTEM_V1
+    assert "Nunca digas que ya has cambiado" in CHAT_SYSTEM_V1
