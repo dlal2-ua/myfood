@@ -11,8 +11,9 @@ from myfood.ai.consent import require_ai_processing_consent
 from myfood.ai.flows.smart_log import request_smart_log
 from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
 from myfood.ai.schemas import AiSessionOut, ai_session_to_out
-from myfood.db.models import Food, FoodLog, FoodNutrient
+from myfood.db.models import Food, FoodLog, FoodNutrient, Profile
 from myfood.deps import get_current_user_id, get_db
+from myfood.domain import micronutrients
 from myfood.errors import AppError
 
 router = APIRouter(prefix="/log", tags=["log"])
@@ -180,6 +181,54 @@ async def get_day_log(
         carbs_g=round(sum(float(e.carbs_g) for e in entries), 2),
     )
     return LogDayOut(date=date, food=[_to_out(e) for e in entries], totals=totals)
+
+
+class MicronutrientOut(BaseModel):
+    key: str
+    label: str
+    amount: float
+    unit: str
+    reference: float
+    pct_of_reference: float
+
+
+class MicronutrientsDayOut(BaseModel):
+    date: date
+    nutrients: list[MicronutrientOut]
+
+
+@router.get("/micronutrients")
+async def get_day_micronutrients(
+    date: date,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> MicronutrientsDayOut:
+    """Seguimiento completo de micronutrientes (Fase 7, no solo macros):
+    suma lo que ya llevan registrado los `food_log` del día (snapshot
+    congelado al registrar, R9) y lo compara contra valores de referencia
+    poblacionales (EFSA), ajustados por sexo cuando el perfil lo tiene."""
+    entries = await session.scalars(
+        select(FoodLog).where(FoodLog.user_id == user_id, FoodLog.log_date == date)
+    )
+    totals = micronutrients.sum_micros([e.micros for e in entries])
+
+    profile = await session.get(Profile, user_id)
+    reference = micronutrients.reference_for_sex(profile.sex if profile else None)
+
+    nutrients = [
+        MicronutrientOut(
+            key=key,
+            label=micronutrients.NUTRIENT_LABELS.get(key, key),
+            amount=totals.get(key, 0.0),
+            unit=key.rsplit("_", 1)[-1],
+            reference=ref_value,
+            pct_of_reference=round((totals.get(key, 0.0) / ref_value) * 100, 1)
+            if ref_value
+            else 0.0,
+        )
+        for key, ref_value in reference.items()
+    ]
+    return MicronutrientsDayOut(date=date, nutrients=nutrients)
 
 
 @router.post("/copy-day", status_code=201)
