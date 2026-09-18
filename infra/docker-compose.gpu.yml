@@ -7,9 +7,19 @@
 # Uso:
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 #
+# En el Servidor Principal esto ya está fijado con
+# `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` en `infra/.env`
+# (fuera del repo), así que un `docker compose up -d` normal usa la GPU.
+# Cuidado: un `-f` explícito gana a COMPOSE_FILE — `docker compose -f
+# docker-compose.yml up` devuelve whisper a CPU sin avisar.
+#
 # Si el host no tiene el toolkit (o el driver está roto), NO se aplica este
 # override — `docker compose up` con solo `docker-compose.yml` funciona en
 # modo CPU sin más cambios (criterio de aceptación de la Fase 8).
+#
+# El healthcheck de whisper solo comprueba que /docs responde: no detecta un
+# fallo de inferencia (p. ej. CUDA out of memory devuelve 500 en /asr con el
+# contenedor todavía "healthy").
 ########################################################################
 services:
   whisper:
@@ -17,6 +27,11 @@ services:
     environment:
       ASR_ENGINE: faster_whisper
       ASR_MODEL: ${WHISPER_MODEL:-medium}
+      # La GTX 1060 (compute 6.1) solo admite float32/int8 en CTranslate2 (sin
+      # float16). float32 es el valor por defecto en GPU y ocupa ~4 GB de los
+      # 6 GB, que se comparten con immich_machine_learning. Volver a float32:
+      # WHISPER_QUANTIZATION=float32 en .env.
+      ASR_QUANTIZATION: ${WHISPER_QUANTIZATION:-int8}
     deploy:
       resources:
         reservations:
