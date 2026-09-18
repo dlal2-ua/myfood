@@ -10,6 +10,7 @@ from myfood.routers import (
     diet_plans,
     favorites,
     foods,
+    gamification,
     health,
     household,
     log,
@@ -43,6 +44,7 @@ app.include_router(restrictions.router, prefix="/api")
 app.include_router(shopping_list.router, prefix="/api")
 app.include_router(pantry.router, prefix="/api")
 app.include_router(household.router, prefix="/api")
+app.include_router(gamification.router, prefix="/api")
 app.include_router(privacy.router, prefix="/api")
 app.include_router(supplements.router, prefix="/api")
 app.include_router(water.router, prefix="/api")

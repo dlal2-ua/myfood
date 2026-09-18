@@ -37,6 +37,7 @@ export function NavBar({ user }: { user: CurrentUser | null }) {
             <Link href="/shopping-list">Lista de la compra</Link>
             <Link href="/pantry">Despensa</Link>
             <Link href="/household">Hogar</Link>
+            <Link href="/progress">Progreso</Link>
             <Link href="/supplements">Suplementos</Link>
             <Link href="/diet-plans">Planes</Link>
             <Link href="/recipes">Recetas</Link>
