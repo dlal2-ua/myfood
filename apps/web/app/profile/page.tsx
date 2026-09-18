@@ -388,6 +388,11 @@ export default function ProfilePage() {
               Objetivo calórico: <span className="font-semibold text-current">{targets.kcal} kcal/día</span>{" "}
               · Agua: {targets.water_ml} ml
             </p>
+            <p className="mt-1 text-xs text-neutral-400">
+              {targets.source === "adaptive_tdee"
+                ? "Calculado con tu TDEE adaptativo (tendencia real de peso e ingesta de las últimas 2 semanas)."
+                : "Calculado con la fórmula de Mifflin-St Jeor. Pasará a tu TDEE adaptativo en cuanto tengas ≥10 días de registro en las últimas 2 semanas."}
+            </p>
             {targets.warnings.length > 0 && (
               <ul className="mt-1 list-disc pl-5 text-xs text-amber-600">
                 {targets.warnings.map((w) => (
