@@ -4,6 +4,7 @@ auditar qué instrucciones produjeron un plan concreto si se cambian más
 adelante."""
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
 DIET_PLAN_PROMPT_VERSION = "diet_plan_v1"
@@ -133,17 +134,18 @@ def build_receipt_scan_line_prompt(line: str, candidates: list[dict[str, Any]]) 
 
 CHAT_PROMPT_VERSION = "chat_v1"
 
-# Sección 24.4 + un párrafo final añadido aquí (no en la especificación):
-# aclara cómo se espera que se use `propose_day_change` cuando solo se pide
+# Sección 24.4 + párrafos finales añadidos aquí (no en la especificación):
+# aclaran cómo se espera que se use `propose_day_change` cuando solo se pide
 # cambiar UNA comida del día — el validador (`chat/flow.py`) reutiliza
 # `solve_day_with_fixed_items`/`validate_day_totals` igual que el resto de
 # iafood, que trabajan sobre el día completo, así que Claude debe incluir
-# las comidas no tocadas también (buscándolas de nuevo) en vez de mandar
-# solo la comida que cambia. A diferencia del resto de prompts de este
-# fichero, el turno de usuario NO lleva un payload JSON de candidatos
-# precargado: es el propio Claude quien decide qué herramientas de lectura
-# llamar (`read_pantry`, `search_foods`, `read_plan_day`) antes de
-# responder, porque la conversación es abierta (sección 24.2).
+# las comidas no tocadas también (con los alias que ya devuelve
+# `read_plan_day`) en vez de mandar solo la comida que cambia. A diferencia
+# del resto de prompts de este fichero, el turno de usuario NO lleva un
+# payload JSON de candidatos precargado: es el propio Claude quien decide qué
+# herramientas de lectura llamar (`read_pantry`, `search_foods`,
+# `read_plan_day`) antes de responder, porque la conversación es abierta
+# (sección 24.2).
 CHAT_SYSTEM_V1 = """Eres el asistente conversacional de MyFood. El usuario te habla en lenguaje
 natural sobre su comida, su despensa o su plan.
 
@@ -164,11 +166,33 @@ Usa las herramientas de lectura las veces que necesites para entender la
 petición antes de responder o proponer un cambio.
 
 Si propones un cambio con propose_day_change, incluye TODAS las comidas del
-día en `meals` — para las que no cambias, vuelve a buscar con search_foods
-los mismos alimentos que ya tenía (puedes verlos con read_plan_day) y
-referéncialos igual; el sistema recalcula gramos de todo el día a la vez
-para que kcal y macros sigan cuadrando."""
+día en `meals`. read_plan_day te devuelve un alias por cada alimento que ya
+está en el plan: para las comidas que no cambias, reutiliza esos mismos alias
+(no hace falta volver a buscarlos); solo usa search_foods para los alimentos
+nuevos. El sistema recalcula los gramos de todo el día a la vez para que kcal y
+macros sigan cuadrando.
+
+Si la petición es ambigua y el usuario ya te respondió a una pregunta
+aclaratoria en la conversación reciente, no vuelvas a preguntar lo mismo:
+úsala."""
 
 
-def build_chat_user_prompt(text: str) -> str:
-    return text
+_HISTORY_ITEM_MAX_CHARS = 1500
+
+
+def build_chat_user_prompt(text: str, history: Sequence[tuple[str, str]] = ()) -> str:
+    """`history`: mensajes recientes de la conversación (rol, contenido), del
+    más antiguo al más reciente. Sin él el modelo no recuerda su propia
+    pregunta aclaratoria ("¿en qué comida?") ni la respuesta del usuario —
+    encontrado en la primera prueba real del chat: cada mensaje se trataba
+    como una conversación nueva."""
+    if not history:
+        return text
+    lines = "\n".join(
+        f"{'Usuario' if role == 'user' else 'Asistente'}: {content[:_HISTORY_ITEM_MAX_CHARS]}"
+        for role, content in history
+    )
+    return (
+        f"Conversación reciente (solo como contexto):\n{lines}\n\n"
+        f"Mensaje actual del usuario (responde a este):\n{text}"
+    )

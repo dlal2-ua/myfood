@@ -17,10 +17,11 @@ proveedor externo) hasta agotar ese timeout.
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai import client as ai_client
@@ -45,6 +46,10 @@ from myfood.domain.quantity_text import resolve_grams
 from myfood.errors import AppError
 
 _MAX_AUDIO_BYTES = 15 * 1024 * 1024
+# Contexto de conversación que se le da al modelo: sin él cada mensaje es una
+# conversación nueva (no recuerda sus propias preguntas aclaratorias).
+_HISTORY_MAX_MESSAGES = 10
+_HISTORY_MAX_AGE = timedelta(hours=6)
 
 
 async def request_chat_message(
@@ -92,6 +97,21 @@ async def request_chat_message(
     return ai_session
 
 
+async def _recent_history(session: AsyncSession, user_id: UUID) -> list[tuple[str, str]]:
+    rows = (
+        await session.scalars(
+            select(ChatMessage)
+            .where(
+                ChatMessage.user_id == user_id,
+                ChatMessage.created_at >= datetime.now(UTC) - _HISTORY_MAX_AGE,
+            )
+            .order_by(ChatMessage.created_at.desc())
+            .limit(_HISTORY_MAX_MESSAGES)
+        )
+    ).all()
+    return [(m.role, m.content) for m in reversed(rows)]
+
+
 async def _latest_weight_kg(session: AsyncSession, user_id: UUID) -> float | None:
     stmt = (
         select(BodyMeasurement)
@@ -133,6 +153,26 @@ async def _build_day_change_proposal(
     day_index = (target_date - plan.start_date).days
     if day_index < 0 or (plan.end_date is not None and target_date > plan.end_date):
         return None, "Esa fecha no está dentro de tu plan activo."
+
+    has_recipe_item = await session.scalar(
+        sql_text("""
+            SELECT 1 FROM plan_items pi
+            JOIN plan_meals pm ON pm.id = pi.plan_meal_id
+            JOIN plan_days pd ON pd.id = pm.plan_day_id
+            WHERE pd.plan_id = :plan_id AND pd.day_index = :day_index
+              AND pi.recipe_id IS NOT NULL
+            LIMIT 1
+        """),
+        {"plan_id": str(plan.id), "day_index": day_index},
+    )
+    if has_recipe_item:
+        # Aprobar un cambio de día sustituye todas sus comidas: una receta de
+        # batch cooking no es un alimento que el modelo pueda referenciar, así
+        # que se perdería sin avisar.
+        return None, (
+            "Ese día incluye una receta de batch cooking y no puedo cambiarlo desde el chat "
+            "sin perderla. Puedes modificarlo desde la pantalla del plan."
+        )
 
     meal_types = [meal.get("meal_type") for meal in args.get("meals", [])]
     alias_to_food_id = {alias: candidate.id for alias, candidate in turn.alias_to_candidate.items()}
@@ -290,6 +330,8 @@ async def process_chat_job(ai_session_id: str) -> None:
         else:
             message_text = ai_session.request_payload["text"]
 
+        # Antes de guardar el mensaje actual, para que no aparezca dos veces.
+        history = await _recent_history(session, user_id)
         session.add(
             ChatMessage(
                 user_id=user_id,
@@ -312,7 +354,7 @@ async def process_chat_job(ai_session_id: str) -> None:
             return
 
         try:
-            turn = await run_chat_turn(session, user_id, token, message_text)
+            turn = await run_chat_turn(session, user_id, token, message_text, history)
         except AiAgentError as exc:
             ai_session.status = "failed"
             ai_session.validation_errors = [{"code": exc.code, "message": str(exc)}]

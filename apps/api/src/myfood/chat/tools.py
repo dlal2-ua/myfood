@@ -44,6 +44,18 @@ ADD_TO_PANTRY_TOOL_NAME = "add_to_pantry"
 _MEAL_TYPES = ["breakfast", "morning_snack", "lunch", "afternoon_snack", "dinner", "supper"]
 
 
+def _alias_for(alias_map: dict[str, CandidateFood], candidate: CandidateFood) -> str:
+    """Alias efímero del alimento; si ya tiene uno en este turno (porque salió
+    antes en `search_foods` o en `read_plan_day`) se reutiliza en vez de crear
+    un duplicado, para que el modelo vea siempre el mismo `cN` por alimento."""
+    for alias, existing in alias_map.items():
+        if existing.id == candidate.id:
+            return alias
+    alias = f"c{len(alias_map) + 1}"
+    alias_map[alias] = candidate
+    return alias
+
+
 def _build_read_pantry_tool(session: AsyncSession, user_id: UUID) -> SdkMcpTool[Any]:
     @tool(
         READ_PANTRY_TOOL_NAME,
@@ -111,15 +123,17 @@ def _build_search_foods_tool(
 
         candidates_out = []
         for row in rows:
-            alias = f"c{len(alias_map) + 1}"
-            alias_map[alias] = CandidateFood(
-                id=str(row.id),
-                name_es=row.name_es,
-                kcal_100g=float(row.kcal_100g),
-                protein_100g=float(row.protein_100g),
-                fat_100g=float(row.fat_100g),
-                carbs_100g=float(row.carbs_100g),
-                category=row.category,
+            alias = _alias_for(
+                alias_map,
+                CandidateFood(
+                    id=str(row.id),
+                    name_es=row.name_es,
+                    kcal_100g=float(row.kcal_100g),
+                    protein_100g=float(row.protein_100g),
+                    fat_100g=float(row.fat_100g),
+                    carbs_100g=float(row.carbs_100g),
+                    category=row.category,
+                ),
             )
             candidates_out.append({"id": alias, "name": row.name_es, "category": row.category})
         text_out = json.dumps({"candidates": candidates_out}, ensure_ascii=False)
@@ -135,7 +149,9 @@ _READ_PLAN_DAY_SCHEMA: dict[str, Any] = {
 }
 
 
-def _build_read_plan_day_tool(session: AsyncSession, user_id: UUID) -> SdkMcpTool[Any]:
+def _build_read_plan_day_tool(
+    session: AsyncSession, user_id: UUID, alias_map: dict[str, CandidateFood]
+) -> SdkMcpTool[Any]:
     @tool(
         READ_PLAN_DAY_TOOL_NAME,
         "Lee las comidas planeadas para una fecha concreta.",
@@ -165,12 +181,14 @@ def _build_read_plan_day_tool(session: AsyncSession, user_id: UUID) -> SdkMcpToo
         rows = (
             await session.execute(
                 text("""
-                    SELECT pm.meal_type, pm.sort_order, f.name_es AS food_name,
-                           r.name AS recipe_name, pi.grams
+                    SELECT pm.meal_type, pm.sort_order, pi.food_id, f.name_es AS food_name,
+                           f.category, fn.kcal_100g, fn.protein_100g, fn.fat_100g,
+                           fn.carbs_100g, r.name AS recipe_name, pi.grams
                     FROM plan_days pd
                     JOIN plan_meals pm ON pm.plan_day_id = pd.id
                     JOIN plan_items pi ON pi.plan_meal_id = pm.id
                     LEFT JOIN foods f ON f.id = pi.food_id
+                    LEFT JOIN food_nutrients fn ON fn.food_id = pi.food_id
                     LEFT JOIN recipes r ON r.id = pi.recipe_id
                     WHERE pd.plan_id = :plan_id AND pd.day_index = :day_index
                     ORDER BY pm.sort_order
@@ -182,7 +200,31 @@ def _build_read_plan_day_tool(session: AsyncSession, user_id: UUID) -> SdkMcpToo
         meals: dict[str, list[dict]] = {}
         for row in rows:
             meal_items = meals.setdefault(row.meal_type, [])
-            meal_items.append({"name": row.food_name or row.recipe_name, "grams": float(row.grams)})
+            if row.food_id is None:
+                # Receta de batch cooking: no es un alimento y no se puede
+                # referenciar por alias (el validador de cambios de día la
+                # protege, ver `chat/flow.py`).
+                meal_items.append(
+                    {"name": row.recipe_name, "grams": float(row.grams), "is_recipe": True}
+                )
+                continue
+            # Alias del alimento que YA está en el plan: así, para las comidas
+            # que no cambia, el modelo los reutiliza en `propose_day_change` en
+            # vez de tener que volver a buscar cada uno con `search_foods`
+            # (con 5 llamadas por turno no llegaba en un día con 6 alimentos).
+            alias = _alias_for(
+                alias_map,
+                CandidateFood(
+                    id=str(row.food_id),
+                    name_es=row.food_name,
+                    kcal_100g=float(row.kcal_100g),
+                    protein_100g=float(row.protein_100g),
+                    fat_100g=float(row.fat_100g),
+                    carbs_100g=float(row.carbs_100g),
+                    category=row.category,
+                ),
+            )
+            meal_items.append({"alias": alias, "name": row.food_name, "grams": float(row.grams)})
 
         return {
             "content": [
@@ -285,7 +327,7 @@ def build_chat_tools(
     return [
         _build_read_pantry_tool(session, user_id),
         _build_search_foods_tool(session, user_id, alias_map),
-        _build_read_plan_day_tool(session, user_id),
+        _build_read_plan_day_tool(session, user_id, alias_map),
         _build_propose_day_change_tool(day_change_sink),
         _build_add_to_pantry_tool(pantry_sink),
     ]

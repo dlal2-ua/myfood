@@ -11,6 +11,7 @@ invoca `ai/agent.run_agent`.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -36,7 +37,11 @@ class ChatTurnResult:
 
 
 async def run_chat_turn(
-    session: AsyncSession, user_id: UUID, token: str, user_text: str
+    session: AsyncSession,
+    user_id: UUID,
+    token: str,
+    user_text: str,
+    history: Sequence[tuple[str, str]] = (),
 ) -> ChatTurnResult:
     alias_map: dict[str, CandidateFood] = {}
     day_change_sink: list[dict] = []
@@ -52,7 +57,7 @@ async def run_chat_turn(
 
     agent_result: AgentResult = await run_agent(
         token=token,
-        prompt=build_chat_user_prompt(user_text),
+        prompt=build_chat_user_prompt(user_text, history),
         system_prompt=CHAT_SYSTEM_V1,
         mcp_tools=tools,
         max_turns=MAX_TOOL_CALLS_PER_TURN,

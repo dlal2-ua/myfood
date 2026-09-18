@@ -17,9 +17,11 @@ import pytest_asyncio
 from sqlalchemy import select, text
 
 from myfood.ai import client as ai_client
+from myfood.ai.prompts import build_chat_user_prompt
 from myfood.ai.queue import pop_chat_audio, store_chat_audio
 from myfood.chat import flow
 from myfood.chat.agent_loop import ChatTurnResult
+from myfood.chat.tools import build_chat_tools
 from myfood.chat.transcribe import TranscriptionUnavailable, transcribe
 from myfood.db.models import AiProposal, AiSession, BodyMeasurement, ChatMessage, DietPlan, Profile
 from myfood.db.session import AdminSessionLocal
@@ -397,7 +399,7 @@ def _fake_turn(**overrides):
     )
     defaults.update(overrides)
 
-    async def _fake_run_chat_turn(session, user_id, token, user_text):
+    async def _fake_run_chat_turn(session, user_id, token, user_text, history=()):
         return ChatTurnResult(**defaults)
 
     return _fake_run_chat_turn
@@ -854,3 +856,202 @@ async def test_store_and_pop_chat_audio_round_trips_once():
 
     # Una segunda lectura ya no encuentra nada — nunca se persiste dos veces.
     assert await pop_chat_audio(session_id) is None
+
+
+# --- historial de conversación (encontrado en la primera prueba real) ---------
+
+
+def test_prompt_without_history_is_just_the_message():
+    assert build_chat_user_prompt("hola") == "hola"
+
+
+def test_prompt_with_history_includes_it_oldest_first_and_marks_current_message():
+    prompt = build_chat_user_prompt(
+        "el de lata",
+        [("user", "cámbiame la cena, tengo salmón"), ("assistant", "¿Cuál de estos salmones?")],
+    )
+    assert prompt.index("Usuario: cámbiame la cena") < prompt.index("Asistente: ¿Cuál")
+    assert prompt.endswith("Mensaje actual del usuario (responde a este):\nel de lata")
+
+
+def test_prompt_truncates_very_long_history_items():
+    prompt = build_chat_user_prompt("x", [("assistant", "a" * 5000)])
+    assert "a" * 1500 in prompt
+    assert "a" * 1501 not in prompt
+
+
+async def test_process_chat_job_passes_recent_history_but_not_the_current_message(
+    two_users, configured_credential, monkeypatch
+):
+    from datetime import UTC, datetime, timedelta
+
+    user_id, _ = two_users
+    captured = {}
+
+    async def _capturing_turn(session, user_id, token, user_text, history=()):
+        captured["history"] = list(history)
+        captured["user_text"] = user_text
+        return ChatTurnResult(text="ok", day_change_args=None, pantry_args=None)
+
+    monkeypatch.setattr(flow, "run_chat_turn", _capturing_turn)
+    monkeypatch.setattr(flow, "push_chat_result", _fake_push({}))
+
+    now = datetime.now(UTC)
+    async with AdminSessionLocal() as session:
+        session.add_all(
+            [
+                # Demasiado viejo (fuera de la ventana de contexto): no debe pasar.
+                ChatMessage(user_id=user_id, role="user", content="de ayer", source="text",
+                            created_at=now - timedelta(hours=30)),
+                ChatMessage(user_id=user_id, role="user", content="cámbiame la cena",
+                            source="text", created_at=now - timedelta(minutes=5)),
+                ChatMessage(user_id=user_id, role="assistant", content="¿cuál salmón?",
+                            source="text", created_at=now - timedelta(minutes=4)),
+            ]
+        )
+        ai_session = _running_ai_session(user_id, {"source": "text", "text": "el de lata"})
+        session.add(ai_session)
+        await session.commit()
+        await session.refresh(ai_session)
+        session_id = ai_session.id
+
+    await flow.process_chat_job(str(session_id))
+
+    assert captured["user_text"] == "el de lata"
+    assert captured["history"] == [
+        ("user", "cámbiame la cena"),
+        ("assistant", "¿cuál salmón?"),
+    ]
+
+
+# --- read_plan_day devuelve alias reutilizables ---------------------------------
+
+
+async def _seed_day_meals(plan_id, food_ids_by_meal):
+    async with AdminSessionLocal() as session:
+        day_id = (
+            await session.execute(
+                text("SELECT id FROM plan_days WHERE plan_id = :p AND day_index = 0"),
+                {"p": str(plan_id)},
+            )
+        ).scalar_one()
+        for order, (meal_type, items) in enumerate(food_ids_by_meal.items()):
+            meal_id = uuid.uuid4()
+            await session.execute(
+                text(
+                    "INSERT INTO plan_meals (id, plan_day_id, meal_type, sort_order) "
+                    "VALUES (:id, :d, :t, :o)"
+                ),
+                {"id": str(meal_id), "d": str(day_id), "t": meal_type, "o": order},
+            )
+            for food_id, grams in items:
+                await session.execute(
+                    text(
+                        "INSERT INTO plan_items (id, plan_meal_id, food_id, grams) "
+                        "VALUES (:id, :m, :f, :g)"
+                    ),
+                    {"id": str(uuid.uuid4()), "m": str(meal_id), "f": str(food_id), "g": grams},
+                )
+        await session.commit()
+
+
+async def test_read_plan_day_returns_reusable_aliases_and_never_real_ids(
+    active_plan, four_real_foods
+):
+    import json
+
+    plan_id, user_id = active_plan
+    await _seed_day_meals(
+        plan_id,
+        {
+            "lunch": [(four_real_foods["c1"], 150), (four_real_foods["c2"], 200)],
+            "dinner": [(four_real_foods["c1"], 120)],  # el mismo alimento en dos comidas
+        },
+    )
+    alias_map: dict = {}
+    async with AdminSessionLocal() as session:
+        tools = build_chat_tools(
+            session, user_id, alias_map=alias_map, day_change_sink=[], pantry_sink=[]
+        )
+        read_plan_day = next(t for t in tools if t.name == "read_plan_day")
+        result = await read_plan_day.handler({"date": date.today().isoformat()})
+
+    body = json.loads(result["content"][0]["text"])
+    lunch = body["meals"]["lunch"]
+    dinner = body["meals"]["dinner"]
+    assert {item["name"] for item in lunch} == {
+        "Pechuga de pollo (test)",
+        "Arroz blanco cocido (test)",
+    }
+    # Mismo alimento -> mismo alias en las dos comidas, sin duplicados en el mapa.
+    assert lunch[0]["alias"] == dinner[0]["alias"]
+    assert len(alias_map) == 2
+    # El alias resuelve al alimento real, pero el id real nunca sale hacia el modelo (R5).
+    assert alias_map[lunch[0]["alias"]].id == four_real_foods["c1"]
+    assert four_real_foods["c1"] not in result["content"][0]["text"]
+
+
+async def test_day_change_is_refused_when_the_day_has_a_batch_cooking_recipe(
+    active_plan, four_real_foods
+):
+    """Aprobar un cambio de día sustituye todas sus comidas: la receta de
+    batch cooking no se puede referenciar por alias y se perdería."""
+    plan_id, user_id = active_plan
+    await _seed_day_meals(plan_id, {"lunch": [(four_real_foods["c1"], 150)]})
+    recipe_id = uuid.uuid4()
+    async with AdminSessionLocal() as session:
+        await session.execute(
+            text(
+                "INSERT INTO recipes (id, user_id, name, servings) "
+                "VALUES (:id, :u, 'Lentejas (test)', 4)"
+            ),
+            {"id": str(recipe_id), "u": str(user_id)},
+        )
+        meal_id = (
+            await session.execute(
+                text(
+                    "SELECT pm.id FROM plan_meals pm JOIN plan_days pd ON pd.id = pm.plan_day_id "
+                    "WHERE pd.plan_id = :p AND pm.meal_type = 'lunch'"
+                ),
+                {"p": str(plan_id)},
+            )
+        ).scalar_one()
+        await session.execute(
+            text(
+                "INSERT INTO plan_items (id, plan_meal_id, recipe_id, grams, is_substitutable) "
+                "VALUES (:id, :m, :r, 300, false)"
+            ),
+            {"id": str(uuid.uuid4()), "m": str(meal_id), "r": str(recipe_id)},
+        )
+        await session.commit()
+
+    candidate = CandidateFood(
+        id=four_real_foods["c1"], name_es="Pechuga de pollo (test)", kcal_100g=165,
+        protein_100g=31, fat_100g=3.6, carbs_100g=0,
+    )
+    turn = ChatTurnResult(
+        text="",
+        day_change_args={
+            "date": date.today().isoformat(),
+            "meals": [
+                {"meal_type": "lunch", "items": [{"alias": "c1", "approx_portion": "medium"}]}
+            ],
+        },
+        pantry_args=None,
+        alias_to_candidate={"c1": candidate},
+    )
+    async with AdminSessionLocal() as session:
+        ai_session = _running_ai_session(user_id, {"source": "text", "text": "cambia la comida"})
+        session.add(ai_session)
+        await session.commit()
+        await session.refresh(ai_session)
+        proposal_out, error = await flow._build_day_change_proposal(
+            session, user_id, ai_session, turn
+        )
+        assert proposal_out is None
+        assert "batch cooking" in error
+        await session.execute(
+            text("DELETE FROM plan_items WHERE recipe_id = :r"), {"r": str(recipe_id)}
+        )
+        await session.execute(text("DELETE FROM recipes WHERE id = :r"), {"r": str(recipe_id)})
+        await session.commit()
