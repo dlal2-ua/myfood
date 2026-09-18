@@ -482,3 +482,24 @@ export interface RecipeImportDraft {
   ingredients: RecipeImportIngredient[];
   unresolved_lines: string[];
 }
+
+export interface HeatmapDay {
+  date: string;
+  count: number;
+}
+
+export interface Achievement {
+  key: string;
+  title: string;
+  description: string;
+  earned: boolean;
+  progress: number;
+  target: number;
+}
+
+export interface GamificationSummary {
+  current_streak: number;
+  longest_streak: number;
+  heatmap: HeatmapDay[];
+  achievements: Achievement[];
+}

@@ -17,6 +17,7 @@ const PROTECTED_PREFIXES = [
   "/wearables",
   "/security",
   "/household",
+  "/progress",
   "/admin",
 ];
 
@@ -50,6 +51,7 @@ export const config = {
     "/wearables/:path*",
     "/security/:path*",
     "/household/:path*",
+    "/progress/:path*",
     "/admin/:path*",
   ],
 };
