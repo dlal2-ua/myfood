@@ -218,6 +218,17 @@ async def diet_candidates(superuser_conn):
         await superuser_conn.execute(
             text("DELETE FROM food_vectors WHERE food_id = :id"), {"id": str(food_id)}
         )
+        # Fase 7: generar la lista de la compra desde un plan (o añadir a la
+        # despensa) puede haber creado filas que referencian estos alimentos
+        # de prueba — igual que en `test_food`, no depender del orden de
+        # teardown entre fixtures (el `ON DELETE CASCADE` de `user_id` en
+        # `registered_client` podría no haber corrido todavía).
+        await superuser_conn.execute(
+            text("DELETE FROM shopping_list_items WHERE food_id = :id"), {"id": str(food_id)}
+        )
+        await superuser_conn.execute(
+            text("DELETE FROM pantry_items WHERE food_id = :id"), {"id": str(food_id)}
+        )
     await superuser_conn.execute(
         text("DELETE FROM foods WHERE id = ANY(:ids)"), {"ids": [str(i) for i in ids]}
     )
