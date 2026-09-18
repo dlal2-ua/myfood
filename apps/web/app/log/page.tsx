@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
+import { MicronutrientsPanel } from "@/components/MicronutrientsPanel";
 import {
   MEAL_TYPES,
   MEAL_TYPE_LABELS,
@@ -573,6 +574,7 @@ export default function LogPage() {
                 <p className="font-semibold">{day.totals.carbs_g} g</p>
               </div>
             </div>
+            <MicronutrientsPanel date={logDate} />
           </>
         )}
       </section>

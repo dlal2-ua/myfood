@@ -141,6 +141,20 @@ export interface LogDay {
   totals: DayTotals;
 }
 
+export interface Micronutrient {
+  key: string;
+  label: string;
+  amount: number;
+  unit: string;
+  reference: number;
+  pct_of_reference: number;
+}
+
+export interface MicronutrientsDay {
+  date: string;
+  nutrients: Micronutrient[];
+}
+
 export interface Favorite {
   id: string;
   food_id: string;
