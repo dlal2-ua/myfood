@@ -7,11 +7,11 @@ Agent SDK de todo el proyecto corre aquí, nunca en el proceso `api`.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import redis.asyncio as redis
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from myfood.ai.flows.diet_plan import process_diet_plan_job
 from myfood.ai.flows.receipt_scan import process_receipt_scan_job
@@ -26,7 +26,7 @@ from myfood.ai.queue import (
 )
 from myfood.chat.flow import process_chat_job
 from myfood.config import get_settings
-from myfood.db.models import NotificationRule, PushSubscription
+from myfood.db.models import AiSession, NotificationRule, PushSubscription
 from myfood.db.session import AdminSessionLocal
 from myfood.notifications import is_rule_due, message_for_rule
 from myfood.push import PushSubscriptionExpired, send_push
@@ -174,6 +174,47 @@ async def _chat_jobs_loop() -> None:
             )
 
 
+# Una sesión de iafood que sigue `running` pasado este tiempo ya no la va a
+# terminar nadie (p. ej. el worker se reinició a mitad de un trabajo): el
+# cliente que hace polling se quedaría esperando para siempre. El peor caso
+# legítimo de un trabajo es el plan de dieta (2 intentos de 60 s).
+_STALE_SESSION_AFTER = timedelta(minutes=10)
+_STALE_SWEEP_SECONDS = 300
+
+
+async def fail_stale_sessions(now: datetime | None = None) -> int:
+    cutoff = (now or datetime.now(UTC)) - _STALE_SESSION_AFTER
+    async with AdminSessionLocal() as session:
+        result = await session.execute(
+            update(AiSession)
+            .where(AiSession.status == "running", AiSession.created_at < cutoff)
+            .values(
+                status="failed",
+                validation_errors=[
+                    {
+                        "code": "SESSION_ORPHANED",
+                        "message": "El trabajo no llegó a terminar (el servicio se reinició).",
+                    }
+                ],
+            )
+        )
+        await session.commit()
+        return result.rowcount
+
+
+async def _stale_sessions_loop() -> None:
+    while True:
+        try:
+            failed = await fail_stale_sessions()
+            if failed:
+                logger.warning("marcadas %s sesiones de iafood huérfanas como fallidas", failed)
+        except Exception:
+            logger.exception(
+                "fallo limpiando sesiones huérfanas — se reintenta en el siguiente ciclo"
+            )
+        await asyncio.sleep(_STALE_SWEEP_SECONDS)
+
+
 async def main() -> None:
     logger.info(
         "MyFood worker arrancado — recordatorios cada %ss + colas de iafood", _TICK_SECONDS
@@ -185,6 +226,7 @@ async def main() -> None:
         _recipe_import_jobs_loop(),
         _receipt_scan_jobs_loop(),
         _chat_jobs_loop(),
+        _stale_sessions_loop(),
     )
 
 
