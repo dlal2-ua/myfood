@@ -177,6 +177,8 @@ export interface ShoppingListItem {
   quantity_g: number | null;
   category: string | null;
   is_checked: boolean;
+  owner_name: string;
+  is_mine: boolean;
 }
 
 export interface ShoppingList {
@@ -199,6 +201,22 @@ export interface PantryItem {
   food_name: string;
   quantity_g: number;
   expires_on: string | null;
+  owner_name: string;
+  is_mine: boolean;
+}
+
+export interface HouseholdMemberInfo {
+  user_id: string;
+  display_name: string;
+  email: string;
+  joined_at: string;
+}
+
+export interface Household {
+  id: string;
+  name: string;
+  invite_code: string;
+  members: HouseholdMemberInfo[];
 }
 
 export type WaterMode = "auto" | "manual";

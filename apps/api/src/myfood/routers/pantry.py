@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from myfood.db.models import Food, PantryItem
+from myfood.db.models import Food, PantryItem, User
 from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
 
@@ -44,15 +44,19 @@ class PantryItemOut(BaseModel):
     food_name: str
     quantity_g: float
     expires_on: str | None
+    owner_name: str
+    is_mine: bool
 
 
-def _to_out(item: PantryItem, food_name: str) -> PantryItemOut:
+def _to_out(item: PantryItem, food_name: str, owner_name: str, viewer_id: UUID) -> PantryItemOut:
     return PantryItemOut(
         id=item.id,
         food_id=item.food_id,
         food_name=food_name,
         quantity_g=float(item.quantity_g),
         expires_on=item.expires_on.isoformat() if item.expires_on else None,
+        owner_name=owner_name,
+        is_mine=item.user_id == viewer_id,
     )
 
 
@@ -61,15 +65,18 @@ async def list_pantry(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> list[PantryItemOut]:
+    # Sin filtrar por `user_id` a propósito: la RLS (migración 0011) ya
+    # deja ver, además de lo propio, lo de los demás miembros del mismo
+    # hogar ("modo familia") — la despensa compartida es justo el punto.
     rows = (
         await session.execute(
-            select(PantryItem, Food.name_es)
+            select(PantryItem, Food.name_es, User.display_name)
             .join(Food, Food.id == PantryItem.food_id)
-            .where(PantryItem.user_id == user_id)
+            .join(User, User.id == PantryItem.user_id)
             .order_by(Food.name_es)
         )
     ).all()
-    return [_to_out(item, name) for item, name in rows]
+    return [_to_out(item, food_name, owner_name, user_id) for item, food_name, owner_name in rows]
 
 
 @router.post("", status_code=201)
@@ -106,7 +113,8 @@ async def add_pantry_item(
 
     await session.commit()
     await session.refresh(item)
-    return _to_out(item, food.name_es)
+    owner = await session.get(User, user_id)
+    return _to_out(item, food.name_es, owner.display_name, user_id)
 
 
 @router.patch("/{item_id}")
@@ -128,7 +136,8 @@ async def update_pantry_item(
     await session.refresh(item)
 
     food = await session.get(Food, item.food_id)
-    return _to_out(item, food.name_es if food else "")
+    owner = await session.get(User, user_id)
+    return _to_out(item, food.name_es if food else "", owner.display_name, user_id)
 
 
 @router.delete("/{item_id}", status_code=204)

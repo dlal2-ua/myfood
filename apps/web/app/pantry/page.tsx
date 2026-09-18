@@ -149,12 +149,16 @@ export default function PantryPage() {
                     <span className="text-sm">
                       {item.food_name} · {item.quantity_g} g
                       {item.expires_on && ` · caduca ${item.expires_on}`}
+                      {!item.is_mine && (
+                        <span className="ml-2 text-xs text-neutral-400">de {item.owner_name}</span>
+                      )}
                     </span>
                     <button
                       type="button"
                       onClick={() => onDelete(item.id)}
-                      disabled={rowBusy === item.id}
-                      className="text-sm text-red-600 underline disabled:opacity-60"
+                      disabled={rowBusy === item.id || !item.is_mine}
+                      title={!item.is_mine ? "Solo puedes editar tu propia despensa" : undefined}
+                      className="text-sm text-red-600 underline disabled:opacity-30"
                     >
                       Eliminar
                     </button>
