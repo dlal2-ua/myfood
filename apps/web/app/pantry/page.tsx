@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
+import { ReceiptScanPanel } from "@/components/ReceiptScanPanel";
 import type { FoodSearchItem, PantryItem } from "@/lib/types";
 
 const inputClass =
@@ -88,6 +89,8 @@ export default function PantryPage() {
           automáticamente lo que aparece aquí.
         </p>
       </div>
+
+      <ReceiptScanPanel onAdded={load} />
 
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Añadir a la despensa</h2>

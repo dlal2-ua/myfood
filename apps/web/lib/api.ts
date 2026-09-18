@@ -45,9 +45,15 @@ async function throwApiError(res: Response): Promise<never> {
  * and the myfood_session cookie is attached automatically.
  */
 export async function apiFetch<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+  // FormData (subida de archivos, p. ej. el escaneo de tickets) necesita
+  // que el navegador ponga su propia cabecera Content-Type con el boundary
+  // multipart — forzar aquí "application/json" la rompería.
+  const isFormData = init?.body instanceof FormData;
   const res = await fetch(path, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: isFormData
+      ? { ...(init?.headers ?? {}) }
+      : { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
     await throwApiError(res);
