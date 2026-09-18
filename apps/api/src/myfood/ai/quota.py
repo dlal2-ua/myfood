@@ -41,7 +41,11 @@ async def _incr_and_check(key: str, ttl: int, limit: int, error_code: str, messa
 
 
 async def check_and_consume_quota(
-    user_id: UUID, *, scope: str = "diet_plan", per_profile_limit: int | None = None
+    user_id: UUID,
+    *,
+    scope: str = "diet_plan",
+    per_profile_limit: int | None = None,
+    enforce_instance: bool = True,
 ) -> None:
     """Se llama justo antes de encolar el trabajo para el `worker`. Si el
     perfil ya agotó su cuota, ni siquiera se comprueba la de instancia — el
@@ -56,7 +60,11 @@ async def check_and_consume_quota(
     contador. `per_profile_limit`, si se pasa, sustituye
     `limits.per_profile_daily` — el chat (sección 24.5) tiene su propio
     número configurable (`chatMessagesPerProfileDaily`), distinto del de
-    generación de dietas, aunque comparte el límite de instancia."""
+    generación de dietas. `enforce_instance=False` omite el tope de
+    instancia: la sección 24.5 solo define un límite POR PERFIL para el chat
+    (50/día), y aplicarle el `instance_daily` de la generación de dietas (30)
+    lo dejaba incoherente — nadie podía llegar a sus 50 mensajes, y la suma de
+    toda la casa se agotaba con 30 (encontrado en la primera prueba real)."""
     limits = load_limits()
     today, ttl = _today_and_ttl()
 
@@ -67,6 +75,8 @@ async def check_and_consume_quota(
         "AI_QUOTA_PROFILE",
         "Has alcanzado tu límite diario de generaciones con IA.",
     )
+    if not enforce_instance:
+        return
     await _incr_and_check(
         f"iafood:quota:{scope}:instance:{today}",
         ttl,

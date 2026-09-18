@@ -86,7 +86,10 @@ async def send_chat_message(
     limits = load_limits()
     try:
         await check_and_consume_quota(
-            user_id, scope="chat", per_profile_limit=limits.chat_messages_per_profile_daily
+            user_id,
+            scope="chat",
+            per_profile_limit=limits.chat_messages_per_profile_daily,
+            enforce_instance=False,
         )
     except QuotaExceeded as exc:
         raise AppError(

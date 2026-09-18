@@ -4,15 +4,28 @@ import os
 import tempfile
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 import pytest_asyncio
+import redis as redis_sync
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from myfood.config import get_settings
+# Redis LÓGICO aparte para los tests (db 15), fijado ANTES de importar nada de
+# `myfood` (los clientes de Redis se crean a nivel de módulo con `REDIS_URL`).
+# Los tests corren contra el Redis compartido con producción: sin esto sus
+# peticiones incrementaban los contadores REALES de cuota de iafood
+# (`iafood:quota:*:instance:*`, límite 30/día) — tras unas cuantas ejecuciones
+# locales Smart Log e importar recetas devolvían 429 a los usuarios de verdad
+# (y a los propios tests) hasta medianoche.
+_TEST_REDIS_DB = 15
+_redis_parts = urlsplit(os.environ.get("REDIS_URL", "redis://redis:6379/0"))
+os.environ["REDIS_URL"] = urlunsplit(_redis_parts._replace(path=f"/{_TEST_REDIS_DB}"))
+
+from myfood.config import get_settings  # noqa: E402
 
 settings = get_settings()
 
@@ -72,6 +85,26 @@ def _restore_credential(conn, payload: dict) -> None:
             "updated_at": payload["updated_at"],
         },
     )
+
+
+def _flush_test_redis() -> None:
+    """Vacía solo la db lógica de tests (nunca la 0, que es la de producción):
+    los contadores de cuota de una ejecución anterior no deben dar 429 a la
+    siguiente."""
+    try:
+        client = redis_sync.Redis.from_url(settings.redis_url)
+        assert client.connection_pool.connection_kwargs.get("db") == _TEST_REDIS_DB
+        client.flushdb()
+        client.close()
+    except (redis_sync.RedisError, AssertionError):
+        pass
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_test_redis():
+    _flush_test_redis()
+    yield
+    _flush_test_redis()
 
 
 @pytest.fixture(scope="session", autouse=True)

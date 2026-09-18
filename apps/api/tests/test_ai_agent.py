@@ -143,7 +143,10 @@ async def test_run_agent_registers_mcp_tools_and_allows_them(monkeypatch):
     options = captured["options"]
     # Ninguna herramienta nativa del CLI, ni siquiera con mcp_tools presente.
     assert options.tools == []
-    assert options.allowed_tools == ["propose_meal_plan"]
+    # Con el nombre a secas el SDK deniega la herramienta en `dontAsk` (encontrado
+    # con un token real: "el permiso para usarla ha sido denegado") — el nombre
+    # que cuenta es el que expone el servidor MCP: `mcp__<servidor>__<nombre>`.
+    assert options.allowed_tools == ["mcp__myfood__propose_meal_plan"]
     assert "myfood" in options.mcp_servers
 
 

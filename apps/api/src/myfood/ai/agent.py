@@ -34,6 +34,7 @@ from claude_agent_sdk import (
 )
 
 _ALLOWED_ENV_PASSTHROUGH = ("PATH",)
+_MCP_SERVER_NAME = "myfood"
 
 
 class AiAgentError(Exception):
@@ -96,8 +97,17 @@ async def run_agent(
         mcp_servers: dict[str, Any] = {}
         allowed_tools: list[str] = []
         if mcp_tools:
-            mcp_servers = {"myfood": create_sdk_mcp_server(name="myfood", tools=mcp_tools)}
-            allowed_tools = [t.name for t in mcp_tools]
+            mcp_servers = {
+                _MCP_SERVER_NAME: create_sdk_mcp_server(name=_MCP_SERVER_NAME, tools=mcp_tools)
+            }
+            # El SDK expone cada herramienta MCP como `mcp__<servidor>__<nombre>`
+            # y con `permission_mode="dontAsk"` deniega cualquier otra cosa: con
+            # el nombre a secas el modelo veía la herramienta pero se le
+            # denegaba el permiso al llamarla ("el permiso ... está denegado").
+            # Encontrado en la primera prueba con un token real — hasta
+            # entonces todos los tests simulaban `run_agent` y ningún flujo de
+            # iafood se había ejecutado de verdad.
+            allowed_tools = [f"mcp__{_MCP_SERVER_NAME}__{t.name}" for t in mcp_tools]
 
         options = ClaudeAgentOptions(
             tools=[],
