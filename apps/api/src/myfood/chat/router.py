@@ -38,6 +38,18 @@ _MAX_AUDIO_BYTES = 15 * 1024 * 1024
 # BRPOP — evita que el 504 llegue justo antes de que el worker termine.
 _WAIT_TIMEOUT_SECONDS = 22
 
+_WORKER_ERROR_MESSAGES = {
+    "AI_NOT_CONFIGURED": "El administrador todavía no ha configurado la credencial de iafood.",
+    "AI_CREDENTIAL_INVALID": (
+        "La credencial de iafood no es válida — el administrador debe renovarla."
+    ),
+    "AI_TIMEOUT": "El proveedor de IA ha tardado demasiado. Inténtalo de nuevo.",
+    "TRANSCRIPTION_UNAVAILABLE": (
+        "No se pudo transcribir la nota de voz. Puedes escribir tu mensaje en su lugar."
+    ),
+    "AUDIO_EXPIRED": "La nota de voz ya no está disponible. Vuelve a grabarla.",
+}
+
 
 class ChatProposalOut(BaseModel):
     scope: str
@@ -93,10 +105,15 @@ async def send_chat_message(
         )
     if "error" in result:
         error_code = result["error"]
-        status_code = (
-            503 if error_code in ("AI_NOT_CONFIGURED", "TRANSCRIPTION_UNAVAILABLE") else 502
+        # 503 y no 502: Cloudflare sustituye el cuerpo de cualquier 502/504
+        # del origen por su propia página (encontrado en vivo: el cliente
+        # veía "error code: 502" en vez del JSON con el código real), y
+        # todos estos son fallos de un servicio del que depende el chat.
+        raise AppError(
+            error_code,
+            _WORKER_ERROR_MESSAGES.get(error_code, "No se pudo procesar el mensaje."),
+            status_code=503,
         )
-        raise AppError(error_code, "No se pudo procesar el mensaje.", status_code=status_code)
 
     proposal = None
     raw_proposal = result.get("proposal")

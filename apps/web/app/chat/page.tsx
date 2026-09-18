@@ -88,7 +88,13 @@ export default function ChatPage() {
     } catch (err) {
       if (err instanceof ApiError && err.code === "AI_CONSENT_REQUIRED") {
         setNeedsConsent(true);
-      } else if (err instanceof ApiError && err.code === "CHAT_TIMEOUT") {
+      } else if (
+        err instanceof ApiError &&
+        (err.code === "CHAT_TIMEOUT" || err.status === 504)
+      ) {
+        // Cloudflare sustituye el cuerpo de un 504 del origen por su propia
+        // página, así que el código del JSON puede no llegar — el estado
+        // HTTP basta para saber que fue el timeout del turno.
         setError(
           "La respuesta está tardando demasiado. Tu mensaje ya se ha guardado — puedes " +
             "revisar el historial en un momento o volver a intentarlo.",

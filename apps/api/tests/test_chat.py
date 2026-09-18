@@ -740,6 +740,36 @@ async def test_send_chat_message_times_out(registered_client, monkeypatch):
         await session.commit()
 
 
+async def test_send_chat_message_maps_worker_error_to_503_with_code(
+    registered_client, monkeypatch
+):
+    """Un fallo del worker (p. ej. credencial inválida) llega como 503 con su
+    código real — nunca 502/504, que Cloudflare enmascara con su propia
+    página (encontrado en vivo)."""
+    from myfood.chat import router as chat_router
+
+    client, user_id = registered_client
+    await _complete_profile_and_login(client)
+    async with AdminSessionLocal() as session:
+        await ai_client.set_credential(session, admin_user_id=user_id, token="fake-token")
+
+    async def _fake_wait(session_id: str, timeout_seconds: int):
+        return {"error": "AI_CREDENTIAL_INVALID"}
+
+    monkeypatch.setattr(chat_router, "wait_for_chat_result", _fake_wait)
+    monkeypatch.setattr(flow, "enqueue_chat_job", _noop_enqueue)
+
+    resp = await client.post("/api/chat/message", data={"text": "hola"})
+    assert resp.status_code == 503
+    body = resp.json()["error"]
+    assert body["code"] == "AI_CREDENTIAL_INVALID"
+    assert "renovarla" in body["message"]
+
+    async with AdminSessionLocal() as session:
+        await session.execute(text("DELETE FROM ai_credentials"))
+        await session.commit()
+
+
 async def test_send_chat_message_without_consent_is_forbidden(registered_client):
     client, user_id = registered_client
     async with AdminSessionLocal() as session:
