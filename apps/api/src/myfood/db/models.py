@@ -241,9 +241,8 @@ class ShoppingListItem(Base):
     quantity_g: Mapped[object | None] = mapped_column(Numeric(10, 2), nullable=True)
     category: Mapped[str | None] = mapped_column(String, nullable=True)
     is_checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Reservado para el futuro feature de planes de comida (Fase 4) — sin uso
-    # todavía: esta lista de la compra es manual y autónoma (no se genera a
-    # partir de ningún plan).
+    # NULL en artículos manuales; con valor cuando el artículo viene de
+    # `POST /shopping-list/from-plan/{plan_id}` (Fase 7).
     plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -587,3 +586,25 @@ class RecipeIngredient(Base):
     grams: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False)
 
     recipe: Mapped["Recipe"] = relationship(back_populates="ingredients")
+
+
+class PantryItem(Base):
+    """Despensa del usuario (sección 6.4 / Fase 7): lo que dice tener en
+    casa. La lista de la compra generada desde un plan (`shopping_list.py`,
+    `POST /shopping-list/from-plan/{plan_id}`) descuenta estas cantidades
+    antes de proponer qué comprar."""
+
+    __tablename__ = "pantry_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    food_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id"), nullable=False
+    )
+    quantity_g: Mapped[object] = mapped_column(Numeric(10, 2), nullable=False)
+    expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

@@ -96,12 +96,13 @@ async def test_food(superuser_conn):
     )
     await superuser_conn.commit()
     yield food_id
-    # food_log, shopping_list_items, supplements y recipe_ingredients pueden
-    # referenciar este alimento (creado por el propio test) y su teardown
-    # puede correr después o antes que el de registered_client según el
-    # orden de los fixtures — se borra explícitamente aquí para no depender
-    # de ese orden ni de una CASCADE que no existe en ninguna de las cuatro
-    # tablas (solo *.user_id tiene ON DELETE CASCADE, no *.food_id).
+    # food_log, shopping_list_items, supplements, recipe_ingredients y
+    # pantry_items pueden referenciar este alimento (creado por el propio
+    # test) y su teardown puede correr después o antes que el de
+    # registered_client según el orden de los fixtures — se borra
+    # explícitamente aquí para no depender de ese orden ni de una CASCADE
+    # que no existe en ninguna de las cinco tablas (solo *.user_id tiene
+    # ON DELETE CASCADE, no *.food_id).
     await superuser_conn.execute(
         text("DELETE FROM food_log WHERE food_id = :id"), {"id": str(food_id)}
     )
@@ -113,6 +114,9 @@ async def test_food(superuser_conn):
     )
     await superuser_conn.execute(
         text("DELETE FROM recipe_ingredients WHERE food_id = :id"), {"id": str(food_id)}
+    )
+    await superuser_conn.execute(
+        text("DELETE FROM pantry_items WHERE food_id = :id"), {"id": str(food_id)}
     )
     await superuser_conn.execute(text("DELETE FROM foods WHERE id = :id"), {"id": str(food_id)})
     await superuser_conn.commit()
@@ -213,6 +217,17 @@ async def diet_candidates(superuser_conn):
         )
         await superuser_conn.execute(
             text("DELETE FROM food_vectors WHERE food_id = :id"), {"id": str(food_id)}
+        )
+        # Fase 7: generar la lista de la compra desde un plan (o añadir a la
+        # despensa) puede haber creado filas que referencian estos alimentos
+        # de prueba — igual que en `test_food`, no depender del orden de
+        # teardown entre fixtures (el `ON DELETE CASCADE` de `user_id` en
+        # `registered_client` podría no haber corrido todavía).
+        await superuser_conn.execute(
+            text("DELETE FROM shopping_list_items WHERE food_id = :id"), {"id": str(food_id)}
+        )
+        await superuser_conn.execute(
+            text("DELETE FROM pantry_items WHERE food_id = :id"), {"id": str(food_id)}
         )
     await superuser_conn.execute(
         text("DELETE FROM foods WHERE id = ANY(:ids)"), {"ids": [str(i) for i in ids]}
