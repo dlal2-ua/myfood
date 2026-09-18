@@ -29,9 +29,6 @@ CHAT_QUEUE_KEY = "iafood:jobs:chat"
 # tiene su propio parámetro de timeout — el socket debe esperar más que
 # eso, no menos.
 _redis = redis.from_url(get_settings().redis_url, decode_responses=True, socket_timeout=None)
-# Cliente aparte, sin `decode_responses`: el audio de voz del chat es
-# binario, y decodificarlo como UTF-8 lo corrompería.
-_redis_bytes = redis.from_url(get_settings().redis_url, decode_responses=False, socket_timeout=None)
 
 
 async def enqueue_job(queue_key: str, ai_session_id: str) -> None:
@@ -97,10 +94,11 @@ async def dequeue_chat_job(timeout_seconds: int = 5) -> str | None:
 # respuesta SÍNCRONA con su propio timeout de turno (sección 24.5, 20s) —
 # tiene sentido para una conversación, no para pedir al usuario que haga
 # polling de cada mensaje. Para no romper la regla 19 de todas formas, el
-# proceso `api` sigue sin llamar nunca a Whisper ni al Agent SDK: encola
-# igual que cualquier otro flujo y solo espera el resultado con un `BRPOP`
-# de Redis (operación local) hasta el timeout del turno — el trabajo real
-# lo hace el `worker`, exactamente igual que en el resto de iafood.
+# proceso `api` sigue sin llamar nunca al Agent SDK: encola igual que
+# cualquier otro flujo y solo espera el resultado con un `BRPOP` de Redis
+# (operación local) hasta el timeout del turno — la llamada al modelo la hace
+# el `worker`, exactamente igual que en el resto de iafood. (La nota de voz sí
+# se transcribe en el proceso `api`, en memoria: ver `chat/flow.py`.)
 def _chat_result_key(ai_session_id: str) -> str:
     return f"iafood:chat_result:{ai_session_id}"
 
@@ -119,27 +117,3 @@ async def wait_for_chat_result(ai_session_id: str, timeout_seconds: int) -> dict
         return None
     _key, raw = result
     return json.loads(raw)
-
-
-# --- Audio de voz en tránsito (sección 24, R2) ------------------------------
-#
-# "El audio nunca se persiste; solo el texto transcrito queda en
-# chat_messages" — nunca toca disco. Vive en Redis, en memoria, solo el
-# tiempo que tarda el worker en recogerlo y transcribirlo; se borra al
-# leerlo (o por su propio TTL si nadie lo recoge).
-_CHAT_AUDIO_TTL_SECONDS = 120
-
-
-def _chat_audio_key(ai_session_id: str) -> str:
-    return f"iafood:chat_audio:{ai_session_id}"
-
-
-async def store_chat_audio(ai_session_id: str, audio_bytes: bytes) -> None:
-    await _redis_bytes.set(_chat_audio_key(ai_session_id), audio_bytes, ex=_CHAT_AUDIO_TTL_SECONDS)
-
-
-async def pop_chat_audio(ai_session_id: str) -> bytes | None:
-    key = _chat_audio_key(ai_session_id)
-    audio_bytes = await _redis_bytes.get(key)
-    await _redis_bytes.delete(key)
-    return audio_bytes

@@ -1,8 +1,16 @@
 """Divide el turno de chat en las dos mitades de la regla 19:
-`request_chat_message` corre en el proceso `api` (valida, guarda el audio
-en Redis sin tocar disco, crea el `ai_session`, encola) y `process_chat_job`
-corre en el `worker` (transcribe si hace falta y es la única función de
-chat que invoca `ai/agent.run_agent`, vía `chat/agent_loop.py`).
+`request_chat_message` corre en el proceso `api` (valida, transcribe la nota
+de voz si la hay, crea el `ai_session`, encola) y `process_chat_job` corre en
+el `worker` (es la única función de chat que invoca `ai/agent.run_agent`, vía
+`chat/agent_loop.py`).
+
+El audio se transcribe EN MEMORIA dentro del proceso `api` (sección 24.1: se
+pasa a Whisper sin tocar disco) y al worker solo le llega el texto. Antes
+viajaba por Redis hasta el worker, pero ese Redis vuelca snapshots a disco
+(`--save 60 1`), así que durante unos segundos los bytes del audio podían
+acabar en `dump.rdb` — incumpliendo "el audio nunca se persiste". Whisper es
+un contenedor local (no un proveedor externo), así que llamarlo desde el
+proceso `api` no rompe la regla 19.
 
 Desviación deliberada del patrón 202+polling del resto de iafood: la
 especificación (sección 7.9/24.3) diseña `POST /chat/message` como una
@@ -26,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai import client as ai_client
 from myfood.ai.agent import AiAgentError
-from myfood.ai.queue import enqueue_chat_job, pop_chat_audio, push_chat_result, store_chat_audio
+from myfood.ai.queue import enqueue_chat_job, push_chat_result
 from myfood.ai.validator import validate_day_totals, validate_structure
 from myfood.chat.agent_loop import ChatTurnResult, run_chat_turn
 from myfood.chat.transcribe import TranscriptionUnavailable, transcribe
@@ -55,8 +63,9 @@ _HISTORY_MAX_AGE = timedelta(hours=6)
 async def request_chat_message(
     session: AsyncSession, user_id: UUID, *, text: str | None, audio_bytes: bytes | None
 ) -> AiSession:
-    """Corre en el proceso `api` (regla 19) — nunca transcribe ni llama al
-    proveedor de IA, solo prepara todo lo determinista y encola."""
+    """Corre en el proceso `api` (regla 19) — nunca llama al proveedor de IA
+    (Claude); solo transcribe la nota de voz con el Whisper local, prepara todo
+    lo determinista y encola."""
     credential_status = await ai_client.get_credential_status(session)
     if not credential_status.configured:
         raise AppError(
@@ -71,6 +80,24 @@ async def request_chat_message(
                 "AUDIO_TOO_LARGE", "La nota de voz es demasiado larga.", status_code=422
             )
         source = "voice"
+        try:
+            text = await transcribe(audio_bytes)
+        except TranscriptionUnavailable as exc:
+            raise AppError(
+                "TRANSCRIPTION_UNAVAILABLE",
+                "No se pudo transcribir la nota de voz. Puedes escribir tu mensaje en su lugar.",
+                status_code=503,
+            ) from exc
+        finally:
+            # El audio no debe sobrevivir a la transcripción, pase lo que pase.
+            del audio_bytes
+        if not text.strip():
+            raise AppError(
+                "EMPTY_TRANSCRIPTION",
+                "No se ha entendido nada en la nota de voz. Vuelve a grabarla o escribe "
+                "tu mensaje.",
+                status_code=422,
+            )
     elif text is not None and text.strip():
         source = "text"
     else:
@@ -82,16 +109,11 @@ async def request_chat_message(
         user_id=user_id,
         kind="chat_edit",
         status="running",
-        request_payload={"source": source, "text": text if source == "text" else None},
+        request_payload={"source": source, "text": text},
     )
     session.add(ai_session)
     await session.commit()
     await session.refresh(ai_session)
-
-    if audio_bytes is not None:
-        # Nunca a disco (R2, sección 24) — Redis con TTL corto, solo hasta
-        # que el worker lo transcriba; se borra en cuanto se lee.
-        await store_chat_audio(str(ai_session.id), audio_bytes)
 
     await enqueue_chat_job(str(ai_session.id))
     return ai_session
@@ -302,33 +324,7 @@ async def process_chat_job(ai_session_id: str) -> None:
 
         user_id = ai_session.user_id
         source = ai_session.request_payload["source"]
-
-        if source == "voice":
-            audio_bytes = await pop_chat_audio(ai_session_id)
-            if audio_bytes is None:
-                ai_session.status = "failed"
-                ai_session.validation_errors = [
-                    {"code": "AUDIO_EXPIRED", "message": "La nota de voz ya no está disponible."}
-                ]
-                await session.commit()
-                await push_chat_result(ai_session_id, {"error": "AUDIO_EXPIRED"})
-                return
-            try:
-                message_text = await transcribe(audio_bytes)
-            except TranscriptionUnavailable:
-                ai_session.status = "failed"
-                ai_session.validation_errors = [
-                    {
-                        "code": "TRANSCRIPTION_UNAVAILABLE",
-                        "message": "El servicio de transcripción no está disponible.",
-                    }
-                ]
-                await session.commit()
-                await push_chat_result(ai_session_id, {"error": "TRANSCRIPTION_UNAVAILABLE"})
-                return
-            del audio_bytes
-        else:
-            message_text = ai_session.request_payload["text"]
+        message_text = ai_session.request_payload["text"]
 
         # Antes de guardar el mensaje actual, para que no aparezca dos veces.
         history = await _recent_history(session, user_id)
