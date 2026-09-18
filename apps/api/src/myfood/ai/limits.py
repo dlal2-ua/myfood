@@ -18,12 +18,19 @@ from myfood.config import get_settings
 DEFAULT_PER_PROFILE_DAILY = 10
 DEFAULT_INSTANCE_DAILY = 30
 DEFAULT_MAX_TOKENS_PER_CALL = 8000
+# Cuota propia del chat (sección 24.5) — más generosa que la de generación
+# completa de dietas a propósito: es una cuota de conversación (preguntas,
+# ida y vuelta), un patrón de uso muy distinto a generar un plan entero.
+DEFAULT_CHAT_MESSAGES_PER_PROFILE_DAILY = 50
 
 
 class IafoodLimits(BaseModel):
     per_profile_daily: int = Field(default=DEFAULT_PER_PROFILE_DAILY, ge=1, le=1000)
     instance_daily: int = Field(default=DEFAULT_INSTANCE_DAILY, ge=1, le=10000)
     max_tokens_per_call: int = Field(default=DEFAULT_MAX_TOKENS_PER_CALL, ge=256, le=200000)
+    chat_messages_per_profile_daily: int = Field(
+        default=DEFAULT_CHAT_MESSAGES_PER_PROFILE_DAILY, ge=1, le=2000
+    )
 
 
 def _config_path() -> Path:

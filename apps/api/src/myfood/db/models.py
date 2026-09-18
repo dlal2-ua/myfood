@@ -647,3 +647,27 @@ class HouseholdMember(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChatMessage(Base):
+    """Historial del chat conversacional (Fase 8, sección 6.10). La tabla y
+    su política RLS ya existen desde las migraciones 0001/0002 (se
+    reservaron de antemano, igual que el valor `'chat_edit'` de
+    `ai_sessions.kind`) — este modelo es lo único que faltaba. El audio de
+    las notas de voz nunca se guarda (R2, sección 24): solo `content`, ya
+    transcrito; `source='voice'` es metadato informativo, no una
+    referencia a ningún fichero."""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="text")
+    ai_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ai_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -18,11 +18,13 @@ from myfood.ai.flows.receipt_scan import process_receipt_scan_job
 from myfood.ai.flows.recipe_import import process_recipe_import_job
 from myfood.ai.flows.smart_log import process_smart_log_job
 from myfood.ai.queue import (
+    dequeue_chat_job,
     dequeue_diet_plan_job,
     dequeue_receipt_scan_job,
     dequeue_recipe_import_job,
     dequeue_smart_log_job,
 )
+from myfood.chat.flow import process_chat_job
 from myfood.config import get_settings
 from myfood.db.models import NotificationRule, PushSubscription
 from myfood.db.session import AdminSessionLocal
@@ -159,6 +161,19 @@ async def _receipt_scan_jobs_loop() -> None:
             )
 
 
+async def _chat_jobs_loop() -> None:
+    while True:
+        try:
+            ai_session_id = await dequeue_chat_job(_AI_QUEUE_POLL_TIMEOUT_SECONDS)
+            if ai_session_id is None:
+                continue
+            await process_chat_job(ai_session_id)
+        except Exception:
+            logger.exception(
+                "fallo procesando un trabajo de chat — se reintenta con el siguiente"
+            )
+
+
 async def main() -> None:
     logger.info(
         "MyFood worker arrancado — recordatorios cada %ss + colas de iafood", _TICK_SECONDS
@@ -169,6 +184,7 @@ async def main() -> None:
         _smart_log_jobs_loop(),
         _recipe_import_jobs_loop(),
         _receipt_scan_jobs_loop(),
+        _chat_jobs_loop(),
     )
 
 

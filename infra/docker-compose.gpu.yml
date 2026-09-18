@@ -1,0 +1,26 @@
+########################################################################
+# Override opcional: acelera `whisper` (Fase 8, sección 24.1) con la GPU
+# local en vez de CPU. Requiere `nvidia-container-toolkit` instalado y
+# funcionando en el host (`docker run --rm --gpus all nvidia/cuda:...
+# nvidia-smi` debe funcionar antes de usar esto).
+#
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Si el host no tiene el toolkit (o el driver está roto), NO se aplica este
+# override — `docker compose up` con solo `docker-compose.yml` funciona en
+# modo CPU sin más cambios (criterio de aceptación de la Fase 8).
+########################################################################
+services:
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest-gpu
+    environment:
+      ASR_ENGINE: faster_whisper
+      ASR_MODEL: ${WHISPER_MODEL:-medium}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
