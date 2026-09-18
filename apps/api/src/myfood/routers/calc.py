@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import BodyMeasurement, Profile
 from myfood.deps import get_current_user_id, get_db
-from myfood.domain import formulas
+from myfood.domain import formulas, tdee
 from myfood.errors import AppError
 
 router = APIRouter(prefix="/calc", tags=["calc"])
@@ -191,7 +191,14 @@ async def get_targets(
     age_years = _age_years(profile.birth_date)
 
     bmr = formulas.bmr_mifflin(profile.sex, weight_kg, height_cm, age_years)
-    tdee_value = formulas.tdee(bmr, profile.activity_level)
+
+    estimate = await tdee.get_current_estimate(session, user_id)
+    if estimate is not None and estimate.is_reliable:
+        tdee_value = float(estimate.estimated_tdee)
+        source: Literal["formula", "adaptive_tdee"] = "adaptive_tdee"
+    else:
+        tdee_value = formulas.tdee(bmr, profile.activity_level)
+        source = "formula"
 
     rate = float(profile.goal_rate_kg_week) if profile.goal_rate_kg_week is not None else 0.5
     kcal, kcal_warnings = formulas.calorie_target(tdee_value, profile.goal, rate, bmr, profile.sex)
@@ -206,6 +213,6 @@ async def get_targets(
         fat_g=round(fat_g, 1),
         carbs_g=round(carbs_g, 1),
         water_ml=water_ml,
-        source="formula",  # TDEE adaptativo llega en la Fase 7 (necesita historial de food_log)
+        source=source,
         warnings=[*kcal_warnings, *macro_warnings],
     )

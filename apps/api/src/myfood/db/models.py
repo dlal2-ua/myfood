@@ -526,6 +526,27 @@ class AiProposal(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class TdeeEstimate(Base):
+    """TDEE adaptativo semanal (sección 6.7 / Fase 7, `domain/tdee.py`).
+
+    Una fila por `(user_id, week_start)` — se recalcula (upsert) cada vez que
+    se pide dentro de la misma semana, no hay worker dedicado."""
+
+    __tablename__ = "tdee_estimates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    week_start: Mapped[date] = mapped_column(Date, nullable=False)
+    weight_trend_kg: Mapped[object] = mapped_column(Numeric(6, 3), nullable=False)
+    weight_change_kg: Mapped[object] = mapped_column(Numeric(6, 3), nullable=False)
+    avg_intake_kcal: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False)
+    estimated_tdee: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False)
+    logging_days: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    is_reliable: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+
 class Recipe(Base):
     """Sección 6.4 / 20. Sin columnas de nutrición propias a propósito: el
     desglose nutricional siempre sale de sumar `food_nutrients` de sus
