@@ -20,6 +20,7 @@ dependencies = [
   "email-validator>=2.2",
   "pywebpush>=2.0",
   "pulp>=2.8",
+  "pyotp>=2.9",
   "claude-agent-sdk>=0.2.152",
   "recipe-scrapers>=15.12.0",
 ]

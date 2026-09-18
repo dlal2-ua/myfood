@@ -9,11 +9,13 @@ const PROTECTED_PREFIXES = [
   "/log",
   "/scan",
   "/shopping-list",
+  "/pantry",
   "/water",
   "/supplements",
   "/diet-plans",
   "/recipes",
   "/wearables",
+  "/security",
   "/admin",
 ];
 
@@ -39,11 +41,13 @@ export const config = {
     "/log/:path*",
     "/scan/:path*",
     "/shopping-list/:path*",
+    "/pantry/:path*",
     "/water/:path*",
     "/supplements/:path*",
     "/diet-plans/:path*",
     "/recipes/:path*",
     "/wearables/:path*",
+    "/security/:path*",
     "/admin/:path*",
   ],
 };

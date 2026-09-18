@@ -7,6 +7,7 @@ export interface CurrentUser {
   display_name: string;
   role: string;
   granted_consents: string[];
+  totp_enabled: boolean;
 }
 
 /** Server-side only: reads the session cookie from the incoming request and

@@ -37,6 +37,12 @@ class User(Base):
     locale: Mapped[str] = mapped_column(String, nullable=False, default="es")
     timezone: Mapped[str] = mapped_column(String, nullable=False, default="Europe/Madrid")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # 2FA (Fase 7): secreto TOTP cifrado en reposo (R4-adjacent — es una
+    # credencial, mismo criterio que `ai_credentials.token_encrypted`), solo
+    # activo cuando `totp_enabled` — permite regenerar el secreto sin
+    # activarlo hasta confirmar un código real (`/auth/2fa/confirm`).
+    totp_secret: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     profile: Mapped["Profile"] = relationship(back_populates="user", uselist=False)
