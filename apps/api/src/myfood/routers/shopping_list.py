@@ -28,6 +28,7 @@ from myfood.db.models import (
     PlanMeal,
     RecipeIngredient,
     ShoppingListItem,
+    User,
 )
 from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
@@ -35,9 +36,12 @@ from myfood.errors import AppError
 router = APIRouter(prefix="/shopping-list", tags=["shopping-list"])
 
 
-async def _get_item(session: AsyncSession, user_id: UUID, item_id: UUID) -> ShoppingListItem:
+async def _get_item(session: AsyncSession, item_id: UUID) -> ShoppingListItem:
+    # Sin comprobar `user_id` a mano: la RLS (migración 0011) ya decide
+    # quién puede ver/editar cada fila — lista de la compra compartida de
+    # verdad con el resto del hogar, no solo lo propio.
     item = await session.get(ShoppingListItem, item_id)
-    if item is None or item.user_id != user_id:
+    if item is None:
         raise AppError("SHOPPING_ITEM_NOT_FOUND", "No existe ese artículo.", status_code=404)
     return item
 
@@ -66,9 +70,13 @@ class ShoppingListItemOut(BaseModel):
     quantity_g: float | None
     category: str | None
     is_checked: bool
+    owner_name: str
+    is_mine: bool
 
 
-def _to_out(item: ShoppingListItem, food_name: str | None) -> ShoppingListItemOut:
+def _to_out(
+    item: ShoppingListItem, food_name: str | None, owner_name: str, viewer_id: UUID
+) -> ShoppingListItemOut:
     return ShoppingListItemOut(
         id=item.id,
         food_id=item.food_id,
@@ -77,6 +85,8 @@ def _to_out(item: ShoppingListItem, food_name: str | None) -> ShoppingListItemOu
         quantity_g=float(item.quantity_g) if item.quantity_g is not None else None,
         category=item.category,
         is_checked=item.is_checked,
+        owner_name=owner_name,
+        is_mine=item.user_id == viewer_id,
     )
 
 
@@ -103,7 +113,8 @@ async def add_item(
     session.add(item)
     await session.commit()
     await session.refresh(item)
-    return _to_out(item, food_name)
+    owner = await session.get(User, user_id)
+    return _to_out(item, food_name, owner.display_name, user_id)
 
 
 class ShoppingListOut(BaseModel):
@@ -115,10 +126,13 @@ async def list_items(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> ShoppingListOut:
+    # Sin filtrar por `user_id` a propósito: la RLS (migración 0011) ya
+    # deja ver, además de lo propio, lo de los demás miembros del mismo
+    # hogar — lista de la compra compartida de verdad.
     stmt = (
-        select(ShoppingListItem, Food.name_es)
+        select(ShoppingListItem, Food.name_es, User.display_name)
         .outerjoin(Food, Food.id == ShoppingListItem.food_id)
-        .where(ShoppingListItem.user_id == user_id)
+        .join(User, User.id == ShoppingListItem.user_id)
         .order_by(
             ShoppingListItem.is_checked,
             ShoppingListItem.category.nulls_last(),
@@ -126,7 +140,12 @@ async def list_items(
         )
     )
     rows = (await session.execute(stmt)).all()
-    return ShoppingListOut(items=[_to_out(item, food_name) for item, food_name in rows])
+    return ShoppingListOut(
+        items=[
+            _to_out(item, food_name, owner_name, user_id)
+            for item, food_name, owner_name in rows
+        ]
+    )
 
 
 @router.post("/from-plan/{plan_id}", status_code=201)
@@ -175,10 +194,16 @@ async def generate_from_plan(
 
     needed_rows = needed.items()
 
+    # Sin filtrar por `user_id`: si hay modo familia, se descuenta la
+    # despensa compartida del hogar entero (RLS, migración 0011), no solo
+    # lo que tenga el dueño del plan — no tiene sentido comprar otra vez
+    # lo que ya tiene cualquier miembro en casa.
     pantry_rows = await session.execute(
-        select(PantryItem.food_id, PantryItem.quantity_g).where(PantryItem.user_id == user_id)
+        select(PantryItem.food_id, PantryItem.quantity_g)
     )
-    in_pantry = {food_id: float(quantity_g) for food_id, quantity_g in pantry_rows}
+    in_pantry: dict[UUID, float] = {}
+    for food_id, quantity_g in pantry_rows:
+        in_pantry[food_id] = in_pantry.get(food_id, 0.0) + float(quantity_g)
 
     # Regenerar en limpio: una llamada repetida para el mismo plan no debe
     # ir acumulando artículos duplicados.
@@ -202,24 +227,25 @@ async def generate_from_plan(
 
     await session.commit()
 
+    owner = await session.get(User, user_id)
     out: list[ShoppingListItemOut] = []
     for item in created:
         food = await session.get(Food, item.food_id)
         await session.refresh(item)
-        out.append(_to_out(item, food.name_es if food else None))
+        out.append(_to_out(item, food.name_es if food else None, owner.display_name, user_id))
     return ShoppingListOut(items=out)
 
 
 @router.delete("/checked", status_code=204)
 async def clear_checked(
-    user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> None:
+    # Sin filtrar por `user_id`: limpia lo marcado de todo el hogar visible
+    # (RLS, migración 0011) — después de la compra, cualquiera termina de
+    # limpiar la lista, no solo quien añadió cada artículo.
     items = list(
         await session.scalars(
-            select(ShoppingListItem).where(
-                ShoppingListItem.user_id == user_id, ShoppingListItem.is_checked.is_(True)
-            )
+            select(ShoppingListItem).where(ShoppingListItem.is_checked.is_(True))
         )
     )
     for item in items:
@@ -240,7 +266,7 @@ async def update_item(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> ShoppingListItemOut:
-    item = await _get_item(session, user_id, item_id)
+    item = await _get_item(session, item_id)
     fields_set = body.model_fields_set
 
     if "is_checked" in fields_set and body.is_checked is not None:
@@ -257,7 +283,8 @@ async def update_item(
     if item.food_id is not None:
         food = await session.get(Food, item.food_id)
         food_name = food.name_es if food else None
-    return _to_out(item, food_name)
+    owner = await session.get(User, item.user_id)
+    return _to_out(item, food_name, owner.display_name if owner else "", user_id)
 
 
 @router.delete("/{item_id}", status_code=204)
@@ -266,6 +293,6 @@ async def delete_item(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> None:
-    item = await _get_item(session, user_id, item_id)
+    item = await _get_item(session, item_id)
     await session.delete(item)
     await session.commit()

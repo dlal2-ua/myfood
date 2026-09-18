@@ -320,6 +320,9 @@ export default function ShoppingListPage() {
                         {item.food_name ?? item.free_text}
                         {item.quantity_g != null && ` · ${item.quantity_g} g`}
                         {item.category && ` · ${item.category}`}
+                        {!item.is_mine && (
+                          <span className="ml-2 text-xs text-neutral-400">de {item.owner_name}</span>
+                        )}
                       </span>
                     </label>
                     <button
