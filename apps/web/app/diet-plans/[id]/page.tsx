@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { MEAL_TYPE_LABELS } from "@/lib/types";
-import type { DietPlanDetail, DietPlanStatus, PlanItem } from "@/lib/types";
+import type { DietPlanDetail, DietPlanStatus, MealType, PlanItem, RecipeSummary } from "@/lib/types";
 
 export default function DietPlanDetailPage() {
   const params = useParams<{ id: string }>();
@@ -16,6 +16,13 @@ export default function DietPlanDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
+
+  const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
+  const [batchCookMealId, setBatchCookMealId] = useState<string | null>(null);
+  const [batchRecipeId, setBatchRecipeId] = useState("");
+  const [batchServings, setBatchServings] = useState("1");
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
 
   async function load() {
     if (!planId) return;
@@ -32,8 +39,39 @@ export default function DietPlanDetailPage() {
 
   useEffect(() => {
     void load();
+    apiFetch<RecipeSummary[]>("/api/recipes")
+      .then(setRecipes)
+      .catch(() => {
+        // El batch cooking es un atajo opcional; si falla la lista de
+        // recetas, el resto de la página del plan sigue funcionando.
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planId]);
+
+  async function onBatchCook(dayIndex: number, mealType: MealType) {
+    if (!batchRecipeId || !batchServings) return;
+    setBatchBusy(true);
+    setBatchError(null);
+    try {
+      await apiFetch(`/api/diet-plans/${planId}/batch-cook`, {
+        method: "POST",
+        body: JSON.stringify({
+          recipe_id: batchRecipeId,
+          assignments: [
+            { day_index: dayIndex, meal_type: mealType, servings: Number(batchServings) },
+          ],
+        }),
+      });
+      setBatchCookMealId(null);
+      setBatchRecipeId("");
+      setBatchServings("1");
+      await load();
+    } catch (err) {
+      setBatchError(errorMessage(err));
+    } finally {
+      setBatchBusy(false);
+    }
+  }
 
   async function onStatusChange(status: DietPlanStatus) {
     try {
@@ -147,6 +185,60 @@ export default function DietPlanDetailPage() {
                     </li>
                   ))}
                 </ul>
+                {recipes.length > 0 && (
+                  <div className="mt-2">
+                    {batchCookMealId === meal.id ? (
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <select
+                          value={batchRecipeId}
+                          onChange={(e) => setBatchRecipeId(e.target.value)}
+                          className="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                        >
+                          <option value="">Elige una receta…</option>
+                          {recipes.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.name}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          min={1}
+                          value={batchServings}
+                          onChange={(e) => setBatchServings(e.target.value)}
+                          className="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                        />
+                        <span className="text-neutral-400">raciones</span>
+                        <button
+                          type="button"
+                          disabled={batchBusy || !batchRecipeId}
+                          onClick={() => onBatchCook(day.day_index, meal.meal_type)}
+                          className="rounded bg-[var(--color-primary)] px-2 py-1 text-white disabled:opacity-60"
+                        >
+                          {batchBusy ? "Asignando…" : "Asignar"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBatchCookMealId(null)}
+                          className="text-neutral-400 underline"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setBatchCookMealId(meal.id)}
+                        className="text-xs text-neutral-500 underline"
+                      >
+                        🍲 Asignar receta de batch cooking
+                      </button>
+                    )}
+                    {batchError && batchCookMealId === meal.id && (
+                      <p className="mt-1 text-xs text-red-600">{batchError}</p>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

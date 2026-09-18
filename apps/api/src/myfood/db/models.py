@@ -442,7 +442,12 @@ class PlanItem(Base):
     food_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("foods.id"), nullable=True
     )
-    recipe_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # ON DELETE CASCADE (migración 0010): el CHECK food_id/recipe_id XOR no
+    # deja poner NULL aquí si se borra la receta — el plan_item entero
+    # desaparece con ella (batch cooking, Fase 7).
+    recipe_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("recipes.id", ondelete="CASCADE"), nullable=True
+    )
     grams: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False)
     is_substitutable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 

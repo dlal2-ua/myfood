@@ -26,11 +26,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from myfood.db.models import (
     BodyMeasurement,
     DietPlan,
+    FoodNutrient,
     PlanDay,
     PlanItem,
     PlanItemAlternative,
     PlanMeal,
     Profile,
+    Recipe,
+    RecipeIngredient,
 )
 from myfood.deps import get_current_user_id, get_db
 from myfood.domain import formulas
@@ -200,6 +203,7 @@ class GeneratePlanIn(BaseModel):
 class PlanItemOut(BaseModel):
     id: UUID
     food_id: UUID | None
+    recipe_id: UUID | None
     name_es: str | None
     grams: float
     is_substitutable: bool
@@ -260,6 +264,56 @@ def _plan_to_out(plan: DietPlan) -> DietPlanOut:
     )
 
 
+async def _recipe_nutrition_density(
+    session: AsyncSession, recipe_ids: set[UUID]
+) -> dict[UUID, dict[str, float]]:
+    """kcal/proteína/grasa/carbos POR GRAMO de cada receta (suma de sus
+    ingredientes / peso total) — para los `plan_items` de la Fase 7 (batch
+    cooking) con `recipe_id` en vez de `food_id`, que la consulta principal
+    de abajo no puede resolver con un simple JOIN a `foods`/`food_nutrients`
+    (R9: nunca un valor guardado que pueda desincronizarse, se recalcula
+    siempre desde los ingredientes reales)."""
+    if not recipe_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                RecipeIngredient.recipe_id,
+                RecipeIngredient.grams,
+                FoodNutrient.kcal_100g,
+                FoodNutrient.protein_100g,
+                FoodNutrient.fat_100g,
+                FoodNutrient.carbs_100g,
+            )
+            .join(FoodNutrient, FoodNutrient.food_id == RecipeIngredient.food_id)
+            .where(RecipeIngredient.recipe_id.in_(recipe_ids))
+        )
+    ).all()
+
+    totals: dict[UUID, dict[str, float]] = {
+        rid: {"weight": 0.0, "kcal": 0.0, "protein_g": 0.0, "fat_g": 0.0, "carbs_g": 0.0}
+        for rid in recipe_ids
+    }
+    for recipe_id, grams, kcal_100g, protein_100g, fat_100g, carbs_100g in rows:
+        grams = float(grams)
+        factor = grams / 100
+        bucket = totals[recipe_id]
+        bucket["weight"] += grams
+        bucket["kcal"] += float(kcal_100g or 0) * factor
+        bucket["protein_g"] += float(protein_100g or 0) * factor
+        bucket["fat_g"] += float(fat_100g or 0) * factor
+        bucket["carbs_g"] += float(carbs_100g or 0) * factor
+
+    return {
+        rid: (
+            {k: v / bucket["weight"] for k, v in bucket.items() if k != "weight"}
+            if bucket["weight"] > 0
+            else {"kcal": 0.0, "protein_g": 0.0, "fat_g": 0.0, "carbs_g": 0.0}
+        )
+        for rid, bucket in totals.items()
+    }
+
+
 async def _load_plan_detail(session: AsyncSession, plan: DietPlan) -> DietPlanDetailOut:
     rows = (
         await session.execute(
@@ -267,7 +321,8 @@ async def _load_plan_detail(session: AsyncSession, plan: DietPlan) -> DietPlanDe
                 SELECT
                     pd.id AS day_id, pd.day_index,
                     pm.id AS meal_id, pm.meal_type, pm.sort_order,
-                    pi.id AS item_id, pi.food_id, f.name_es, pi.grams, pi.is_substitutable,
+                    pi.id AS item_id, pi.food_id, pi.recipe_id, f.name_es, r.name AS recipe_name,
+                    pi.grams, pi.is_substitutable,
                     fn.kcal_100g, fn.protein_100g, fn.fat_100g, fn.carbs_100g,
                     pia.id AS alt_id, pia.food_id AS alt_food_id, af.name_es AS alt_name_es,
                     pia.grams AS alt_grams, pia.rank AS alt_rank, pia.distance AS alt_distance
@@ -276,6 +331,7 @@ async def _load_plan_detail(session: AsyncSession, plan: DietPlan) -> DietPlanDe
                 JOIN plan_items pi ON pi.plan_meal_id = pm.id
                 LEFT JOIN foods f ON f.id = pi.food_id
                 LEFT JOIN food_nutrients fn ON fn.food_id = pi.food_id
+                LEFT JOIN recipes r ON r.id = pi.recipe_id
                 LEFT JOIN plan_item_alternatives pia ON pia.plan_item_id = pi.id
                 LEFT JOIN foods af ON af.id = pia.food_id
                 WHERE pd.plan_id = :plan_id
@@ -284,6 +340,9 @@ async def _load_plan_detail(session: AsyncSession, plan: DietPlan) -> DietPlanDe
             {"plan_id": str(plan.id)},
         )
     ).all()
+
+    recipe_ids = {row.recipe_id for row in rows if row.recipe_id is not None}
+    density_by_recipe = await _recipe_nutrition_density(session, recipe_ids)
 
     days: dict[int, dict] = {}
     for row in rows:
@@ -305,7 +364,8 @@ async def _load_plan_detail(session: AsyncSession, plan: DietPlan) -> DietPlanDe
             {
                 "id": row.item_id,
                 "food_id": row.food_id,
-                "name_es": row.name_es,
+                "recipe_id": row.recipe_id,
+                "name_es": row.name_es if row.food_id is not None else row.recipe_name,
                 "grams": float(row.grams),
                 "is_substitutable": row.is_substitutable,
                 "alternatives": [],
@@ -322,6 +382,13 @@ async def _load_plan_detail(session: AsyncSession, plan: DietPlan) -> DietPlanDe
             day["protein_g"] += float(row.protein_100g) * factor
             day["fat_g"] += float(row.fat_100g) * factor
             day["carbs_g"] += float(row.carbs_100g) * factor
+        elif is_new_item and row.recipe_id is not None:
+            density = density_by_recipe.get(row.recipe_id, {})
+            grams = float(row.grams)
+            day["kcal"] += density.get("kcal", 0.0) * grams
+            day["protein_g"] += density.get("protein_g", 0.0) * grams
+            day["fat_g"] += density.get("fat_g", 0.0) * grams
+            day["carbs_g"] += density.get("carbs_g", 0.0) * grams
         if row.alt_id is not None and not any(a["id"] == row.alt_id for a in item["alternatives"]):
             item["alternatives"].append(
                 {
@@ -346,6 +413,7 @@ async def _load_plan_detail(session: AsyncSession, plan: DietPlan) -> DietPlanDe
                         PlanItemOut(
                             id=item["id"],
                             food_id=item["food_id"],
+                            recipe_id=item["recipe_id"],
                             name_es=item["name_es"],
                             grams=item["grams"],
                             is_substitutable=item["is_substitutable"],
@@ -513,8 +581,89 @@ async def substitute_item(
     return PlanItemOut(
         id=item.id,
         food_id=item.food_id,
+        recipe_id=None,
         name_es=name_es,
         grams=float(item.grams),
         is_substitutable=item.is_substitutable,
         alternatives=alternatives,
     )
+
+
+class BatchCookAssignmentIn(BaseModel):
+    day_index: int = Field(ge=0)
+    meal_type: str
+    servings: float = Field(gt=0, le=20)
+
+
+class BatchCookIn(BaseModel):
+    recipe_id: UUID
+    assignments: list[BatchCookAssignmentIn] = Field(min_length=1, max_length=_MAX_DAYS * 6)
+
+
+@router.post("/{plan_id}/batch-cook")
+async def batch_cook(
+    plan_id: UUID,
+    body: BatchCookIn,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> DietPlanDetailOut:
+    """Batch cooking (Fase 7, documento 1): asigna raciones de UNA receta
+    ya cocinada a comidas concretas de un plan ya existente — sustituye lo
+    que hubiera en esa comida por la receta (mismo criterio que "esta
+    comida ya está resuelta con lo que cociné el domingo"), con los gramos
+    calculados a partir de sus ingredientes reales (R9), nunca inventados.
+    """
+    plan = await _get_plan(session, user_id, plan_id)
+
+    recipe = await session.get(Recipe, body.recipe_id)
+    if recipe is None or recipe.user_id != user_id:
+        raise AppError("RECIPE_NOT_FOUND", "No existe esa receta.", status_code=404)
+
+    ingredients = list(
+        await session.scalars(
+            select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)
+        )
+    )
+    if not ingredients:
+        raise AppError(
+            "RECIPE_HAS_NO_INGREDIENTS", "Esa receta no tiene ingredientes.", status_code=422
+        )
+    total_weight = sum(float(i.grams) for i in ingredients)
+    per_serving_grams = total_weight / max(recipe.servings, 1)
+
+    for assignment in body.assignments:
+        plan_day = await session.scalar(
+            select(PlanDay).where(
+                PlanDay.plan_id == plan_id, PlanDay.day_index == assignment.day_index
+            )
+        )
+        if plan_day is None:
+            raise AppError(
+                "PLAN_DAY_NOT_FOUND", f"El plan no tiene el día {assignment.day_index}.", 404
+            )
+        plan_meal = await session.scalar(
+            select(PlanMeal).where(
+                PlanMeal.plan_day_id == plan_day.id, PlanMeal.meal_type == assignment.meal_type
+            )
+        )
+        if plan_meal is None:
+            raise AppError(
+                "PLAN_MEAL_NOT_FOUND",
+                f"El día {assignment.day_index} no tiene la comida '{assignment.meal_type}'.",
+                404,
+            )
+
+        # La receta sustituye lo que hubiera en esa comida — no se mezclan
+        # alimentos sueltos con una comida ya resuelta por el batch.
+        await session.execute(delete(PlanItem).where(PlanItem.plan_meal_id == plan_meal.id))
+        session.add(
+            PlanItem(
+                plan_meal_id=plan_meal.id,
+                recipe_id=recipe.id,
+                grams=round(per_serving_grams * assignment.servings, 2),
+                is_substitutable=False,
+            )
+        )
+
+    await session.commit()
+    return await _load_plan_detail(session, plan)

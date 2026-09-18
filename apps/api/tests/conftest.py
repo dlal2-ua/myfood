@@ -101,8 +101,14 @@ async def test_food(superuser_conn):
     # test) y su teardown puede correr después o antes que el de
     # registered_client según el orden de los fixtures — se borra
     # explícitamente aquí para no depender de ese orden ni de una CASCADE
-    # que no existe en ninguna de las cinco tablas (solo *.user_id tiene
-    # ON DELETE CASCADE, no *.food_id).
+    # que no existe en ninguna de estas tablas (solo *.user_id tiene
+    # ON DELETE CASCADE, no *.food_id). `plan_items`/`plan_item_alternatives`
+    # /`food_vectors` entran en la misma categoría: en un entorno con el
+    # catálogo vacío (CI, o esta BD de prueba), `select_candidates` escanea
+    # TODA la tabla `foods` — este alimento puede colar como candidato real
+    # del generador de dietas (bug real encontrado: quality_rank=1 y 31 g de
+    # proteína/100 g lo hacían competitivo) en cualquier test que además
+    # genere un plan, no solo en los tests de /log.
     await superuser_conn.execute(
         text("DELETE FROM food_log WHERE food_id = :id"), {"id": str(food_id)}
     )
@@ -117,6 +123,15 @@ async def test_food(superuser_conn):
     )
     await superuser_conn.execute(
         text("DELETE FROM pantry_items WHERE food_id = :id"), {"id": str(food_id)}
+    )
+    await superuser_conn.execute(
+        text("DELETE FROM plan_items WHERE food_id = :id"), {"id": str(food_id)}
+    )
+    await superuser_conn.execute(
+        text("DELETE FROM plan_item_alternatives WHERE food_id = :id"), {"id": str(food_id)}
+    )
+    await superuser_conn.execute(
+        text("DELETE FROM food_vectors WHERE food_id = :id"), {"id": str(food_id)}
     )
     await superuser_conn.execute(text("DELETE FROM foods WHERE id = :id"), {"id": str(food_id)})
     await superuser_conn.commit()
