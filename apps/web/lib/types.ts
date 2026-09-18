@@ -169,6 +169,16 @@ export interface ShoppingList {
   items: ShoppingListItem[];
 }
 
+export interface PrivacySummary {
+  account_created_at: string;
+  measurements_count: number;
+  food_log_entries: number;
+  water_log_entries: number;
+  supplements_count: number;
+  diet_plans_count: number;
+  recipes_count: number;
+}
+
 export interface PantryItem {
   id: string;
   food_id: string;
