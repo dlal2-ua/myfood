@@ -1,13 +1,118 @@
+import base64
+import json
+import os
+import tempfile
 import uuid
+from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from myfood.config import get_settings
 
 settings = get_settings()
+
+# --- Protección de la credencial real de iafood -------------------------------
+#
+# Estos tests corren contra el MISMO Postgres que producción (localmente, con
+# POSTGRES_HOST apuntando al contenedor; en CI la BD es una desechable vacía)
+# y muchos borran/crean la fila única de `ai_credentials`. Sin esto, un
+# `pytest` local destruye en silencio el token real del admin en cuanto lo ha
+# pegado en el panel (`claude setup-token`, algo que solo él puede volver a
+# generar).
+#
+# Al empezar la sesión se guarda la fila real (en memoria y en un fichero 0600
+# en el directorio temporal — solo contiene el token YA CIFRADO, igual que la
+# BD — para sobrevivir a un proceso matado a mitad); antes de cada test la
+# tabla se vacía (así ningún test depende de que haya o no un token real); y
+# al terminar la sesión se borra lo que hayan dejado los tests y se restaura la
+# fila real. Si una sesión anterior murió sin restaurar (fichero presente y
+# fila ausente), la siguiente la restaura al arrancar.
+_CREDENTIAL_BACKUP_PATH = Path(tempfile.gettempdir()) / "myfood-tests-ai-credential-backup.json"
+_SELECT_CREDENTIAL = text(
+    "SELECT provider, token_encrypted, updated_by, updated_at FROM ai_credentials WHERE id = 1"
+)
+
+
+def _write_credential_backup(row, path: Path = _CREDENTIAL_BACKUP_PATH) -> dict:
+    payload = {
+        "provider": row.provider,
+        "token_encrypted": base64.b64encode(bytes(row.token_encrypted)).decode(),
+        "updated_by": str(row.updated_by) if row.updated_by is not None else None,
+        "updated_at": row.updated_at.isoformat(),
+    }
+    # Se borra antes de crear para que el 0600 se aplique de verdad (el modo de
+    # os.open solo cuenta al crear el fichero).
+    path.unlink(missing_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(payload, f)
+    return payload
+
+
+def _restore_credential(conn, payload: dict) -> None:
+    conn.execute(text("DELETE FROM ai_credentials"))
+    conn.execute(
+        text(
+            "INSERT INTO ai_credentials (id, provider, token_encrypted, updated_by, updated_at) "
+            "VALUES (1, :provider, :token, "
+            # Si el usuario que la guardó ya no existe, mejor sin `updated_by`
+            # que perder el token por una violación de la FK.
+            "(SELECT id FROM users WHERE id = CAST(:updated_by AS uuid)), "
+            "CAST(:updated_at AS timestamptz))"
+        ),
+        {
+            "provider": payload["provider"],
+            "token": base64.b64decode(payload["token_encrypted"]),
+            "updated_by": payload["updated_by"],
+            "updated_at": payload["updated_at"],
+        },
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def protect_real_ai_credential():
+    engine = create_engine(settings.database_url_superuser_sync)
+    payload: dict | None = None
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(_SELECT_CREDENTIAL).first()
+            if row is None and _CREDENTIAL_BACKUP_PATH.exists():
+                _restore_credential(conn, json.loads(_CREDENTIAL_BACKUP_PATH.read_text()))
+                row = conn.execute(_SELECT_CREDENTIAL).first()
+            if row is not None:
+                payload = _write_credential_backup(row)
+            else:
+                _CREDENTIAL_BACKUP_PATH.unlink(missing_ok=True)
+    except SQLAlchemyError:
+        # Sin BD alcanzable (o sin migrar) no hay nada que proteger — los tests
+        # que la necesiten fallarán por su cuenta.
+        engine.dispose()
+        yield None
+        return
+
+    yield engine
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM ai_credentials"))
+            if payload is not None:
+                _restore_credential(conn, payload)
+        _CREDENTIAL_BACKUP_PATH.unlink(missing_ok=True)
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def clean_ai_credentials_before_each_test(protect_real_ai_credential):
+    if protect_real_ai_credential is not None:
+        with protect_real_ai_credential.begin() as conn:
+            conn.execute(text("DELETE FROM ai_credentials"))
+    yield
 
 
 @pytest_asyncio.fixture
