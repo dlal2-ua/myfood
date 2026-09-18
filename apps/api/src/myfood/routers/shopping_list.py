@@ -5,11 +5,11 @@
 2. Generada desde un plan de dieta (`POST /from-plan/{plan_id}`, Fase 7):
    suma los gramos de cada alimento en los 7 días del plan y descuenta lo
    que ya hay en la despensa (`pantry_items`) — criterio de aceptación de
-   la Fase 7. Los `plan_items` con `recipe_id` (en vez de `food_id`) se
-   ignoran: ningún flujo del backend permite hoy meter una receta en un
-   plan ni en el registro diario (`recipe_id` existe en el esquema para
-   ese caso futuro, sin usar todavía en ningún sitio), así que no hay nada
-   real que expandir.
+   la Fase 7. Los `plan_items` con `recipe_id` (comidas de batch cooking,
+   Fase 7) se expanden a sus ingredientes reales (`recipe_ingredients`,
+   escalados a los gramos de receta que pida el plan) antes de sumar —
+   nunca se guarda un desglose de ingredientes aparte que pudiera
+   desincronizarse (R9).
 """
 
 from uuid import UUID
@@ -26,6 +26,7 @@ from myfood.db.models import (
     PlanDay,
     PlanItem,
     PlanMeal,
+    RecipeIngredient,
     ShoppingListItem,
 )
 from myfood.deps import get_current_user_id, get_db
@@ -138,15 +139,41 @@ async def generate_from_plan(
     if plan is None or plan.user_id != user_id:
         raise AppError("DIET_PLAN_NOT_FOUND", "No existe ese plan.", status_code=404)
 
-    needed_rows = (
+    needed: dict[UUID, float] = {}
+    for food_id, total_grams in await session.execute(
+        select(PlanItem.food_id, func.sum(PlanItem.grams))
+        .join(PlanMeal, PlanMeal.id == PlanItem.plan_meal_id)
+        .join(PlanDay, PlanDay.id == PlanMeal.plan_day_id)
+        .where(PlanDay.plan_id == plan_id, PlanItem.food_id.is_not(None))
+        .group_by(PlanItem.food_id)
+    ):
+        needed[food_id] = needed.get(food_id, 0.0) + float(total_grams)
+
+    recipe_rows = (
         await session.execute(
-            select(PlanItem.food_id, func.sum(PlanItem.grams))
+            select(PlanItem.recipe_id, func.sum(PlanItem.grams))
             .join(PlanMeal, PlanMeal.id == PlanItem.plan_meal_id)
             .join(PlanDay, PlanDay.id == PlanMeal.plan_day_id)
-            .where(PlanDay.plan_id == plan_id, PlanItem.food_id.is_not(None))
-            .group_by(PlanItem.food_id)
+            .where(PlanDay.plan_id == plan_id, PlanItem.recipe_id.is_not(None))
+            .group_by(PlanItem.recipe_id)
         )
     ).all()
+    for recipe_id, recipe_grams_needed in recipe_rows:
+        ingredients = list(
+            await session.scalars(
+                select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe_id)
+            )
+        )
+        total_ingredient_weight = sum(float(i.grams) for i in ingredients)
+        if total_ingredient_weight <= 0:
+            continue
+        scale = float(recipe_grams_needed) / total_ingredient_weight
+        for ingredient in ingredients:
+            needed[ingredient.food_id] = needed.get(ingredient.food_id, 0.0) + float(
+                ingredient.grams
+            ) * scale
+
+    needed_rows = needed.items()
 
     pantry_rows = await session.execute(
         select(PantryItem.food_id, PantryItem.quantity_g).where(PantryItem.user_id == user_id)

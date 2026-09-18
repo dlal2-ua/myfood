@@ -297,6 +297,7 @@ export interface PlanItemAlternative {
 export interface PlanItem {
   id: string;
   food_id: string | null;
+  recipe_id: string | null;
   name_es: string | null;
   grams: number;
   is_substitutable: boolean;
