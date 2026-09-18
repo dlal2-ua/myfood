@@ -503,3 +503,50 @@ export interface GamificationSummary {
   heatmap: HeatmapDay[];
   achievements: Achievement[];
 }
+
+export type ChatRole = "user" | "assistant";
+export type ChatSource = "text" | "voice";
+
+export interface ChatHistoryItem {
+  id: string;
+  role: ChatRole;
+  content: string;
+  source: ChatSource;
+  created_at: string;
+}
+
+// Mismo shape que AiProposalPayload (día completo de un plan existente).
+export interface ChatDayChangePayload {
+  diet_plan_id: string;
+  day_index: number;
+  meals: AiProposalMeal[];
+}
+
+export interface ChatPantryProposalItem {
+  food_id: string;
+  food_name: string;
+  quantity_g: number;
+}
+
+export interface ChatPantryPayload {
+  items: ChatPantryProposalItem[];
+}
+
+export interface ChatDayProposal {
+  scope: "day";
+  ai_proposal_id: string;
+  payload: ChatDayChangePayload;
+}
+
+export interface ChatPantryProposal {
+  scope: "pantry";
+  ai_proposal_id: string;
+  payload: ChatPantryPayload;
+}
+
+export type ChatProposal = ChatDayProposal | ChatPantryProposal;
+
+export interface ChatMessageResponse {
+  message: string;
+  proposal: ChatProposal | null;
+}

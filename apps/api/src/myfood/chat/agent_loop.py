@@ -1,0 +1,72 @@
+"""Bucle agente del chat conversacional (sección 24.3). A diferencia del
+resto de iafood (una única llamada, una única tool, `max_turns=1` o `2`),
+aquí Claude puede encadenar varias llamadas de solo lectura antes de
+responder o proponer un cambio — la conversación es abierta y no viene con
+candidatos precargados (sección 24.2). Tope de 5 llamadas por turno
+(sección 24.5, anti-abuso de coste) y 20s de timeout de turno.
+
+Corre siempre en el `worker` (regla 19) — es la única función de chat que
+invoca `ai/agent.run_agent`.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from myfood.ai.agent import AgentResult, run_agent
+from myfood.ai.prompts import CHAT_SYSTEM_V1, build_chat_user_prompt
+from myfood.chat.tools import build_chat_tools
+from myfood.domain.diet_engine import CandidateFood
+
+MAX_TOOL_CALLS_PER_TURN = 5
+CHAT_TURN_TIMEOUT_SECONDS = 20.0
+
+
+@dataclass
+class ChatTurnResult:
+    text: str
+    day_change_args: dict | None
+    pantry_args: dict | None
+    alias_to_candidate: dict[str, CandidateFood] = field(default_factory=dict)
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+async def run_chat_turn(
+    session: AsyncSession, user_id: UUID, token: str, user_text: str
+) -> ChatTurnResult:
+    alias_map: dict[str, CandidateFood] = {}
+    day_change_sink: list[dict] = []
+    pantry_sink: list[dict] = []
+
+    tools = build_chat_tools(
+        session,
+        user_id,
+        alias_map=alias_map,
+        day_change_sink=day_change_sink,
+        pantry_sink=pantry_sink,
+    )
+
+    agent_result: AgentResult = await run_agent(
+        token=token,
+        prompt=build_chat_user_prompt(user_text),
+        system_prompt=CHAT_SYSTEM_V1,
+        mcp_tools=tools,
+        max_turns=MAX_TOOL_CALLS_PER_TURN,
+        timeout_seconds=CHAT_TURN_TIMEOUT_SECONDS,
+    )
+
+    return ChatTurnResult(
+        text=agent_result.text,
+        # Si el modelo llama a la misma tool más de una vez en el turno
+        # (p. ej. se corrige a media conversación), se queda con la última
+        # — mismo criterio que el resto de flujos sink-based (`sink[-1]`).
+        day_change_args=day_change_sink[-1] if day_change_sink else None,
+        pantry_args=pantry_sink[-1] if pantry_sink else None,
+        alias_to_candidate=alias_map,
+        input_tokens=agent_result.input_tokens,
+        output_tokens=agent_result.output_tokens,
+    )

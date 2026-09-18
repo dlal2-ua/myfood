@@ -91,6 +91,7 @@ async def test_admin_limits_defaults(admin_client):
         "per_profile_daily": 10,
         "instance_daily": 30,
         "max_tokens_per_call": 8000,
+        "chat_messages_per_profile_daily": 50,
     }
 
 
@@ -108,6 +109,7 @@ async def test_admin_updates_limits_and_get_reflects_it(admin_client):
         "per_profile_daily": 3,
         "instance_daily": 15,
         "max_tokens_per_call": 4000,
+        "chat_messages_per_profile_daily": 50,
     }
 
 

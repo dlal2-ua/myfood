@@ -9,14 +9,22 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai.consent import require_ai_processing_consent
 from myfood.ai.flows.diet_plan import request_diet_plan
 from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
 from myfood.ai.schemas import AiSessionOut, ai_session_to_out
-from myfood.db.models import AiProposal, AiSession, DietPlan, PlanDay, PlanItem, PlanMeal
+from myfood.db.models import (
+    AiProposal,
+    AiSession,
+    DietPlan,
+    PantryItem,
+    PlanDay,
+    PlanItem,
+    PlanMeal,
+)
 from myfood.deps import get_current_user_id, get_db
 from myfood.domain.food_candidates import compute_alternatives_for_item
 from myfood.errors import AppError
@@ -105,20 +113,61 @@ async def _get_owned_proposal(
     return proposal
 
 
+async def _materialize_pantry_proposal(session: AsyncSession, user_id: UUID, payload: dict) -> None:
+    """Propuesta del chat (`scope='pantry'`, sección 24.3: `add_to_pantry`)
+    — mismo criterio de "sumar si ya existe" que `routers/pantry.py::add_pantry_item`."""
+    for entry in payload["items"]:
+        food_id = UUID(entry["food_id"])
+        existing = await session.scalar(
+            select(PantryItem).where(PantryItem.user_id == user_id, PantryItem.food_id == food_id)
+        )
+        if existing is not None:
+            existing.quantity_g = float(existing.quantity_g) + entry["quantity_g"]
+        else:
+            session.add(
+                PantryItem(user_id=user_id, food_id=food_id, quantity_g=entry["quantity_g"])
+            )
+
+
 async def _materialize_proposal(session: AsyncSession, user_id: UUID, proposal: AiProposal) -> None:
-    """Vuelca la propuesta de un día (`scope='meal'`) en `plan_days`/
-    `plan_meals`/`plan_items` reales del `DietPlan` que ya creó el worker —
-    las mismas tablas que usa el motor determinista, con las mismas
-    alternativas precalculadas (sección "Plan de Actuación": cualquier
-    dieta que salga de MyFood cuadra igual, venga de la IA o no)."""
+    """Vuelca la propuesta de un día en `plan_days`/`plan_meals`/`plan_items`
+    reales del `DietPlan` — las mismas tablas que usa el motor determinista,
+    con las mismas alternativas precalculadas (sección "Plan de Actuación":
+    cualquier dieta que salga de MyFood cuadra igual, venga de la IA o no).
+
+    `scope='meal'`: día nuevo de un plan recién generado por iafood — crea
+    el `PlanDay`. `scope='day'`: cambio del chat sobre un plan YA existente
+    (sección 24.3, `propose_day_change`) — el `PlanDay` ya existe, así que
+    se sustituyen sus comidas (borra `plan_meals` del día y reinserta,
+    mismo criterio que `batch_cook`, `routers/diet_plans.py`, solo que para
+    el día completo en vez de una comida suelta). `scope='pantry'`: no toca
+    planes, va aparte."""
+    if proposal.scope == "pantry":
+        await _materialize_pantry_proposal(session, user_id, proposal.payload)
+        return
+
     payload = proposal.payload
     plan = await session.get(DietPlan, UUID(payload["diet_plan_id"]))
     if plan is None or plan.user_id != user_id:
         raise AppError("PLAN_NOT_FOUND", "El plan asociado ya no existe.", status_code=404)
 
-    plan_day = PlanDay(plan_id=plan.id, day_index=payload["day_index"])
-    session.add(plan_day)
-    await session.flush()
+    if proposal.scope == "day":
+        plan_day = await session.scalar(
+            select(PlanDay).where(
+                PlanDay.plan_id == plan.id, PlanDay.day_index == payload["day_index"]
+            )
+        )
+        if plan_day is None:
+            raise AppError(
+                "PLAN_DAY_NOT_FOUND", "Ese día ya no existe en el plan.", status_code=404
+            )
+        await session.execute(delete(PlanMeal).where(PlanMeal.plan_day_id == plan_day.id))
+        await session.flush()
+    else:  # scope == "meal"
+        plan_day = PlanDay(plan_id=plan.id, day_index=payload["day_index"])
+        session.add(plan_day)
+        await session.flush()
+
     for sort_order, meal in enumerate(payload["meals"]):
         plan_meal = PlanMeal(
             plan_day_id=plan_day.id, meal_type=meal["meal_type"], sort_order=sort_order

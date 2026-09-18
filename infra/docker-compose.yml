@@ -64,6 +64,31 @@ services:
     depends_on:
       api: { condition: service_healthy }
 
+  # Transcripción de voz autoalojada (Fase 8, sección 24.1) — única IA local
+  # del proyecto, no razona, solo convierte audio en texto (R2). Imagen sin
+  # GPU por defecto para que `docker compose up` funcione en cualquier host
+  # sin más requisitos; en un host con `nvidia-container-toolkit` operativo,
+  # usar la GPU con:
+  #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+  # (criterio de aceptación de la Fase 8: funciona con GPU si está
+  # disponible, y en modo CPU si no — ver docker-compose.gpu.yml).
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    restart: unless-stopped
+    environment:
+      ASR_ENGINE: faster_whisper
+      ASR_MODEL: ${WHISPER_MODEL:-medium}
+    volumes:
+      - /var/apps/propias-app/myfood/data/whisper:/root/.cache/whisper
+    healthcheck:
+      # El servicio no expone una ruta de salud dedicada — /docs (Swagger,
+      # generado automáticamente por FastAPI) sirve igual para comprobar que
+      # el proceso responde, y no requiere subir audio de prueba.
+      test: ["CMD", "curl", "-f", "http://localhost:9000/docs"]
+      interval: 30s
+      retries: 5
+      start_period: 120s
+
   web:
     build: ../apps/web
     restart: unless-stopped

@@ -7,6 +7,8 @@ una única cola con un campo "kind") para que el worker pueda escuchar cada
 una con su propio bucle, sin tener que descartar mensajes de otro tipo.
 """
 
+import json
+
 import redis.asyncio as redis
 
 from myfood.config import get_settings
@@ -15,6 +17,7 @@ DIET_PLAN_QUEUE_KEY = "iafood:jobs:diet_plan"
 SMART_LOG_QUEUE_KEY = "iafood:jobs:smart_log"
 RECIPE_IMPORT_QUEUE_KEY = "iafood:jobs:recipe_import"
 RECEIPT_SCAN_QUEUE_KEY = "iafood:jobs:receipt_scan"
+CHAT_QUEUE_KEY = "iafood:jobs:chat"
 
 # `socket_timeout` explícito a `None`: redis-py (desde 8.x) pone un
 # `socket_timeout=5` por defecto en el cliente async, que compite con el
@@ -26,6 +29,9 @@ RECEIPT_SCAN_QUEUE_KEY = "iafood:jobs:receipt_scan"
 # tiene su propio parámetro de timeout — el socket debe esperar más que
 # eso, no menos.
 _redis = redis.from_url(get_settings().redis_url, decode_responses=True, socket_timeout=None)
+# Cliente aparte, sin `decode_responses`: el audio de voz del chat es
+# binario, y decodificarlo como UTF-8 lo corrompería.
+_redis_bytes = redis.from_url(get_settings().redis_url, decode_responses=False, socket_timeout=None)
 
 
 async def enqueue_job(queue_key: str, ai_session_id: str) -> None:
@@ -73,3 +79,67 @@ async def enqueue_receipt_scan_job(ai_session_id: str) -> None:
 
 async def dequeue_receipt_scan_job(timeout_seconds: int = 5) -> str | None:
     return await dequeue_job(RECEIPT_SCAN_QUEUE_KEY, timeout_seconds)
+
+
+async def enqueue_chat_job(ai_session_id: str) -> None:
+    await enqueue_job(CHAT_QUEUE_KEY, ai_session_id)
+
+
+async def dequeue_chat_job(timeout_seconds: int = 5) -> str | None:
+    return await dequeue_job(CHAT_QUEUE_KEY, timeout_seconds)
+
+
+# --- Resultado síncrono del chat (sección 7.9/24.3) -------------------------
+#
+# El resto de iafood es 202 + polling de `ai_sessions` (regla 19: el
+# proveedor de IA nunca se llama desde el hilo de la petición). El chat es
+# la única excepción deliberada: la especificación lo diseña como una
+# respuesta SÍNCRONA con su propio timeout de turno (sección 24.5, 20s) —
+# tiene sentido para una conversación, no para pedir al usuario que haga
+# polling de cada mensaje. Para no romper la regla 19 de todas formas, el
+# proceso `api` sigue sin llamar nunca a Whisper ni al Agent SDK: encola
+# igual que cualquier otro flujo y solo espera el resultado con un `BRPOP`
+# de Redis (operación local) hasta el timeout del turno — el trabajo real
+# lo hace el `worker`, exactamente igual que en el resto de iafood.
+def _chat_result_key(ai_session_id: str) -> str:
+    return f"iafood:chat_result:{ai_session_id}"
+
+
+async def push_chat_result(ai_session_id: str, payload: dict) -> None:
+    key = _chat_result_key(ai_session_id)
+    await _redis.lpush(key, json.dumps(payload))
+    # Por si nadie llega a hacer BRPOP (p. ej. el cliente ya cortó la
+    # conexión tras su propio timeout) — no debe quedar colgado para siempre.
+    await _redis.expire(key, 60)
+
+
+async def wait_for_chat_result(ai_session_id: str, timeout_seconds: int) -> dict | None:
+    result = await _redis.brpop([_chat_result_key(ai_session_id)], timeout=timeout_seconds)
+    if result is None:
+        return None
+    _key, raw = result
+    return json.loads(raw)
+
+
+# --- Audio de voz en tránsito (sección 24, R2) ------------------------------
+#
+# "El audio nunca se persiste; solo el texto transcrito queda en
+# chat_messages" — nunca toca disco. Vive en Redis, en memoria, solo el
+# tiempo que tarda el worker en recogerlo y transcribirlo; se borra al
+# leerlo (o por su propio TTL si nadie lo recoge).
+_CHAT_AUDIO_TTL_SECONDS = 120
+
+
+def _chat_audio_key(ai_session_id: str) -> str:
+    return f"iafood:chat_audio:{ai_session_id}"
+
+
+async def store_chat_audio(ai_session_id: str, audio_bytes: bytes) -> None:
+    await _redis_bytes.set(_chat_audio_key(ai_session_id), audio_bytes, ex=_CHAT_AUDIO_TTL_SECONDS)
+
+
+async def pop_chat_audio(ai_session_id: str) -> bytes | None:
+    key = _chat_audio_key(ai_session_id)
+    audio_bytes = await _redis_bytes.get(key)
+    await _redis_bytes.delete(key)
+    return audio_bytes

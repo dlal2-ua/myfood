@@ -40,7 +40,9 @@ async def _incr_and_check(key: str, ttl: int, limit: int, error_code: str, messa
         raise QuotaExceeded(error_code, message)
 
 
-async def check_and_consume_quota(user_id: UUID, *, scope: str = "diet_plan") -> None:
+async def check_and_consume_quota(
+    user_id: UUID, *, scope: str = "diet_plan", per_profile_limit: int | None = None
+) -> None:
     """Se llama justo antes de encolar el trabajo para el `worker`. Si el
     perfil ya agotó su cuota, ni siquiera se comprueba la de instancia — el
     intento no llega a "gastar" cuota compartida por algo que de todas
@@ -51,14 +53,17 @@ async def check_and_consume_quota(user_id: UUID, *, scope: str = "diet_plan") ->
     dietas") — Smart Log puede usarse muchas veces al día para registrar
     rápido, un patrón de uso muy distinto al de generar un plan completo,
     así que comparten los mismos límites configurados pero no el mismo
-    contador."""
+    contador. `per_profile_limit`, si se pasa, sustituye
+    `limits.per_profile_daily` — el chat (sección 24.5) tiene su propio
+    número configurable (`chatMessagesPerProfileDaily`), distinto del de
+    generación de dietas, aunque comparte el límite de instancia."""
     limits = load_limits()
     today, ttl = _today_and_ttl()
 
     await _incr_and_check(
         f"iafood:quota:{scope}:{user_id}:{today}",
         ttl,
-        limits.per_profile_daily,
+        per_profile_limit if per_profile_limit is not None else limits.per_profile_daily,
         "AI_QUOTA_PROFILE",
         "Has alcanzado tu límite diario de generaciones con IA.",
     )
