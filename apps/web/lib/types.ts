@@ -169,6 +169,14 @@ export interface ShoppingList {
   items: ShoppingListItem[];
 }
 
+export interface PantryItem {
+  id: string;
+  food_id: string;
+  food_name: string;
+  quantity_g: number;
+  expires_on: string | null;
+}
+
 export type WaterMode = "auto" | "manual";
 
 export interface WaterContainer {

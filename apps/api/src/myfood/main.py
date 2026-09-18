@@ -13,6 +13,7 @@ from myfood.routers import (
     health,
     log,
     notification_rules,
+    pantry,
     profile,
     push,
     recipes,
@@ -37,6 +38,7 @@ app.include_router(log.router, prefix="/api")
 app.include_router(favorites.router, prefix="/api")
 app.include_router(restrictions.router, prefix="/api")
 app.include_router(shopping_list.router, prefix="/api")
+app.include_router(pantry.router, prefix="/api")
 app.include_router(supplements.router, prefix="/api")
 app.include_router(water.router, prefix="/api")
 app.include_router(push.router, prefix="/api")

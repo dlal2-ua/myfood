@@ -1,18 +1,33 @@
-"""Lista de la compra manual (sección 6.4) — el usuario añade artículos a
-mano, eligiendo un alimento del catálogo o escribiendo texto libre para lo
-que no está en el catálogo (p. ej. "papel de aluminio"). No se genera a
-partir de ningún plan de comidas: `plan_id` existe en el esquema para un
-feature futuro (Fase 4) y se deja sin usar aquí.
+"""Lista de la compra (sección 6.4). Dos vías para añadir artículos:
+
+1. Manual: el usuario elige un alimento del catálogo o escribe texto libre
+   para lo que no está en el catálogo (p. ej. "papel de aluminio").
+2. Generada desde un plan de dieta (`POST /from-plan/{plan_id}`, Fase 7):
+   suma los gramos de cada alimento en los 7 días del plan y descuenta lo
+   que ya hay en la despensa (`pantry_items`) — criterio de aceptación de
+   la Fase 7. Los `plan_items` con `recipe_id` (en vez de `food_id`) se
+   ignoran: ningún flujo del backend permite hoy meter una receta en un
+   plan ni en el registro diario (`recipe_id` existe en el esquema para
+   ese caso futuro, sin usar todavía en ningún sitio), así que no hay nada
+   real que expandir.
 """
 
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from myfood.db.models import Food, ShoppingListItem
+from myfood.db.models import (
+    DietPlan,
+    Food,
+    PantryItem,
+    PlanDay,
+    PlanItem,
+    PlanMeal,
+    ShoppingListItem,
+)
 from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
 
@@ -111,6 +126,61 @@ async def list_items(
     )
     rows = (await session.execute(stmt)).all()
     return ShoppingListOut(items=[_to_out(item, food_name) for item, food_name in rows])
+
+
+@router.post("/from-plan/{plan_id}", status_code=201)
+async def generate_from_plan(
+    plan_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> ShoppingListOut:
+    plan = await session.get(DietPlan, plan_id)
+    if plan is None or plan.user_id != user_id:
+        raise AppError("DIET_PLAN_NOT_FOUND", "No existe ese plan.", status_code=404)
+
+    needed_rows = (
+        await session.execute(
+            select(PlanItem.food_id, func.sum(PlanItem.grams))
+            .join(PlanMeal, PlanMeal.id == PlanItem.plan_meal_id)
+            .join(PlanDay, PlanDay.id == PlanMeal.plan_day_id)
+            .where(PlanDay.plan_id == plan_id, PlanItem.food_id.is_not(None))
+            .group_by(PlanItem.food_id)
+        )
+    ).all()
+
+    pantry_rows = await session.execute(
+        select(PantryItem.food_id, PantryItem.quantity_g).where(PantryItem.user_id == user_id)
+    )
+    in_pantry = {food_id: float(quantity_g) for food_id, quantity_g in pantry_rows}
+
+    # Regenerar en limpio: una llamada repetida para el mismo plan no debe
+    # ir acumulando artículos duplicados.
+    await session.execute(delete(ShoppingListItem).where(ShoppingListItem.plan_id == plan_id))
+
+    created: list[ShoppingListItem] = []
+    for food_id, total_needed in needed_rows:
+        remaining = float(total_needed) - in_pantry.get(food_id, 0.0)
+        if remaining <= 0:
+            continue  # la despensa ya cubre este alimento entero
+        food = await session.get(Food, food_id)
+        item = ShoppingListItem(
+            user_id=user_id,
+            food_id=food_id,
+            quantity_g=round(remaining, 2),
+            category=food.category if food else None,
+            plan_id=plan_id,
+        )
+        session.add(item)
+        created.append(item)
+
+    await session.commit()
+
+    out: list[ShoppingListItemOut] = []
+    for item in created:
+        food = await session.get(Food, item.food_id)
+        await session.refresh(item)
+        out.append(_to_out(item, food.name_es if food else None))
+    return ShoppingListOut(items=out)
 
 
 @router.delete("/checked", status_code=204)

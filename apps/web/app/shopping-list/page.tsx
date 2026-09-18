@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
-import type { FoodSearchItem, ShoppingList, ShoppingListItem } from "@/lib/types";
+import type { DietPlan, FoodSearchItem, ShoppingList, ShoppingListItem } from "@/lib/types";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -28,9 +28,38 @@ export default function ShoppingListPage() {
   const [rowError, setRowError] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
 
+  const [plans, setPlans] = useState<DietPlan[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
   useEffect(() => {
     void load();
+    void loadPlans();
   }, []);
+
+  async function loadPlans() {
+    try {
+      setPlans(await apiFetch<DietPlan[]>("/api/diet-plans"));
+    } catch {
+      // La lista de planes es un atajo opcional; si falla, la lista de la
+      // compra manual sigue funcionando igual.
+    }
+  }
+
+  async function onGenerateFromPlan() {
+    if (!selectedPlanId) return;
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      await apiFetch(`/api/shopping-list/from-plan/${selectedPlanId}`, { method: "POST" });
+      await load();
+    } catch (err) {
+      setGenerateError(errorMessage(err));
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -143,6 +172,42 @@ export default function ShoppingListPage() {
   return (
     <main className="flex flex-col gap-8">
       <h1 className="text-xl font-semibold">Lista de la compra</h1>
+
+      {plans.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-lg font-semibold">Generar desde un plan</h2>
+          <p className="text-sm text-neutral-500">
+            Suma lo que necesitas para los 7 días del plan y descuenta lo que ya tienes en la{" "}
+            <a href="/pantry" className="underline">
+              despensa
+            </a>
+            . Repetirlo para el mismo plan regenera la lista en limpio.
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <select
+              className={inputClass}
+              value={selectedPlanId}
+              onChange={(e) => setSelectedPlanId(e.target.value)}
+            >
+              <option value="">Elige un plan…</option>
+              {plans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={onGenerateFromPlan}
+              disabled={generating || !selectedPlanId}
+              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            >
+              {generating ? "Generando…" : "Generar lista"}
+            </button>
+          </div>
+          {generateError && <p className="text-sm text-red-600">{generateError}</p>}
+        </section>
+      )}
 
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Añadir artículo</h2>
