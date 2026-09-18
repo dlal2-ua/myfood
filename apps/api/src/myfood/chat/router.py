@@ -47,7 +47,6 @@ _WORKER_ERROR_MESSAGES = {
     "TRANSCRIPTION_UNAVAILABLE": (
         "No se pudo transcribir la nota de voz. Puedes escribir tu mensaje en su lugar."
     ),
-    "AUDIO_EXPIRED": "La nota de voz ya no está disponible. Vuelve a grabarla.",
 }
 
 

@@ -18,7 +18,6 @@ from sqlalchemy import select, text
 
 from myfood.ai import client as ai_client
 from myfood.ai.prompts import build_chat_user_prompt
-from myfood.ai.queue import pop_chat_audio, store_chat_audio
 from myfood.chat import flow
 from myfood.chat.agent_loop import ChatTurnResult
 from myfood.chat.tools import build_chat_tools
@@ -443,95 +442,47 @@ async def test_process_chat_job_text_message_succeeds(
     assert pushed.get("proposal") is None
 
 
-async def test_process_chat_job_voice_message_transcribes_and_never_persists_audio(
+async def test_process_chat_job_saves_voice_message_with_the_already_transcribed_text(
     two_users, configured_credential, monkeypatch
 ):
-    """Criterios de aceptación #2/#3 de la Fase 8: la nota de voz se
-    transcribe y el resultado queda en `chat_messages` con `source='voice'`
-    — el audio en sí nunca toca disco ni queda accesible una segunda vez
-    (se borra de Redis al leerlo, `ai/queue.py::pop_chat_audio`)."""
+    """La transcripción ocurre en el proceso `api` (en memoria); al worker solo
+    le llega el texto. Si el worker intentara transcribir, este test revienta."""
     user_id, _ = two_users
+
+    async def _worker_must_never_transcribe(audio_bytes: bytes) -> str:
+        raise AssertionError("el worker no debe transcribir: el audio no le llega")
+
     monkeypatch.setattr(flow, "run_chat_turn", _fake_turn(text="Vale."))
-    monkeypatch.setattr(flow, "transcribe", _fake_transcribe("dos huevos fritos"))
+    monkeypatch.setattr(flow, "transcribe", _worker_must_never_transcribe)
     monkeypatch.setattr(flow, "push_chat_result", _fake_push({}))
 
     async with AdminSessionLocal() as session:
-        ai_session = _running_ai_session(user_id, {"source": "voice", "text": None})
+        ai_session = _running_ai_session(
+            user_id, {"source": "voice", "text": "dos huevos fritos"}
+        )
         session.add(ai_session)
         await session.commit()
         await session.refresh(ai_session)
         session_id = ai_session.id
 
-    await store_chat_audio(str(session_id), b"contenido de audio falso, nunca a disco")
-
     await flow.process_chat_job(str(session_id))
 
-    reloaded = await _reload_session(session_id)
-    assert reloaded.status == "succeeded"
-
+    assert (await _reload_session(session_id)).status == "succeeded"
     async with AdminSessionLocal() as session:
         user_message = await session.scalar(
-            select(ChatMessage).where(
-                ChatMessage.user_id == user_id, ChatMessage.role == "user"
-            )
+            select(ChatMessage).where(ChatMessage.user_id == user_id, ChatMessage.role == "user")
         )
     assert user_message.content == "dos huevos fritos"
     assert user_message.source == "voice"
 
-    # El audio ya no está disponible tras procesarse una vez.
-    assert await pop_chat_audio(str(session_id)) is None
 
-
-def _fake_transcribe(text_out: str):
+def _fake_transcribe(text_out: str, received: dict | None = None):
     async def _fake(audio_bytes: bytes) -> str:
+        if received is not None:
+            received["audio"] = audio_bytes
         return text_out
 
     return _fake
-
-
-async def test_process_chat_job_voice_without_audio_marks_failed(
-    two_users, configured_credential
-):
-    """El audio ya expiró de Redis (TTL) o nunca llegó a guardarse — falla
-    con un código claro en vez de reventar."""
-    user_id, _ = two_users
-    async with AdminSessionLocal() as session:
-        ai_session = _running_ai_session(user_id, {"source": "voice", "text": None})
-        session.add(ai_session)
-        await session.commit()
-        await session.refresh(ai_session)
-        session_id = ai_session.id
-
-    await flow.process_chat_job(str(session_id))
-
-    reloaded = await _reload_session(session_id)
-    assert reloaded.status == "failed"
-    assert reloaded.validation_errors[0]["code"] == "AUDIO_EXPIRED"
-
-
-async def test_process_chat_job_transcription_unavailable_marks_failed(
-    two_users, configured_credential, monkeypatch
-):
-    user_id, _ = two_users
-
-    async def _raise(audio_bytes: bytes) -> str:
-        raise TranscriptionUnavailable("no responde")
-
-    monkeypatch.setattr(flow, "transcribe", _raise)
-
-    async with AdminSessionLocal() as session:
-        ai_session = _running_ai_session(user_id, {"source": "voice", "text": None})
-        session.add(ai_session)
-        await session.commit()
-        await session.refresh(ai_session)
-        session_id = ai_session.id
-    await store_chat_audio(str(session_id), b"audio falso")
-
-    await flow.process_chat_job(str(session_id))
-
-    reloaded = await _reload_session(session_id)
-    assert reloaded.status == "failed"
-    assert reloaded.validation_errors[0]["code"] == "TRANSCRIPTION_UNAVAILABLE"
 
 
 async def test_process_chat_job_day_change_propagates_honest_message_on_failure(
@@ -623,29 +574,70 @@ async def test_request_chat_message_without_credential_raises(two_users):
         assert exc_info.value.code == "AI_NOT_CONFIGURED"
 
 
-async def test_request_chat_message_stores_audio_and_enqueues(
+async def test_request_chat_message_transcribes_voice_in_memory_and_enqueues_only_text(
     two_users, configured_credential, monkeypatch
 ):
+    """Criterios de la Fase 8: el audio nunca se persiste. Se transcribe en el
+    proceso `api` y solo el texto viaja al worker — ni Redis (que vuelca
+    snapshots a disco) ni la BD guardan los bytes."""
+    import myfood.ai.queue as queue_module
+
     user_id, _ = two_users
     enqueued = []
+    received = {}
 
     async def _fake_enqueue(session_id: str) -> None:
         enqueued.append(session_id)
 
     monkeypatch.setattr(flow, "enqueue_chat_job", _fake_enqueue)
+    monkeypatch.setattr(flow, "transcribe", _fake_transcribe("dos huevos fritos", received))
 
     async with AdminSessionLocal() as session:
         ai_session = await flow.request_chat_message(
             session, user_id, text=None, audio_bytes=b"nota de voz falsa"
         )
 
+    assert received["audio"] == b"nota de voz falsa"
     assert ai_session.status == "running"
     assert ai_session.kind == "chat_edit"
-    assert ai_session.request_payload["source"] == "voice"
+    assert ai_session.request_payload == {"source": "voice", "text": "dos huevos fritos"}
     assert enqueued == [str(ai_session.id)]
+    # Guarda contra reintroducir el paso del audio por Redis.
+    assert not hasattr(queue_module, "store_chat_audio")
 
-    audio = await pop_chat_audio(str(ai_session.id))
-    assert audio == b"nota de voz falsa"
+
+async def test_request_chat_message_voice_with_whisper_down_raises_503_and_creates_no_session(
+    two_users, configured_credential, monkeypatch
+):
+    user_id, _ = two_users
+
+    async def _down(audio_bytes: bytes) -> str:
+        raise TranscriptionUnavailable("no responde")
+
+    monkeypatch.setattr(flow, "transcribe", _down)
+    async with AdminSessionLocal() as session:
+        before = await session.scalar(
+            text("SELECT count(*) FROM ai_sessions WHERE user_id = :u"), {"u": str(user_id)}
+        )
+        with pytest.raises(AppError) as exc_info:
+            await flow.request_chat_message(session, user_id, text=None, audio_bytes=b"x")
+        assert exc_info.value.code == "TRANSCRIPTION_UNAVAILABLE"
+        assert exc_info.value.status_code == 503
+        after = await session.scalar(
+            text("SELECT count(*) FROM ai_sessions WHERE user_id = :u"), {"u": str(user_id)}
+        )
+    assert after == before
+
+
+async def test_request_chat_message_rejects_a_voice_note_with_nothing_intelligible(
+    two_users, configured_credential, monkeypatch
+):
+    user_id, _ = two_users
+    monkeypatch.setattr(flow, "transcribe", _fake_transcribe("   "))
+    async with AdminSessionLocal() as session:
+        with pytest.raises(AppError) as exc_info:
+            await flow.request_chat_message(session, user_id, text=None, audio_bytes=b"x")
+        assert exc_info.value.code == "EMPTY_TRANSCRIPTION"
 
 
 async def test_request_chat_message_rejects_oversized_audio(two_users, configured_credential):
@@ -772,6 +764,31 @@ async def test_send_chat_message_maps_worker_error_to_503_with_code(
         await session.commit()
 
 
+async def test_send_chat_message_voice_with_whisper_down_is_503_with_a_readable_code(
+    registered_client, monkeypatch
+):
+    client, user_id = registered_client
+    await _complete_profile_and_login(client)
+    async with AdminSessionLocal() as session:
+        await ai_client.set_credential(session, admin_user_id=user_id, token="fake-token")
+
+    async def _down(audio_bytes: bytes) -> str:
+        raise TranscriptionUnavailable("no responde")
+
+    monkeypatch.setattr(flow, "transcribe", _down)
+    monkeypatch.setattr(flow, "enqueue_chat_job", _noop_enqueue)
+
+    resp = await client.post(
+        "/api/chat/message", files={"audio": ("nota.webm", b"audio falso", "audio/webm")}
+    )
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "TRANSCRIPTION_UNAVAILABLE"
+
+    async with AdminSessionLocal() as session:
+        await session.execute(text("DELETE FROM ai_credentials"))
+        await session.commit()
+
+
 async def test_send_chat_message_without_consent_is_forbidden(registered_client):
     client, user_id = registered_client
     async with AdminSessionLocal() as session:
@@ -841,21 +858,6 @@ async def test_chat_history_round_trip(registered_client):
     assert resp.status_code == 204
     resp = await client.get("/api/chat/history")
     assert resp.json() == []
-
-
-# --- ai/queue.py: audio en tránsito (nunca a disco, R2) ------------------------
-
-
-async def test_store_and_pop_chat_audio_round_trips_once():
-    session_id = str(uuid.uuid4())
-    original = b"\x00\x01contenido binario de audio\xff\xfe"
-    await store_chat_audio(session_id, original)
-
-    fetched = await pop_chat_audio(session_id)
-    assert fetched == original
-
-    # Una segunda lectura ya no encuentra nada — nunca se persiste dos veces.
-    assert await pop_chat_audio(session_id) is None
 
 
 # --- historial de conversación (encontrado en la primera prueba real) ---------
