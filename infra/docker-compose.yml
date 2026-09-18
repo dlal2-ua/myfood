@@ -83,8 +83,14 @@ services:
     healthcheck:
       # El servicio no expone una ruta de salud dedicada — /docs (Swagger,
       # generado automáticamente por FastAPI) sirve igual para comprobar que
-      # el proceso responde, y no requiere subir audio de prueba.
-      test: ["CMD", "curl", "-f", "http://localhost:9000/docs"]
+      # el proceso responde, y no requiere subir audio de prueba. Con python3
+      # y no curl: la imagen `latest-gpu` no lo trae (encontrado en vivo, se
+      # quedaba en "unhealthy" aunque el servicio respondía bien).
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:9000/docs', timeout=5)"
       interval: 30s
       retries: 5
       start_period: 120s
