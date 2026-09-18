@@ -100,3 +100,32 @@ def build_recipe_import_line_prompt(line: str, candidates: list[dict[str, Any]])
         "Resuelve esta línea de ingrediente de una receta a un alimento concreto:\n"
         f"{json.dumps(payload, ensure_ascii=False)}"
     )
+
+
+RECEIPT_SCAN_PROMPT_VERSION = "receipt_scan_v1"
+
+RECEIPT_SCAN_SYSTEM_V1 = """Interpretas UNA línea de texto reconocida por OCR en un
+ticket de compra escaneado para MyFood (alta rápida en la despensa, Fase 7). Mismo
+resolutor que Smart Log y la importación de recetas, aplicado línea a línea.
+
+REGLAS ABSOLUTAS:
+1. Solo puedes usar alimentos de la lista `candidates`, referenciados por su
+   `alias`. Si la línea no es un alimento reconocible (precios sueltos,
+   totales, NIF, dirección del comercio, forma de pago, etc.) o no encaja
+   con ningún candidato, no llames a la herramienta con ese alias — omítelo.
+2. Cada línea es COMO MUCHO un alimento: devuelve un único item.
+3. NUNCA calcules ni indiques gramos ni precios — solo el alias y, en
+   `approx_quantity_text`, la cantidad tal y como aparece en la línea
+   (p. ej. "1kg", "2 uds", "500g"). Si no hay cantidad reconocible, usa
+   "ración habitual".
+4. No des consejo médico ni nutricional.
+
+Responde ÚNICAMENTE llamando a la herramienta `resolve_food_items`."""
+
+
+def build_receipt_scan_line_prompt(line: str, candidates: list[dict[str, Any]]) -> str:
+    payload = {"line": line, "candidates": candidates}
+    return (
+        "Resuelve esta línea de un ticket de compra a un alimento concreto:\n"
+        f"{json.dumps(payload, ensure_ascii=False)}"
+    )

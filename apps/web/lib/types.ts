@@ -402,6 +402,15 @@ export interface SmartLogResult {
   warning: string | null;
 }
 
+export interface ReceiptScanItem extends SmartLogItem {
+  original_line: string;
+}
+
+export interface ReceiptScanResult {
+  items: ReceiptScanItem[];
+  lines_found: number;
+}
+
 export interface RecipeIngredient {
   id: string;
   food_id: string;
