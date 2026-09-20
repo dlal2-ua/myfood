@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai.consent import require_ai_processing_consent
 from myfood.ai.flows.diet_plan import request_diet_plan
+from myfood.ai.flows.supplement_suggestion import request_supplement_suggestion
 from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
 from myfood.ai.schemas import AiSessionOut, ai_session_to_out
 from myfood.db.models import (
@@ -24,6 +25,7 @@ from myfood.db.models import (
     PlanDay,
     PlanItem,
     PlanMeal,
+    Supplement,
 )
 from myfood.deps import get_current_user_id, get_db
 from myfood.domain.food_candidates import compute_alternatives_for_item
@@ -51,6 +53,24 @@ async def create_diet_plan_request(
         ) from exc
 
     ai_session = await request_diet_plan(session, user_id, num_days=body.num_days)
+    return ai_session_to_out(ai_session)
+
+
+@router.post("/supplement-suggestions", status_code=202)
+async def create_supplement_suggestion_request(
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> AiSessionOut:
+    """Sugerencia de suplementos (sección 10.7): solo bajo petición explícita, con la lista blanca
+    y los bloqueos por embarazo, patología o edad (`403 SUPPLEMENT_ADVICE_BLOCKED`)."""
+    await require_ai_processing_consent(session, user_id)
+    try:
+        await check_and_consume_quota(user_id, scope="supplement_suggestion")
+    except QuotaExceeded as exc:
+        raise AppError(
+            exc.code, exc.message, status_code=429, details={"reset_at": reset_at_iso()}
+        ) from exc
+    ai_session = await request_supplement_suggestion(session, user_id)
     return ai_session_to_out(ai_session)
 
 
@@ -144,6 +164,19 @@ async def _materialize_proposal(session: AsyncSession, user_id: UUID, proposal: 
     planes, va aparte."""
     if proposal.scope == "pantry":
         await _materialize_pantry_proposal(session, user_id, proposal.payload)
+        return
+    if proposal.scope == "supplement":
+        payload = proposal.payload
+        session.add(
+            Supplement(
+                user_id=user_id,
+                name=payload["name_es"],
+                type=payload["type"],
+                dose_amount=payload["dose_amount"],
+                dose_unit=payload["dose_unit"],
+                notes="Sugerido por iafood según tu ingesta (orientativo, no es consejo médico).",
+            )
+        )
         return
 
     payload = proposal.payload

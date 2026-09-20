@@ -91,13 +91,21 @@ async def download_remote_image(url: str, client: httpx.AsyncClient | None = Non
 
 
 def process_image(
-    data: bytes, *, sizes: tuple[int, ...] = VARIANT_SIZES
+    data: bytes,
+    *,
+    sizes: tuple[int, ...] = VARIANT_SIZES,
+    accepted_formats: frozenset[str] | set[str] = frozenset(_ACCEPTED_FORMATS),
 ) -> tuple[dict[int, bytes], tuple[int, int]]:
     """Variantes WebP (sin EXIF) por lado mayor, y las dimensiones del original."""
     try:
         with Image.open(BytesIO(data)) as probe:
-            if probe.format not in _ACCEPTED_FORMATS:
+            if probe.format not in accepted_formats:
                 raise ImageRejected("Formato de imagen no admitido.")
+            # Pillow solo lanza error por encima del DOBLE de MAX_IMAGE_PIXELS: entre el límite y
+            # el doble se limita a avisar, así que el tope se aplica aquí de forma explícita.
+            width, height = probe.size
+            if width * height > Image.MAX_IMAGE_PIXELS:
+                raise ImageRejected("La imagen tiene demasiados píxeles.")
         with Image.open(BytesIO(data)) as image:
             image = ImageOps.exif_transpose(image)  # respeta la orientación antes de quitar el EXIF
             original_size = image.size

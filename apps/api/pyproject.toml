@@ -25,6 +25,7 @@ dependencies = [
   "Pillow>=10.4",
   "claude-agent-sdk>=0.2.152",
   "recipe-scrapers>=15.12.0",
+  "pillow-heif>=0.18",
 ]
 
 [dependency-groups]

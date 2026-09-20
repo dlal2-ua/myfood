@@ -63,6 +63,7 @@ from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
 from myfood.ratelimit import guard, password_confirm_rules, record_failure, reset
 from myfood.security import SESSION_COOKIE_NAME, destroy_session, verify_password
+from myfood.services import user_images
 
 router = APIRouter(prefix="/privacy", tags=["privacy"])
 
@@ -335,6 +336,12 @@ async def delete_account(
                 "Eres el único administrador: nombra a otro antes de eliminar tu cuenta.",
                 status_code=409,
             )
+
+    # Las fotos de recetas y suplementos viven en disco, no en la base de datos: el borrado en
+    # cascada no las toca, así que se eliminan aquí (derecho al olvido).
+    for model, kind in ((Recipe, "recipe"), (Supplement, "supplement")):
+        for owner_id in await session.scalars(select(model.id).where(model.user_id == user_id)):
+            user_images.delete_image(kind, owner_id)
 
     # DELETE en SQL directo, no `session.delete(user)`: el ORM intentaría
     # gestionar la relación `User.profile` a mano (poner NULL en una PK, lo

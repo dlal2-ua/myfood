@@ -17,6 +17,7 @@ from myfood.ai.flows.diet_plan import process_diet_plan_job
 from myfood.ai.flows.receipt_scan import process_receipt_scan_job
 from myfood.ai.flows.recipe_import import process_recipe_import_job
 from myfood.ai.flows.smart_log import process_smart_log_job
+from myfood.ai.flows.supplement_suggestion import process_supplement_suggestion_job
 from myfood.ai.queue import (
     dequeue_chat_job,
     dequeue_diet_plan_job,
@@ -24,6 +25,7 @@ from myfood.ai.queue import (
     dequeue_receipt_scan_job,
     dequeue_recipe_import_job,
     dequeue_smart_log_job,
+    dequeue_supplement_suggestion_job,
 )
 from myfood.chat.flow import process_chat_job
 from myfood.config import get_settings
@@ -153,6 +155,17 @@ async def _diet_plan_jobs_loop() -> None:
             logger.exception(
                 "fallo procesando un trabajo de plan de dieta — se reintenta con el siguiente"
             )
+
+
+async def _supplement_suggestion_jobs_loop() -> None:
+    while True:
+        try:
+            ai_session_id = await dequeue_supplement_suggestion_job(_AI_QUEUE_POLL_TIMEOUT_SECONDS)
+            if ai_session_id is None:
+                continue
+            await process_supplement_suggestion_job(ai_session_id)
+        except Exception:
+            logger.exception("fallo procesando una sugerencia de suplementos — se sigue")
 
 
 async def _smart_log_jobs_loop() -> None:
@@ -286,6 +299,7 @@ async def main() -> None:
         _notifications_loop(),
         _diet_plan_jobs_loop(),
         _smart_log_jobs_loop(),
+        _supplement_suggestion_jobs_loop(),
         _recipe_import_jobs_loop(),
         _receipt_scan_jobs_loop(),
         _chat_jobs_loop(),

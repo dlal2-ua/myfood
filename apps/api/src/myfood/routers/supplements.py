@@ -27,7 +27,7 @@ from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +46,8 @@ from myfood.deps import get_current_user_id, get_db
 from myfood.domain import supplements as supplements_calc
 from myfood.errors import AppError
 from myfood.notification_rules_defaults import default_quiet_hours
+from myfood.routers._user_images import serve_image, store_uploaded_image
+from myfood.services import user_images
 
 router = APIRouter(prefix="/supplements", tags=["supplements"])
 
@@ -173,6 +175,7 @@ class SupplementOut(BaseModel):
     low_stock: bool
     # Coste estimado de 30 días con las tomas programadas; `None` si falta el precio o las dosis.
     monthly_cost: float | None = None
+    image_url: str | None = None
 
 
 def _to_out(
@@ -208,6 +211,9 @@ def _to_out(
             else None,
             supplement.doses_per_container,
             _days(schedules),
+        ),
+        image_url=user_images.image_url(
+            f"/api/supplements/{supplement.id}", "supplement", supplement.id
         ),
     )
 
@@ -453,6 +459,38 @@ async def get_today(
     )
 
 
+@router.put("/{supplement_id}/image", status_code=204)
+async def upload_supplement_image(
+    supplement_id: UUID,
+    file: UploadFile = File(...),
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """Foto del suplemento (máx. 10 MB; se reescala a 1024 px y se quita el EXIF)."""
+    await _get_supplement(session, user_id, supplement_id)
+    await store_uploaded_image("supplement", supplement_id, file)
+
+
+@router.get("/{supplement_id}/image")
+async def get_supplement_image(
+    supplement_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+):
+    await _get_supplement(session, user_id, supplement_id)
+    return serve_image("supplement", supplement_id)
+
+
+@router.delete("/{supplement_id}/image", status_code=204)
+async def delete_supplement_image(
+    supplement_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    await _get_supplement(session, user_id, supplement_id)
+    user_images.delete_image("supplement", supplement_id)
+
+
 @router.get("/{supplement_id}")
 async def get_supplement_detail(
     supplement_id: UUID,
@@ -538,6 +576,7 @@ async def delete_supplement(
     supplement = await _get_supplement(session, user_id, supplement_id)
     await session.delete(supplement)
     await session.commit()
+    user_images.delete_image("supplement", supplement_id)
 
 
 async def _reminder_schedule_ids(session: AsyncSession, user_id: UUID) -> set[str]:
