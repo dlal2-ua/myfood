@@ -13,9 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from myfood.db.models import BodyMeasurement, Profile, WaterLog, WaterSettings
+from myfood.db.models import WaterLog, WaterSettings
 from myfood.deps import get_current_user_id, get_db
-from myfood.domain import formulas
+from myfood.domain.water import effective_target_ml
 from myfood.errors import AppError
 
 router = APIRouter(prefix="/water", tags=["water"])
@@ -47,32 +47,10 @@ async def _get_or_create_settings(session: AsyncSession, user_id: UUID) -> Water
     return settings
 
 
-async def _latest_weight_kg(session: AsyncSession, user_id: UUID) -> float | None:
-    stmt = (
-        select(BodyMeasurement)
-        .where(BodyMeasurement.user_id == user_id, BodyMeasurement.weight_kg.is_not(None))
-        .order_by(BodyMeasurement.measured_on.desc())
-        .limit(1)
-    )
-    measurement = await session.scalar(stmt)
-    return float(measurement.weight_kg) if measurement else None
-
-
 async def _effective_target_ml(
     session: AsyncSession, user_id: UUID, settings: WaterSettings
 ) -> int:
-    """En modo 'auto' recalcula con la fórmula EFSA si hay sexo+peso
-    disponibles; si faltan datos, se queda con el último valor guardado
-    (arranca en el default de la migración, 2500 ml) en vez de fallar —
-    a diferencia de `/calc/targets`, el control de agua debe ser usable
-    antes de completar el perfil."""
-    if settings.mode == "manual":
-        return settings.daily_target_ml
-    profile = await session.get(Profile, user_id)
-    weight_kg = await _latest_weight_kg(session, user_id)
-    if profile is not None and profile.sex is not None and weight_kg is not None:
-        return formulas.water_target_ml(profile.sex, weight_kg)
-    return settings.daily_target_ml
+    return await effective_target_ml(session, user_id, settings)
 
 
 def _settings_to_out(settings: WaterSettings, target_ml: int) -> WaterSettingsOut:

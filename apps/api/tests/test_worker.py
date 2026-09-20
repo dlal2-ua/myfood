@@ -3,7 +3,7 @@ Redis reales, pero `send_push` siempre sustituido: nunca se llama a un
 servicio de push real desde los tests."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 
@@ -43,10 +43,15 @@ async def test_run_tick_sends_and_deduplicates(monkeypatch, superuser_conn, two_
     # limpia cualquier marca de deduplicación de una ejecución anterior de este test
     await _redis.delete(f"notif-sent:{rule_id}:2026-01-15:10:00:00")
 
-    now = datetime(2026, 1, 15, 10, 0)
+    now = datetime(2026, 1, 15, 9, 0, tzinfo=UTC)  # 10:00 en Europe/Madrid (CET)
     sent_count = await run_tick(now)
     assert sent_count == 1
-    assert sent_to == [(endpoint, {"title": "MyFood", "body": "Hora de beber agua."})]
+    assert len(sent_to) == 1
+    sent_endpoint, payload = sent_to[0]
+    assert sent_endpoint == endpoint
+    assert payload["body"] == "Te faltan 2500 ml para tu objetivo de hoy."
+    assert payload["data"]["kind"] == "water"
+    assert payload["actions"][0]["action"] == "add-water"
 
     # segundo tick, mismo minuto exacto -> no debe reenviar (deduplicado)
     sent_to.clear()
@@ -84,7 +89,7 @@ async def test_run_tick_skips_disabled_rules(monkeypatch, superuser_conn, two_us
     ).scalar_one()
     await superuser_conn.commit()
 
-    await run_tick(datetime(2026, 1, 15, 10, 0))
+    await run_tick(datetime(2026, 1, 15, 9, 0, tzinfo=UTC))
     assert called["n"] == 0
 
     await superuser_conn.execute(
@@ -132,7 +137,7 @@ async def test_run_tick_one_failing_subscription_does_not_block_others(
         )
     await superuser_conn.commit()
 
-    now = datetime(2026, 1, 15, 10, 0)
+    now = datetime(2026, 1, 15, 9, 0, tzinfo=UTC)  # 10:00 en Europe/Madrid (CET)
     await _redis.delete(f"notif-sent:{rule_id}:2026-01-15:10:00:00")
     sent_count = await run_tick(now)
 

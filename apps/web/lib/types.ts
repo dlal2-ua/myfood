@@ -302,10 +302,13 @@ export interface Supplement {
   last_restock_at: string | null;
   days_remaining: number | null;
   low_stock: boolean;
+  /** Coste estimado de 30 días; null si falta el precio, las dosis del envase o un horario. */
+  monthly_cost: number | null;
 }
 
 export interface SupplementList {
   items: Supplement[];
+  total_monthly_cost: number | null;
 }
 
 export interface SupplementSchedule {
@@ -313,6 +316,24 @@ export interface SupplementSchedule {
   time_of_day: string;
   days_of_week: number[];
   with_food: boolean;
+  has_reminder: boolean;
+}
+
+export interface TodayDose {
+  supplement_id: string;
+  supplement_name: string;
+  dose_amount: number;
+  dose_unit: string;
+  schedule_id: string;
+  time_of_day: string;
+  with_food: boolean;
+  status: "taken" | "skipped" | "pending" | "overdue";
+}
+
+export interface SupplementsToday {
+  date: string;
+  doses: TodayDose[];
+  pending_count: number;
 }
 
 export interface SupplementDetail extends Supplement {

@@ -3,7 +3,8 @@
 import { localDateIso } from "@/lib/dates";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
-import type { Supplement, SupplementList } from "@/lib/types";
+import Link from "next/link";
+import type { Supplement, SupplementList, SupplementsToday, TodayDose } from "@/lib/types";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -28,7 +29,11 @@ function todayIso(): string {
  * días de la semana. Es la simplificación mínima necesaria para que el
  * indicador de "días de stock restantes" tenga algo con lo que estimar el
  * consumo diario; no hay editor de horarios en esta fase. */
-async function createEvenlySpacedSchedules(supplementId: string, timesPerDay: number) {
+async function createEvenlySpacedSchedules(
+  supplementId: string,
+  timesPerDay: number,
+  remind: boolean,
+) {
   const spacingHours = Math.max(1, Math.floor(24 / timesPerDay));
   await Promise.all(
     Array.from({ length: timesPerDay }, (_, i) => {
@@ -36,13 +41,116 @@ async function createEvenlySpacedSchedules(supplementId: string, timesPerDay: nu
       const timeOfDay = `${String(hour).padStart(2, "0")}:00:00`;
       return apiFetch(`/api/supplements/${supplementId}/schedules`, {
         method: "POST",
-        body: JSON.stringify({ time_of_day: timeOfDay, days_of_week: [1, 2, 3, 4, 5, 6, 7] }),
+        body: JSON.stringify({
+          time_of_day: timeOfDay,
+          days_of_week: [1, 2, 3, 4, 5, 6, 7],
+          remind,
+        }),
       });
     }),
   );
 }
 
+const STATUS_LABELS: Record<TodayDose["status"], string> = {
+  taken: "Tomada",
+  skipped: "Saltada",
+  pending: "Pendiente",
+  overdue: "Toca ya",
+};
+
+function TodayPanel({ reload }: { reload: () => void }) {
+  const [today, setToday] = useState<SupplementsToday | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = () =>
+    apiFetch<SupplementsToday>("/api/supplements/today")
+      .then(setToday)
+      .catch((err) => setError(errorMessage(err)));
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function log(dose: TodayDose, skipped: boolean) {
+    setBusy(dose.schedule_id);
+    setError(null);
+    try {
+      await apiFetch(`/api/supplements/${dose.supplement_id}/log`, {
+        method: "POST",
+        body: JSON.stringify({ log_date: todayIso(), skipped }),
+      });
+      await refresh();
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!today || today.doses.length === 0) return null;
+  return (
+    <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Hoy</h2>
+        <span className="text-sm text-neutral-500">
+          {today.pending_count === 0
+            ? "Todo al día"
+            : `${today.pending_count} pendiente${today.pending_count === 1 ? "" : "s"}`}
+        </span>
+      </div>
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      <ul className="flex flex-col gap-2">
+        {today.doses.map((d) => {
+          const done = d.status === "taken" || d.status === "skipped";
+          return (
+            <li
+              key={d.schedule_id}
+              className="flex flex-wrap items-center justify-between gap-2 text-sm"
+            >
+              <span className={done ? "text-neutral-400 line-through" : ""}>
+                <span className="mr-2 font-mono">{d.time_of_day}</span>
+                {d.supplement_name} ({d.dose_amount} {d.dose_unit})
+                {d.with_food && <span className="text-neutral-500"> · con comida</span>}
+              </span>
+              {done ? (
+                <span className="text-xs text-neutral-500">{STATUS_LABELS[d.status]}</span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <span
+                    className={`text-xs ${d.status === "overdue" ? "text-amber-700 dark:text-amber-300" : "text-neutral-500"}`}
+                  >
+                    {STATUS_LABELS[d.status]}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy === d.schedule_id}
+                    onClick={() => void log(d, false)}
+                    className="rounded-lg bg-[var(--color-primary)] px-3 py-1 text-xs text-white disabled:opacity-60"
+                  >
+                    Tomada
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy === d.schedule_id}
+                    onClick={() => void log(d, true)}
+                    className="rounded-lg border border-neutral-300 px-3 py-1 text-xs disabled:opacity-60 dark:border-neutral-700"
+                  >
+                    Saltar
+                  </button>
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export default function SupplementsPage() {
+  const [remind, setRemind] = useState(false);
   const [list, setList] = useState<SupplementList | null>(null);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -113,7 +221,7 @@ export default function SupplementsPage() {
 
       const times = timesPerDay ? Number(timesPerDay) : 0;
       if (times > 0) {
-        await createEvenlySpacedSchedules(created.id, times).catch(() => {
+        await createEvenlySpacedSchedules(created.id, times, remind).catch(() => {
           // el suplemento ya se creó — un fallo aquí solo deja sin estimar
           // los días de stock, no bloquea el alta
         });
@@ -127,6 +235,7 @@ export default function SupplementsPage() {
       setDosesPerContainer("");
       setPricePerContainer("");
       setTimesPerDay("");
+      setRemind(false);
       await load();
     } catch (err) {
       setAddError(errorMessage(err));
@@ -242,6 +351,8 @@ export default function SupplementsPage() {
     <main className="flex flex-col gap-8">
       <h1 className="text-xl font-semibold">Suplementos</h1>
 
+      <TodayPanel reload={() => void load()} />
+
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Añadir suplemento</h2>
         <form onSubmit={onAdd} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -341,6 +452,19 @@ export default function SupplementsPage() {
             />
           </label>
 
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={remind}
+              disabled={!timesPerDay || Number(timesPerDay) < 1}
+              onChange={(e) => setRemind(e.target.checked)}
+            />
+            Recordarme cada toma con una notificación
+            <Link href="/recordatorios" className="text-neutral-500 underline">
+              (ajustes de avisos)
+            </Link>
+          </label>
+
           <div className="sm:col-span-2">
             <button
               type="submit"
@@ -373,6 +497,11 @@ export default function SupplementsPage() {
 
         {list && (
           <>
+            {list.total_monthly_cost != null && (
+              <p className="mb-3 text-sm text-neutral-500">
+                Coste estimado de tus suplementos: ≈{list.total_monthly_cost.toFixed(2)} €/mes.
+              </p>
+            )}
             {list.items.length === 0 ? (
               <p className="text-sm text-neutral-500">Todavía no has añadido ningún suplemento.</p>
             ) : (
@@ -433,6 +562,7 @@ export default function SupplementsPage() {
                           <p className="text-xs text-neutral-500">
                             {s.type} · {s.dose_amount} {s.dose_unit}
                             {s.price_per_container != null && ` · ${s.price_per_container} €/envase`}
+                            {s.monthly_cost != null && ` · ≈${s.monthly_cost.toFixed(2)} €/mes`}
                           </p>
                           <p className="mt-1 text-xs">
                             {s.doses_remaining == null ? (
