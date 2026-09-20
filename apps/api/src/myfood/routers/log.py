@@ -253,6 +253,10 @@ async def copy_day(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> list[LogFoodOut]:
+    if from_date == to_date:
+        raise AppError(
+            "SAME_DATE", "El día de origen y el de destino son el mismo.", status_code=422
+        )
     source_entries = list(
         await session.scalars(
             select(FoodLog).where(FoodLog.user_id == user_id, FoodLog.log_date == from_date)

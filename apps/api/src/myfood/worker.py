@@ -217,6 +217,10 @@ async def _stale_sessions_loop() -> None:
         await asyncio.sleep(_STALE_SWEEP_SECONDS)
 
 
+# OFF tarda ~10 s por imagen: varios consumidores para que una página de resultados no tarde.
+_IMAGE_DOWNLOAD_WORKERS = 4
+
+
 async def _image_jobs_loop() -> None:
     """Reintenta las descargas de imágenes que fallaron en la petición del usuario."""
     while True:
@@ -258,7 +262,7 @@ async def main() -> None:
         _receipt_scan_jobs_loop(),
         _chat_jobs_loop(),
         _stale_sessions_loop(),
-        _image_jobs_loop(),
+        *(_image_jobs_loop() for _ in range(_IMAGE_DOWNLOAD_WORKERS)),
         _image_purge_loop(),
     )
 

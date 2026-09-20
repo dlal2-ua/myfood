@@ -169,7 +169,13 @@ export default function ScanPage() {
             </p>
             </div>
           </div>
-          <AddToLogForm foodId={food.id} foodName={food.name_es} />
+          <AddToLogForm
+            foodId={food.id}
+            foodName={food.name_es}
+            servingSizeG={food.serving_size_g}
+            servingLabel={food.serving_label}
+            redirectTo="/log"
+          />
         </>
       )}
 

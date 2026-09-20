@@ -1,6 +1,7 @@
 "use client";
 
 import { localDateIso } from "@/lib/dates";
+import { mealTypeForTime } from "@/lib/meals";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useCurrentUserId } from "@/components/CurrentUser";
@@ -18,12 +19,26 @@ function todayIso(): string {
 /** Formulario de "añadir al registro diario" — compartido entre la ficha de
  * producto (`/foods/[id]`) y el flujo de escaneo (`/scan`), misma lógica en
  * los dos sitios. */
-export function AddToLogForm({ foodId, foodName }: { foodId: string; foodName?: string }) {
+export function AddToLogForm({
+  foodId,
+  foodName,
+  servingSizeG,
+  servingLabel,
+  redirectTo,
+}: {
+  foodId: string;
+  foodName?: string;
+  /** Porción habitual del producto: es la cantidad por defecto (y un atajo). */
+  servingSizeG?: number | null;
+  servingLabel?: string | null;
+  /** Adónde ir tras registrar (el flujo de escaneo vuelve al registro del día). */
+  redirectTo?: string;
+}) {
   const router = useRouter();
   const userId = useCurrentUserId();
   const [logDate, setLogDate] = useState(todayIso());
-  const [mealType, setMealType] = useState<MealType>("lunch");
-  const [grams, setGrams] = useState("100");
+  const [mealType, setMealType] = useState<MealType>(() => mealTypeForTime());
+  const [grams, setGrams] = useState(String(servingSizeG && servingSizeG > 0 ? servingSizeG : 100));
   const [logging, setLogging] = useState(false);
   const [logError, setLogError] = useState<string | null>(null);
   const [logged, setLogged] = useState<LogFoodEntry | null>(null);
@@ -43,7 +58,10 @@ export function AddToLogForm({ foodId, foodName }: { foodId: string; foodName?: 
         payload: { log_date: logDate, meal_type: mealType, food_id: foodId, grams: Number(grams) },
       });
       if (outcome.queued) setQueued(true);
-      else setLogged(outcome.result);
+      else if (redirectTo) {
+        router.push(redirectTo);
+        return;
+      } else setLogged(outcome.result);
     } catch (err) {
       setLogError(errorMessage(err));
     } finally {
@@ -91,6 +109,16 @@ export function AddToLogForm({ foodId, foodName }: { foodId: string; foodName?: 
             onChange={(e) => setGrams(e.target.value)}
           />
         </label>
+        {servingSizeG && servingSizeG > 0 ? (
+          <button
+            type="button"
+            onClick={() => setGrams(String(servingSizeG))}
+            className="rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700"
+            title="Usar la porción indicada en el envase"
+          >
+            1 porción ({servingSizeG} g{servingLabel ? ` · ${servingLabel}` : ""})
+          </button>
+        ) : null}
         <button
           type="submit"
           disabled={logging}
