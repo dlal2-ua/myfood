@@ -21,7 +21,9 @@ from myfood.domain.food_candidates import (
 pytestmark = pytest.mark.asyncio
 
 
-async def _insert(conn, name, kcal, protein, fat, carbs, *, source="bedca", category=None, vec=None):
+async def _insert(
+    conn, name, kcal, protein, fat, carbs, *, source="bedca", category=None, vec=None
+):
     food_id = uuid.uuid4()
     await conn.execute(
         text(
@@ -29,7 +31,10 @@ async def _insert(conn, name, kcal, protein, fat, carbs, *, source="bedca", cate
             "quality_rank) VALUES (:id, 'generic', :source, :sid, 'CC0', :name, :category, 4)"
         ),
         {
-            "id": str(food_id), "sid": str(food_id), "source": source, "name": name,
+            "id": str(food_id),
+            "sid": str(food_id),
+            "source": source,
+            "name": name,
             "category": category,
         },
     )
@@ -62,17 +67,40 @@ async def catalog(superuser_conn):
     distancia sea el que interesa a cada test (mismo truco que `test_foods_similar.py`)."""
     conn = superuser_conn
     ids = {
-        "pollo": await _insert(conn, "Pechuga de pollo (alt)", 165, 31, 3.6, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0]),
+        "pollo": await _insert(
+            conn, "Pechuga de pollo (alt)", 165, 31, 3.6, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0]
+        ),
         # el más cercano, pero es un pescado: no es un sustituto de un pollo
-        "merluza": await _insert(conn, "Merluza, cruda (alt)", 71, 16, 0.8, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.01]),
-        "queso": await _insert(conn, "Queso curado (alt)", 390, 26, 32, 1, vec=[0.5, 0.9, 0.1, 0, 0, 0.02]),
-        "pavo": await _insert(conn, "Pavo, pechuga (alt)", 135, 30, 1.5, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.03]),
-        "ternera": await _insert(conn, "Ternera, solomillo (alt)", 156, 28.4, 4.5, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.04]),
+        "merluza": await _insert(
+            conn, "Merluza, cruda (alt)", 71, 16, 0.8, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.01]
+        ),
+        "queso": await _insert(
+            conn, "Queso curado (alt)", 390, 26, 32, 1, vec=[0.5, 0.9, 0.1, 0, 0, 0.02]
+        ),
+        "pavo": await _insert(
+            conn, "Pavo, pechuga (alt)", 135, 30, 1.5, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.03]
+        ),
+        "ternera": await _insert(
+            conn, "Ternera, solomillo (alt)", 156, 28.4, 4.5, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.04]
+        ),
         # carne, pero con tan pocas kcal que igualar las del pollo exigiría comer casi un kilo
-        "magra": await _insert(conn, "Carne magra imposible (alt)", 40, 8, 0.5, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.05]),
+        "magra": await _insert(
+            conn, "Carne magra imposible (alt)", 40, 8, 0.5, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.05]
+        ),
         # otra fuente: no se ofrece como alternativa de un alimento de BEDCA
-        "usda": await _insert(conn, "Turkey breast (alt)", 135, 30, 1.5, 0, source="usda_sr", vec=[0.5, 0.9, 0.1, 0, 0, 0.06]),
-        "pavo_repetido": await _insert(conn, "Pavo, pechuga (alt)", 140, 29, 2, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.07]),
+        "usda": await _insert(
+            conn,
+            "Turkey breast (alt)",
+            135,
+            30,
+            1.5,
+            0,
+            source="usda_sr",
+            vec=[0.5, 0.9, 0.1, 0, 0, 0.06],
+        ),
+        "pavo_repetido": await _insert(
+            conn, "Pavo, pechuga (alt)", 140, 29, 2, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.07]
+        ),
     }
     await conn.commit()
     yield ids
@@ -81,7 +109,9 @@ async def catalog(superuser_conn):
 
 async def _alternatives(user_id, catalog, keep="kcal", grams=200.0, limit=10):
     async with AdminSessionLocal() as session:
-        return await find_alternatives(session, catalog["pollo"], grams, user_id, keep=keep, limit=limit)
+        return await find_alternatives(
+            session, catalog["pollo"], grams, user_id, keep=keep, limit=limit
+        )
 
 
 async def test_alternatives_are_of_the_same_group_and_never_a_fish_or_a_cheese(
@@ -105,7 +135,10 @@ async def test_alternatives_come_with_the_grams_that_keep_the_kcal(registered_cl
     assert found[catalog["ternera"]].grams == 210
     for alternative in found.values():
         original_kcal = 165 * 200 / 100
-        assert abs(alternative.kcal_100g * alternative.grams / 100 - original_kcal) <= original_kcal * 0.03
+        assert (
+            abs(alternative.kcal_100g * alternative.grams / 100 - original_kcal)
+            <= original_kcal * 0.03
+        )
 
 
 async def test_alternatives_can_keep_the_protein_instead(registered_client, catalog):
@@ -252,7 +285,15 @@ async def test_an_allergen_keeps_a_tagged_food_out_of_the_pool(
 
 def _c(id_, group, *, source="bedca", staple=True, complete=True, name=None):
     return CandidateFood(
-        id_, name or id_, 100, 10, 5, 10, group=group, source=source, staple=staple,
+        id_,
+        name or id_,
+        100,
+        10,
+        5,
+        10,
+        group=group,
+        source=source,
+        staple=staple,
         complete_data=complete,
     )
 
@@ -262,7 +303,9 @@ def test_the_day_pool_prefers_official_everyday_foods():
     members += [_c(f"raro{i}", fg.MEAT, staple=False) for i in range(10)]
     members += [_c(f"super{i}", fg.MEAT, source="off", name=f"Pollo {i}x") for i in range(10)]
     # `name` con dígito no es «sencillo»: hay que ir a por los que no lo tienen
-    simple = [_c(f"simple{i}", fg.MEAT, source="off", name=f"Pollo asado {'a' * i}") for i in range(5)]
+    simple = [
+        _c(f"simple{i}", fg.MEAT, source="off", name=f"Pollo asado {'a' * i}") for i in range(5)
+    ]
 
     pool = sample_day_pool(members + simple, random.Random(1))
 

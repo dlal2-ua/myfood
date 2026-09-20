@@ -149,7 +149,7 @@ async def test_cross_user_isolation(registered_client, diet_candidates, two_user
 
 
 async def test_substitute_item_updates_food_and_recomputes_alternatives(
-    registered_client, diet_candidates, superuser_conn, monkeypatch
+    registered_client, diet_candidates, superuser_conn
 ):
     client, _user_id = registered_client
     await _complete_profile(client)
@@ -165,33 +165,6 @@ async def test_substitute_item_updates_food_and_recomputes_alternatives(
         )
     await superuser_conn.commit()
 
-    # El pool de candidatos real mezcla estos 6 alimentos de prueba con todo
-    # el catálogo real (miles de alimentos) — el solver podría, con razón,
-    # preferir alimentos reales bien ajustados a los objetivos y no usar
-    # ninguno de los que aquí tienen vector. Para probar la sustitución de
-    # forma determinista (no probabilística) se sustituye la selección de
-    # candidatos para que sean *solo* estos 6 — el resto del flujo (solver,
-    # persistencia, cálculo de alternativas, endpoint de sustitución) sigue
-    # siendo el real, sin mockear.
-    from myfood.domain.diet_engine import CandidateFood
-
-    fixed_candidates = [
-        CandidateFood(
-            id=str(food_id),
-            name_es=f"food-{i}",
-            kcal_100g=200,
-            protein_100g=15,
-            fat_100g=8,
-            carbs_100g=20,
-        )
-        for i, food_id in enumerate(diet_candidates)
-    ]
-
-    async def _fake_select_candidates(session, user_id):
-        return fixed_candidates
-
-    monkeypatch.setattr("myfood.routers.diet_plans.select_candidates", _fake_select_candidates)
-
     created = await client.post("/api/diet-plans/generate", json={"num_days": 1})
     plan = created.json()
     items_with_alternatives = [
@@ -203,8 +176,8 @@ async def test_substitute_item_updates_food_and_recomputes_alternatives(
     ]
     assert items_with_alternatives, (
         "ningún alimento del plan generado tenía alternativas — no debería "
-        "pasar con los 6 vectores sintéticos ya insertados para todos los "
-        "candidatos garantizados del fixture"
+        "pasar con los vectores sintéticos ya insertados para todos los "
+        "candidatos del fixture"
     )
     item = items_with_alternatives[0]
     alternative = item["alternatives"][0]

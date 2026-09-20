@@ -275,7 +275,8 @@ def test_energy_is_spread_across_meals_by_their_share():
     shares = fg.MEAL_KCAL_SHARES[3]
     for meal in plan.meals:
         kcal = sum(by_id[i.food_id].kcal_100g * i.grams / 100 for i in meal.items)
-        assert abs(kcal - DAY.kcal * shares[meal.meal_type]) <= DAY.kcal * shares[meal.meal_type] * 0.3
+        expected = DAY.kcal * shares[meal.meal_type]
+        assert abs(kcal - expected) <= expected * 0.3
 
 
 def test_grams_are_multiples_of_five_within_each_foods_bounds():
