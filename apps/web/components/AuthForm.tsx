@@ -1,5 +1,6 @@
 "use client";
 
+import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
@@ -145,6 +146,16 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
           onChange={(e) => setPassword(e.target.value)}
           className="rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900"
         />
+
+        {mode === "register" && (
+          <>
+            <MedicalDisclaimer />
+            <p className="text-xs text-neutral-500">
+              Tras crear la cuenta te pediremos tu consentimiento para tratar tus datos de salud
+              (peso, medidas, comidas). Podrás revocarlo y borrar tu cuenta cuando quieras.
+            </p>
+          </>
+        )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 

@@ -576,3 +576,12 @@ export interface ChatMessageResponse {
   message: string;
   proposal: ChatProposal | null;
 }
+
+export interface ConsentStatus {
+  kind: string;
+  required: boolean;
+  granted: boolean;
+  version: string | null;
+  granted_at: string | null;
+  revoked_at: string | null;
+}

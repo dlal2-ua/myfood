@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch, errorMessage } from "@/lib/api";
+import { ConsentsPanel } from "@/components/ConsentsPanel";
 import type { PrivacySummary } from "@/lib/types";
 
 const inputClass =
@@ -92,6 +93,8 @@ export default function PrivacyPage() {
               Descargar todos mis datos (JSON)
             </a>
           </section>
+
+          <ConsentsPanel />
 
           <section className="mt-6 flex flex-col gap-3 rounded-lg border border-red-300 p-4 dark:border-red-900">
             <h2 className="text-lg font-semibold text-red-700 dark:text-red-400">

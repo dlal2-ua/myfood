@@ -5,13 +5,11 @@ enlace local de metadatos de nube, etc.).
 
 Solo esquemas http/https; se resuelve el hostname y se rechaza si
 CUALQUIER IP resuelta es privada/loopback/enlace-local/reservada/
-multicast. Limitación reconocida: esto comprueba la resolución en el
-momento de la llamada, no fija la conexión a esa IP exacta — una respuesta
-DNS distinta entre esta comprobación y la descarga real (DNS rebinding)
-no quedaría cubierta. Para el contexto de esta app (autoalojada, uso
-personal/familiar, no multi-inquilino de cara a internet) es una mitigación
-proporcionada, no a prueba de balas — documentado aquí en vez de fingir
-que sí lo es.
+multicast. `ensure_public_http_url` solo comprueba (se usa al encolar, para dar un error
+rápido al usuario); la descarga real usa `resolve_public_ip` y CONECTA a la IP
+validada (ver `ai/flows/recipe_import.py::_fetch_html`), validando además cada
+salto de una redirección — una página pública podía redirigir a
+`http://169.254.169.254/...` y el cliente HTTP la seguía sin comprobar.
 """
 
 import ipaddress
@@ -23,7 +21,12 @@ class UnsafeUrlError(Exception):
     pass
 
 
-def ensure_public_http_url(url: str) -> None:
+def resolve_public_ip(url: str) -> str:
+    """Valida la URL y devuelve la IP pública a la que hay que conectar.
+
+    Quien descargue debe conectar a ESA IP (no volver a resolver el nombre): así
+    una respuesta DNS distinta entre la comprobación y la descarga (DNS
+    rebinding) no puede llevar la petición a una red interna."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise UnsafeUrlError("Solo se admiten URLs http/https.")
@@ -35,6 +38,7 @@ def ensure_public_http_url(url: str) -> None:
     except socket.gaierror as exc:
         raise UnsafeUrlError("No se ha podido resolver ese dominio.") from exc
 
+    safe_ips: list[str] = []
     for _family, _type, _proto, _canonname, sockaddr in addrinfo:
         ip = ipaddress.ip_address(sockaddr[0])
         if (
@@ -46,3 +50,11 @@ def ensure_public_http_url(url: str) -> None:
             or ip.is_unspecified
         ):
             raise UnsafeUrlError("Esa URL apunta a una red privada o reservada.")
+        safe_ips.append(str(ip))
+    if not safe_ips:
+        raise UnsafeUrlError("No se ha podido resolver ese dominio.")
+    return safe_ips[0]
+
+
+def ensure_public_http_url(url: str) -> None:
+    resolve_public_ip(url)

@@ -1,5 +1,6 @@
 "use client";
 
+import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { BmrResponse, Measurement, Profile, TargetsResponse } from "@/lib/types";
@@ -357,6 +358,7 @@ export default function ProfilePage() {
 
       <section>
         <h2 className="mb-4 text-xl font-semibold">Cálculos</h2>
+        <MedicalDisclaimer />
         <button
           type="button"
           onClick={onCalculate}

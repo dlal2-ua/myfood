@@ -1,5 +1,6 @@
 "use client";
 
+import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
@@ -171,6 +172,7 @@ export default function DietPlansPage() {
   return (
     <main className="flex flex-col gap-6">
       <h1 className="text-xl font-semibold">Planes de dieta</h1>
+      <MedicalDisclaimer />
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Generar un plan nuevo</h2>

@@ -1,5 +1,6 @@
 "use client";
 
+import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import type {
@@ -193,6 +194,12 @@ export default function ChatPage() {
         <p className="mt-1 text-sm text-neutral-500">
           Pídeme cambios sobre la marcha — nunca aplico nada sin que lo confirmes.
         </p>
+        <div className="mt-2">
+          <MedicalDisclaimer>
+            El chat no da consejo médico. Los cambios que propone son estimaciones que tú
+            confirmas; consulta con un profesional ante cualquier duda de salud.
+          </MedicalDisclaimer>
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">

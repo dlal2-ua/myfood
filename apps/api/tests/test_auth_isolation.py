@@ -53,7 +53,7 @@ async def test_register_login_logout_flow():
     # producción, ver security.py); ASGITransport no valida TLS de verdad,
     # pero httpx sí exige el esquema https para aceptar cookies Secure.
     async with AsyncClient(transport=transport, base_url="https://test") as client:
-        email = f"flow-test-{uuid.uuid4()}@example.com"
+        email = f"flow-test-{uuid.uuid4()}@test.myfood"
         resp = await client.post(
             "/api/auth/register",
             json={"email": email, "password": "correcthorse123", "display_name": "Flujo Test"},

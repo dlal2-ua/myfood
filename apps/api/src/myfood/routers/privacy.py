@@ -48,6 +48,7 @@ from myfood.db.models import (
 )
 from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
+from myfood.ratelimit import guard, password_confirm_rules, record_failure, reset
 from myfood.security import SESSION_COOKIE_NAME, destroy_session, verify_password
 
 router = APIRouter(prefix="/privacy", tags=["privacy"])
@@ -201,9 +202,13 @@ async def delete_account(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> None:
+    rules = password_confirm_rules("delete-account", user_id)
+    await guard(*rules)
     user = await session.get(User, user_id)
     if user is None or not verify_password(body.password, user.password_hash):
+        await record_failure(*rules)
         raise AppError("INVALID_CREDENTIALS", "Contraseña incorrecta.", status_code=401)
+    await reset(*rules)
 
     # DELETE en SQL directo, no `session.delete(user)`: el ORM intentaría
     # gestionar la relación `User.profile` a mano (poner NULL en una PK, lo

@@ -10,6 +10,16 @@ from myfood.db.models import Consent, User
 from myfood.db.session import get_session
 from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
+from myfood.ratelimit import (
+    client_ip,
+    guard,
+    login_rules,
+    password_confirm_rules,
+    record_failure,
+    reset,
+    totp_rules,
+)
+from myfood.routers.consents import REQUIRED_CONSENTS
 from myfood.security import (
     SESSION_COOKIE_NAME,
     create_mfa_challenge,
@@ -71,13 +81,22 @@ async def register(
 
 @router.post("/login")
 async def login(
-    body: LoginRequest, response: Response, session: AsyncSession = Depends(get_session)
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
 ) -> dict:
+    rules = login_rules(body.email, client_ip(request))
+    await guard(*rules)
     user = await session.scalar(select(User).where(User.email == body.email))
     if user is None or not verify_password(body.password, user.password_hash):
+        await record_failure(*rules)
         raise AppError("INVALID_CREDENTIALS", "Email o contraseña incorrectos.", 401)
     if not user.is_active:
         raise AppError("ACCOUNT_DISABLED", "Esta cuenta está desactivada.", 403)
+    # Un acierto reinicia solo el contador del par (email, IP): los fallos de otras IPs
+    # contra esta misma cuenta siguen contando.
+    await reset(rules[0])
 
     if user.totp_enabled:
         # Contraseña correcta, pero no se emite sesión todavía: hace falta
@@ -112,8 +131,13 @@ async def verify_2fa_login(
         raise AppError(
             "MFA_CHALLENGE_EXPIRED", "El código ha caducado, inicia sesión de nuevo.", 401
         )
+    # Un TOTP tiene solo un millón de combinaciones: sin límite se puede adivinar.
+    rules = totp_rules(body.mfa_token, user.id)
+    await guard(*rules)
     if not pyotp.TOTP(user.totp_secret).verify(body.code, valid_window=1):
+        await record_failure(*rules)
         raise AppError("INVALID_TOTP_CODE", "Código incorrecto.", 401)
+    await reset(*rules)
 
     # Un solo uso: si no se invalidara, un código válido reenviado (o el
     # mismo mfa_token reutilizado) podría canjearse varias veces dentro de
@@ -159,8 +183,12 @@ async def confirm_totp(
     user = await session.get(User, user_id)
     if user.totp_secret is None:
         raise AppError("TOTP_NOT_SETUP", "Genera un secreto en /auth/2fa/setup primero.", 422)
+    rules = password_confirm_rules("2fa-confirm", user_id)
+    await guard(*rules)
     if not pyotp.TOTP(user.totp_secret).verify(body.code, valid_window=1):
+        await record_failure(*rules)
         raise AppError("INVALID_TOTP_CODE", "Código incorrecto.", 401)
+    await reset(*rules)
     user.totp_enabled = True
     await session.commit()
     return {"totp_enabled": True}
@@ -177,8 +205,12 @@ async def disable_totp(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     user = await session.get(User, user_id)
+    rules = password_confirm_rules("2fa-disable", user_id)
+    await guard(*rules)
     if not verify_password(body.password, user.password_hash):
+        await record_failure(*rules)
         raise AppError("INVALID_CREDENTIALS", "Contraseña incorrecta.", 401)
+    await reset(*rules)
     user.totp_enabled = False
     user.totp_secret = None
     await session.commit()
@@ -200,14 +232,18 @@ async def me(
     user = await session.get(User, user_id)
     if user is None:
         raise AppError("NOT_AUTHENTICATED", "Se requiere iniciar sesión.", 401)
-    pending_consents = await session.scalars(
-        select(Consent.kind).where(Consent.user_id == user_id, Consent.revoked_at.is_(None))
+    granted_consents = list(
+        await session.scalars(
+            select(Consent.kind).where(Consent.user_id == user_id, Consent.revoked_at.is_(None))
+        )
     )
     return {
         "id": str(user.id),
         "email": user.email,
         "display_name": user.display_name,
         "role": user.role,
-        "granted_consents": list(pending_consents),
+        "granted_consents": granted_consents,
+        # Los obligatorios que faltan (spec 7.1): la web bloquea el uso hasta aceptarlos.
+        "pending_consents": [c for c in REQUIRED_CONSENTS if c not in granted_consents],
         "totp_enabled": user.totp_enabled,
     }

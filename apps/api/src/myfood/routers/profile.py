@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import BodyMeasurement, Profile
 from myfood.deps import get_current_user_id, get_db
+from myfood.routers.consents import require_health_data_consent
 
 router = APIRouter(tags=["profile"])
 
@@ -82,7 +83,7 @@ async def get_profile(
     return _to_out(profile)
 
 
-@router.put("/profile")
+@router.put("/profile", dependencies=[Depends(require_health_data_consent)])
 async def update_profile(
     body: ProfileUpdate,
     user_id: UUID = Depends(get_current_user_id),
@@ -151,7 +152,9 @@ async def list_measurements(
     return [_measurement_to_out(row) for row in rows]
 
 
-@router.post("/measurements", status_code=201)
+@router.post(
+    "/measurements", status_code=201, dependencies=[Depends(require_health_data_consent)]
+)
 async def upsert_measurement(
     body: MeasurementIn,
     user_id: UUID = Depends(get_current_user_id),
@@ -166,8 +169,12 @@ async def upsert_measurement(
         existing = BodyMeasurement(user_id=user_id, measured_on=body.measured_on)
         session.add(existing)
 
-    for field, value in body.model_dump(exclude={"measured_on"}).items():
-        setattr(existing, field, value)
+    # Fusiona: los campos que no vienen (o vienen a `null`) no se tocan. Antes se
+    # sobrescribía TODO, así que apuntar solo la cintura un día en que Health Connect
+    # ya había escrito el peso borraba el peso.
+    for field, value in body.model_dump(exclude={"measured_on"}, exclude_unset=True).items():
+        if value is not None:
+            setattr(existing, field, value)
 
     await session.commit()
     await session.refresh(existing)
