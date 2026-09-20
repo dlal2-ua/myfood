@@ -12,7 +12,7 @@ from myfood.ai.consent import require_ai_processing_consent
 from myfood.ai.flows.smart_log import request_smart_log
 from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
 from myfood.ai.schemas import AiSessionOut, ai_session_to_out
-from myfood.db.models import Food, FoodLog, FoodNutrient, Profile
+from myfood.db.models import Food, FoodLog, FoodNutrient, Profile, Recipe, RecipeIngredient
 from myfood.deps import get_current_user_id, get_db
 from myfood.domain import micronutrients
 from myfood.errors import AppError
@@ -37,6 +37,9 @@ class LogFoodIn(BaseModel):
     meal_type: MealType
     food_id: UUID
     grams: float = Field(gt=0, le=5000)
+    # `cooked`: `grams` es el peso ya cocinado; se divide por el factor de cocción del alimento y la
+    # nutrición se calcula sobre el peso crudo equivalente (sección 21).
+    weighed_as: Literal["raw", "cooked"] = "raw"
     # Id generado en el cliente para los registros hechos sin conexión: reenviar el mismo
     # registro (respuesta perdida, reintento de la cola) no lo duplica.
     client_id: UUID | None = None
@@ -47,7 +50,11 @@ class LogFoodOut(BaseModel):
     log_date: date
     meal_type: str
     food_id: UUID | None
+    recipe_id: UUID | None = None
+    recipe_name: str | None = None
     grams: float
+    weighed_as: str = "raw"
+    entered_grams: float | None = None
     entry_source: str
     kcal: float
     protein_g: float
@@ -61,7 +68,10 @@ def _to_out(entry: FoodLog) -> LogFoodOut:
         log_date=entry.log_date,
         meal_type=entry.meal_type,
         food_id=entry.food_id,
+        recipe_id=entry.recipe_id,
         grams=float(entry.grams),
+        weighed_as=entry.weighed_as,
+        entered_grams=float(entry.entered_grams) if entry.entered_grams is not None else None,
         entry_source=entry.entry_source,
         kcal=float(entry.kcal),
         protein_g=float(entry.protein_g),
@@ -80,6 +90,20 @@ async def _get_food_with_nutrients(
     return food, nutrients
 
 
+def _raw_grams(food: Food, grams: float, weighed_as: str) -> tuple[float, float | None]:
+    """(peso crudo equivalente, lo que escribió el usuario si lo pesó cocinado)."""
+    if weighed_as == "raw":
+        return grams, None
+    factor = float(food.cooking_yield_factor) if food.cooking_yield_factor else None
+    if not factor:
+        raise AppError(
+            "NO_COOKING_YIELD",
+            "Este alimento no tiene factor de cocción: indica el peso en crudo.",
+            status_code=422,
+        )
+    return round(grams / factor, 2), grams
+
+
 @router.post("/food", status_code=201)
 async def log_food(
     body: LogFoodIn,
@@ -90,7 +114,8 @@ async def log_food(
         existing = await session.get(FoodLog, body.client_id)
         if existing is not None and existing.user_id == user_id:
             return _to_out(existing)
-    _food, nutrients = await _get_food_with_nutrients(session, body.food_id)
+    food, nutrients = await _get_food_with_nutrients(session, body.food_id)
+    raw_grams, entered_grams = _raw_grams(food, body.grams, body.weighed_as)
 
     entry = FoodLog(
         **({"id": body.client_id} if body.client_id is not None else {}),
@@ -98,12 +123,14 @@ async def log_food(
         log_date=body.log_date,
         meal_type=body.meal_type,
         food_id=body.food_id,
-        grams=body.grams,
-        kcal=_scale(nutrients.kcal_100g, body.grams),
-        protein_g=_scale(nutrients.protein_100g, body.grams),
-        fat_g=_scale(nutrients.fat_100g, body.grams),
-        carbs_g=_scale(nutrients.carbs_100g, body.grams),
-        micros=_scale_micros(nutrients.micros, body.grams),
+        grams=raw_grams,
+        weighed_as=body.weighed_as,
+        entered_grams=entered_grams,
+        kcal=_scale(nutrients.kcal_100g, raw_grams),
+        protein_g=_scale(nutrients.protein_100g, raw_grams),
+        fat_g=_scale(nutrients.fat_100g, raw_grams),
+        carbs_g=_scale(nutrients.carbs_100g, raw_grams),
+        micros=_scale_micros(nutrients.micros, raw_grams),
     )
     session.add(entry)
     try:
@@ -137,13 +164,16 @@ async def update_log_food(
         entry.meal_type = body.meal_type
 
     if body.grams is not None and entry.food_id is not None:
-        _food, nutrients = await _get_food_with_nutrients(session, entry.food_id)
-        entry.grams = body.grams
-        entry.kcal = _scale(nutrients.kcal_100g, body.grams)
-        entry.protein_g = _scale(nutrients.protein_100g, body.grams)
-        entry.fat_g = _scale(nutrients.fat_100g, body.grams)
-        entry.carbs_g = _scale(nutrients.carbs_100g, body.grams)
-        entry.micros = _scale_micros(nutrients.micros, body.grams)
+        food, nutrients = await _get_food_with_nutrients(session, entry.food_id)
+        # Un registro pesado cocinado se sigue editando en cocinado.
+        raw_grams, entered_grams = _raw_grams(food, body.grams, entry.weighed_as)
+        entry.grams = raw_grams
+        entry.entered_grams = entered_grams
+        entry.kcal = _scale(nutrients.kcal_100g, raw_grams)
+        entry.protein_g = _scale(nutrients.protein_100g, raw_grams)
+        entry.fat_g = _scale(nutrients.fat_100g, raw_grams)
+        entry.carbs_g = _scale(nutrients.carbs_100g, raw_grams)
+        entry.micros = _scale_micros(nutrients.micros, raw_grams)
 
     await session.commit()
     await session.refresh(entry)
@@ -161,6 +191,76 @@ async def delete_log_food(
         raise AppError("LOG_ENTRY_NOT_FOUND", "No existe ese registro.", status_code=404)
     await session.delete(entry)
     await session.commit()
+
+
+class LogRecipeIn(BaseModel):
+    log_date: date
+    meal_type: MealType
+    recipe_id: UUID
+    servings: float = Field(gt=0, le=20)
+    client_id: UUID | None = None
+
+
+@router.post("/recipe", status_code=201)
+async def log_recipe(
+    body: LogRecipeIn,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> LogFoodOut:
+    """Registra raciones de una receta propia: el snapshot se calcula ahora, sumando sus
+    ingredientes (R9), y no cambia si luego se edita la receta."""
+    if body.client_id is not None:
+        existing = await session.get(FoodLog, body.client_id)
+        if existing is not None and existing.user_id == user_id:
+            return _to_out(existing)
+    recipe = await session.get(Recipe, body.recipe_id)
+    if recipe is None or recipe.user_id != user_id:
+        raise AppError("RECIPE_NOT_FOUND", "No existe esa receta.", status_code=404)
+
+    rows = (
+        await session.execute(
+            select(RecipeIngredient.grams, FoodNutrient)
+            .join(FoodNutrient, FoodNutrient.food_id == RecipeIngredient.food_id)
+            .where(RecipeIngredient.recipe_id == recipe.id)
+        )
+    ).all()
+    if not rows:
+        raise AppError(
+            "RECIPE_HAS_NO_INGREDIENTS", "Esa receta no tiene ingredientes.", status_code=422
+        )
+    share = body.servings / max(recipe.servings, 1)
+    total_grams = sum(float(g) for g, _ in rows)
+    micros: dict[str, float] = {}
+    for grams, nutrients in rows:
+        for key, value in _scale_micros(nutrients.micros, float(grams) * share).items():
+            micros[key] = round(micros.get(key, 0.0) + value, 4)
+
+    entry = FoodLog(
+        **({"id": body.client_id} if body.client_id is not None else {}),
+        user_id=user_id,
+        log_date=body.log_date,
+        meal_type=body.meal_type,
+        recipe_id=recipe.id,
+        grams=round(total_grams * share, 2),
+        entry_source="recipe",
+        kcal=round(sum(_scale(n.kcal_100g, float(g)) for g, n in rows) * share, 2),
+        protein_g=round(sum(_scale(n.protein_100g, float(g)) for g, n in rows) * share, 2),
+        fat_g=round(sum(_scale(n.fat_100g, float(g)) for g, n in rows) * share, 2),
+        carbs_g=round(sum(_scale(n.carbs_100g, float(g)) for g, n in rows) * share, 2),
+        micros=micros,
+    )
+    session.add(entry)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise AppError(
+            "CLIENT_ID_CONFLICT", "Ese identificador de registro ya está en uso.", status_code=409
+        ) from exc
+    await session.refresh(entry)
+    out = _to_out(entry)
+    out.recipe_name = recipe.name
+    return out
 
 
 class DayTotals(BaseModel):
@@ -195,7 +295,19 @@ async def get_day_log(
         fat_g=round(sum(float(e.fat_g) for e in entries), 2),
         carbs_g=round(sum(float(e.carbs_g) for e in entries), 2),
     )
-    return LogDayOut(date=date, food=[_to_out(e) for e in entries], totals=totals)
+    recipe_ids = {e.recipe_id for e in entries if e.recipe_id is not None}
+    recipe_names: dict[UUID, str] = {}
+    if recipe_ids:
+        recipe_names = {
+            r.id: r.name
+            for r in await session.scalars(select(Recipe).where(Recipe.id.in_(recipe_ids)))
+        }
+    out = []
+    for entry in entries:
+        item = _to_out(entry)
+        item.recipe_name = recipe_names.get(entry.recipe_id) if entry.recipe_id else None
+        out.append(item)
+    return LogDayOut(date=date, food=out, totals=totals)
 
 
 class MicronutrientOut(BaseModel):

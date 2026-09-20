@@ -1,0 +1,17 @@
+source,name_regex,factor,note
+bedca,^arroz.*integral.*crudo,2.6,gramos cocido / gramos crudo
+bedca,^arroz.*crudo,2.8,gramos cocido / gramos crudo
+bedca,^pasta.*cruda,2.2,gramos cocido / gramos crudo
+bedca,^quinoa.*cruda,2.8,gramos cocido / gramos crudo
+bedca,^lenteja.*seca.*cruda,2.4,legumbre seca sin remojar
+bedca,^garbanzo.*seco.*crudo,2.3,legumbre seca sin remojar
+bedca,^alubia.*seca.*cruda,2.4,legumbre seca sin remojar
+bedca,"^haba, seca$",2.2,legumbre seca sin remojar
+bedca,^guisante.*seco.*crudo,2.3,legumbre seca sin remojar
+bedca,^pollo.*pechuga.*crudo,0.75,la carne pierde agua al cocinarse
+bedca,^pollo.*muslo.*crudo,0.72,la carne pierde agua al cocinarse
+bedca,^pavo.*muslo.*crudo,0.72,la carne pierde agua al cocinarse
+bedca,^ternera.*crud[oa],0.70,la carne pierde agua al cocinarse
+bedca,^cerdo.*crud[oa],0.72,la carne pierde agua al cocinarse
+bedca,^conejo.*cruda,0.72,la carne pierde agua al cocinarse
+bedca,^(merluza|pescadilla).*cruda,0.80,el pescado pierde agua al cocinarse

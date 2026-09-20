@@ -214,6 +214,7 @@ export default function FoodDetailPage() {
             foodName={food.name_es}
             servingSizeG={food.serving_size_g}
             servingLabel={food.serving_label}
+            cookingYieldFactor={food.cooking_yield_factor}
           />
     </main>
   );

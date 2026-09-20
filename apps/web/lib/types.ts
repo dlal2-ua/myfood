@@ -104,6 +104,8 @@ export interface FoodDetail {
   category: string | null;
   serving_size_g: number | null;
   serving_label: string | null;
+  /** gramos cocido / gramos crudo; si lo tiene se puede registrar el peso ya cocinado. */
+  cooking_yield_factor?: number | null;
   quality_rank: number;
   nutriscore_grade: string | null;
   nova_group: number | null;
@@ -152,7 +154,12 @@ export interface LogFoodEntry {
   log_date: string;
   meal_type: MealType;
   food_id: string | null;
+  recipe_id?: string | null;
+  recipe_name?: string | null;
   grams: number;
+  /** "cooked": el usuario pesó el plato ya cocinado; `grams` es el peso crudo equivalente. */
+  weighed_as?: "raw" | "cooked";
+  entered_grams?: number | null;
   entry_source: string;
   kcal: number;
   protein_g: number;
@@ -508,6 +515,7 @@ export interface RecipeNutritionTotals {
 export interface Recipe {
   id: string;
   name: string;
+  internal_ean?: string | null;
   servings: number;
   prep_minutes: number | null;
   instructions: string | null;

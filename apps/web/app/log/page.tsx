@@ -51,6 +51,8 @@ export default function LogPage() {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [quickAddFoodId, setQuickAddFoodId] = useState<string | null>(null);
+  const [cookingFactor, setCookingFactor] = useState<number | null>(null);
+  const [weighedAs, setWeighedAs] = useState<"raw" | "cooked">("raw");
 
   const [favorites, setFavorites] = useState<Favorite[]>([]);
 
@@ -126,6 +128,20 @@ export default function LogPage() {
     setQuickAddFoodId(fav.food_id);
   }
 
+  useEffect(() => {
+    // El factor de cocción solo está en la ficha del alimento: se pide al elegirlo.
+    setCookingFactor(null);
+    setWeighedAs("raw");
+    if (!selectedFood) return;
+    let cancelled = false;
+    apiFetch<{ cooking_yield_factor: number | null }>(`/api/foods/${selectedFood.id}`)
+      .then((f) => !cancelled && setCookingFactor(f.cooking_yield_factor ?? null))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFood]);
+
   function onSelectFromSearch(item: FoodSearchItem) {
     setSelectedFood(item);
     setQuickAddFoodId(null);
@@ -182,6 +198,7 @@ export default function LogPage() {
           meal_type: mealType,
           food_id: selectedFood.id,
           grams: Number(grams),
+          weighed_as: cookingFactor ? weighedAs : "raw",
         },
       });
       if (outcome.queued) {
@@ -240,7 +257,7 @@ export default function LogPage() {
 
   function startEdit(entry: LogFoodEntry) {
     setEditingId(entry.id);
-    setEditGrams(String(entry.grams));
+    setEditGrams(String(entry.weighed_as === "cooked" && entry.entered_grams ? entry.entered_grams : entry.grams));
     setEditMealType(entry.meal_type);
     setRowError(null);
   }
@@ -564,6 +581,29 @@ export default function LogPage() {
                 onChange={(e) => setGrams(e.target.value)}
               />
             </label>
+            {cookingFactor ? (
+              <fieldset className="flex flex-col gap-1 text-sm">
+                <legend className="mb-1">¿Lo pesaste crudo o ya cocinado?</legend>
+                <div className="flex gap-3">
+                  {(["raw", "cooked"] as const).map((v) => (
+                    <label key={v} className="flex items-center gap-1">
+                      <input
+                        type="radio"
+                        name="log-weighed-as"
+                        checked={weighedAs === v}
+                        onChange={() => setWeighedAs(v)}
+                      />
+                      {v === "raw" ? "Crudo" : "Cocinado"}
+                    </label>
+                  ))}
+                </div>
+                {weighedAs === "cooked" && Number(grams) > 0 && (
+                  <span className="text-xs text-neutral-500">
+                    ≈ {Math.round(Number(grams) / cookingFactor)} g en crudo.
+                  </span>
+                )}
+              </fieldset>
+            ) : null}
             <button
               type="submit"
               disabled={adding}
@@ -594,7 +634,8 @@ export default function LogPage() {
                     {editingId === entry.id ? (
                       <div className="flex flex-wrap items-end gap-3">
                         <span className="text-sm font-medium">
-                          {(entry.food_id && foodNames[entry.food_id]) || "Alimento"}
+                          {entry.recipe_name ??
+                            ((entry.food_id && foodNames[entry.food_id]) || "Alimento")}
                         </span>
                         <select
                           className={inputClass}
@@ -607,14 +648,19 @@ export default function LogPage() {
                             </option>
                           ))}
                         </select>
-                        <input
-                          type="number"
-                          min={1}
-                          max={5000}
-                          className={inputClass}
-                          value={editGrams}
-                          onChange={(e) => setEditGrams(e.target.value)}
-                        />
+                        {entry.food_id && (
+                          <input
+                            type="number"
+                            min={1}
+                            max={5000}
+                            className={inputClass}
+                            value={editGrams}
+                            onChange={(e) => setEditGrams(e.target.value)}
+                            aria-label={
+                              entry.weighed_as === "cooked" ? "Gramos (peso cocinado)" : "Gramos"
+                            }
+                          />
+                        )}
                         <button
                           type="button"
                           onClick={() => onSaveEdit(entry.id)}
@@ -635,10 +681,15 @@ export default function LogPage() {
                       <>
                         <div>
                           <p className="text-sm font-medium">
-                            {(entry.food_id && foodNames[entry.food_id]) || "Alimento"}
+                            {entry.recipe_name ??
+                              ((entry.food_id && foodNames[entry.food_id]) || "Alimento")}
                           </p>
                           <p className="text-xs text-neutral-500">
-                            {MEAL_TYPE_LABELS[entry.meal_type]} · {entry.grams} g · {entry.kcal} kcal
+                            {MEAL_TYPE_LABELS[entry.meal_type]} ·{" "}
+                            {entry.weighed_as === "cooked" && entry.entered_grams
+                              ? `${entry.entered_grams} g cocinado (≈${entry.grams} g crudo)`
+                              : `${entry.grams} g`}{" "}
+                            · {entry.kcal} kcal
                           </p>
                         </div>
                         <div className="flex items-center gap-3 text-sm">
