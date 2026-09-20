@@ -21,6 +21,8 @@ const PROTECTED_PREFIXES = [
   "/progress",
   "/admin",
   "/consent",
+  "/ayuno",
+  "/calculadoras",
 ];
 
 export function middleware(request: NextRequest) {
@@ -57,5 +59,7 @@ export const config = {
     "/household/:path*",
     "/progress/:path*",
     "/admin/:path*",
+    "/ayuno/:path*",
+    "/calculadoras/:path*",
   ],
 };

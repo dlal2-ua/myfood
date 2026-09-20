@@ -30,7 +30,6 @@ import uuid
 from datetime import date, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai import client as ai_client
@@ -44,9 +43,8 @@ from myfood.ai.prompts import (
 )
 from myfood.ai.queue import enqueue_diet_plan_job
 from myfood.ai.validator import ValidationError, validate_day_totals, validate_structure
-from myfood.db.models import AiProposal, AiSession, BodyMeasurement, DietPlan, Profile
+from myfood.db.models import AiProposal, AiSession, DietPlan
 from myfood.db.session import AdminSessionLocal
-from myfood.domain import formulas
 from myfood.domain.diet_engine import (
     CandidateFood,
     DayPlan,
@@ -58,6 +56,7 @@ from myfood.domain.food_candidates import (
     sample_day_pool,
     select_candidates,
 )
+from myfood.domain.targets import ResolvedTargets, resolve_targets
 from myfood.errors import AppError
 
 _MAX_RETRY_ATTEMPTS = 2
@@ -82,66 +81,8 @@ def _meal_types_for(meals_per_day: int) -> list[str]:
     return _MEAL_TYPES_BY_COUNT[clamped]
 
 
-def _age_years(birth_date: date) -> float:
-    return (date.today() - birth_date).days / 365.25
-
-
-async def _require_complete_profile(session: AsyncSession, user_id: UUID) -> Profile:
-    profile = await session.get(Profile, user_id)
-    incomplete = (
-        profile is None
-        or profile.sex is None
-        or profile.birth_date is None
-        or profile.height_cm is None
-    )
-    if incomplete:
-        raise AppError(
-            "PROFILE_INCOMPLETE",
-            "Completa sexo, fecha de nacimiento y altura en tu perfil antes de generar un plan.",
-            status_code=422,
-        )
-    return profile
-
-
-async def _latest_weight_kg(session: AsyncSession, user_id: UUID) -> float | None:
-    stmt = (
-        select(BodyMeasurement)
-        .where(BodyMeasurement.user_id == user_id, BodyMeasurement.weight_kg.is_not(None))
-        .order_by(BodyMeasurement.measured_on.desc())
-        .limit(1)
-    )
-    measurement = await session.scalar(stmt)
-    return float(measurement.weight_kg) if measurement else None
-
-
-async def _day_targets(session: AsyncSession, user_id: UUID) -> tuple[Profile, float, DayTargets]:
-    """Como `routers/diet_plans.py:_day_targets`, pero además devuelve el
-    peso — lo necesita `process_diet_plan_job` para el mínimo hormonal de
-    grasa y el suelo de seguridad calórico (R6), y nunca se guarda en
-    `ai_sessions` (solo vive en memoria del proceso `worker`)."""
-    profile = await _require_complete_profile(session, user_id)
-    weight_kg = await _latest_weight_kg(session, user_id)
-    if weight_kg is None:
-        raise AppError(
-            "MISSING_MEASUREMENTS",
-            "Registra tu peso en Medidas antes de generar un plan.",
-            status_code=422,
-        )
-    height_cm = float(profile.height_cm)
-    age_years = _age_years(profile.birth_date)
-
-    bmr = formulas.bmr_mifflin(profile.sex, weight_kg, height_cm, age_years)
-    tdee_value = formulas.tdee(bmr, profile.activity_level)
-    rate = float(profile.goal_rate_kg_week) if profile.goal_rate_kg_week is not None else 0.5
-    kcal, _ = formulas.calorie_target(tdee_value, profile.goal, rate, bmr, profile.sex)
-    protein_g, fat_g, carbs_g, _ = formulas.macro_targets(weight_kg, kcal, profile.goal)
-    targets = DayTargets(
-        kcal=round(kcal, 1),
-        protein_g=round(protein_g, 1),
-        fat_g=round(fat_g, 1),
-        carbs_g=round(carbs_g, 1),
-    )
-    return profile, weight_kg, targets
+async def _resolve(session: AsyncSession, user_id: UUID) -> ResolvedTargets:
+    return await resolve_targets(session, user_id, action="generar un plan")
 
 
 async def request_diet_plan(session: AsyncSession, user_id: UUID, *, num_days: int) -> AiSession:
@@ -155,7 +96,8 @@ async def request_diet_plan(session: AsyncSession, user_id: UUID, *, num_days: i
             status_code=503,
         )
 
-    profile, _weight_kg, targets = await _day_targets(session, user_id)
+    resolved = await _resolve(session, user_id)
+    profile, targets = resolved.profile, resolved.day_targets()
     meal_types = _meal_types_for(profile.meals_per_day)
 
     candidates = sample_day_pool(
@@ -252,14 +194,9 @@ async def process_diet_plan_job(ai_session_id: str) -> None:
             await session.commit()
             return
 
-        _profile, weight_kg, _targets_recomputed = await _day_targets(session, user_id)
-        safety_floor_kcal = max(
-            formulas.bmr_mifflin(
-                _profile.sex, weight_kg, float(_profile.height_cm), _age_years(_profile.birth_date)
-            ),
-            1200 if _profile.sex == "female" else 1500,
-        )
-        min_fat_g = weight_kg * 0.5
+        resolved = await _resolve(session, user_id)
+        safety_floor_kcal = resolved.safety_floor_kcal
+        min_fat_g = resolved.min_fat_g
 
         candidate_by_food_id = _candidates_by_food_id(anonymized_payload, alias_to_food_id)
         base_prompt = build_diet_plan_user_prompt(anonymized_payload, num_days=num_days)
