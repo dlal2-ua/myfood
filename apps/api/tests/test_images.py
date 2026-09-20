@@ -283,9 +283,11 @@ async def test_a_failed_download_serves_the_placeholder_queues_a_retry_and_is_no
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("image/svg+xml")
     assert state["enqueued"] == [(svc.IMAGE_JOBS_QUEUE_KEY, f"{test_food}:front")]
+    assert "max-age=10" in resp.headers["cache-control"], "el placeholder es provisional"
 
     again = await client.get(f"/api/foods/{test_food}/image")
     assert again.headers["content-type"].startswith("image/svg+xml")
+    assert "max-age=10" in again.headers["cache-control"]
     assert state["downloads"] == 1, "la caché negativa evita reintentar en cada petición"
 
 
@@ -300,6 +302,7 @@ async def test_an_invalid_image_is_not_retried_by_the_worker(
     resp = await client.get(f"/api/foods/{test_food}/image")
     assert resp.headers["content-type"].startswith("image/svg+xml")
     assert state["enqueued"] == []
+    assert "max-age=3600" in resp.headers["cache-control"], "una imagen inválida no se reintenta"
 
 
 async def test_the_worker_job_retries_and_stores_the_image(registered_client, test_food, image_env):

@@ -237,3 +237,13 @@ async def test_log_food_client_id_of_another_user_is_a_conflict(
 
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "CLIENT_ID_CONFLICT"
+
+
+async def test_copy_day_onto_itself_is_rejected(registered_client):
+    client, _ = registered_client
+    today = date.today().isoformat()
+
+    resp = await client.post("/api/log/copy-day", params={"from_date": today, "to_date": today})
+
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "SAME_DATE"

@@ -63,6 +63,10 @@ export default function RecipesPage() {
     | null
   >(null);
   const [savingDraft, setSavingDraft] = useState(false);
+  // Fila del borrador cuyo alimento se está cambiando; `addingFor` = línea sin resolver que se
+  // está resolviendo a mano (cadena vacía = ingrediente extra sin línea de origen).
+  const [changingIndex, setChangingIndex] = useState<number | null>(null);
+  const [addingFor, setAddingFor] = useState<string | null>(null);
   const importPollCountRef = useRef(0);
 
   async function loadRecipes() {
@@ -251,6 +255,32 @@ export default function RecipesPage() {
     );
   }
 
+  function onChangeDraftFood(index: number, food: FoodSearchItem) {
+    updateDraftRow(index, { food_id: food.id, name_es: food.name_es });
+    setChangingIndex(null);
+  }
+
+  function onAddDraftIngredient(line: string, food: FoodSearchItem) {
+    setImportDraft((prev) => [
+      ...(prev ?? []),
+      {
+        food_id: food.id,
+        name_es: food.name_es,
+        grams: 100,
+        gramsInput: "100",
+        approx_quantity_text: "",
+        original_line: line,
+        include: true,
+      },
+    ]);
+    if (line) {
+      setImportMeta((prev) =>
+        prev ? { ...prev, unresolved_lines: prev.unresolved_lines.filter((l) => l !== line) } : prev,
+      );
+    }
+    setAddingFor(null);
+  }
+
   async function onSaveDraft() {
     if (!importDraft || !importMeta) return;
     setSavingDraft(true);
@@ -334,7 +364,9 @@ export default function RecipesPage() {
                   />
                   {row.name_es}
                 </label>
-                <span className="text-xs text-neutral-500">&quot;{row.original_line}&quot;</span>
+                {row.original_line && (
+                  <span className="text-xs text-neutral-500">&quot;{row.original_line}&quot;</span>
+                )}
                 <label className="flex flex-col gap-1 text-sm">
                   Gramos
                   <input
@@ -345,14 +377,56 @@ export default function RecipesPage() {
                     onChange={(e) => updateDraftRow(index, { gramsInput: e.target.value })}
                   />
                 </label>
+                <button
+                  type="button"
+                  onClick={() => setChangingIndex(changingIndex === index ? null : index)}
+                  className="text-sm text-neutral-500 underline"
+                >
+                  {changingIndex === index ? "Cancelar" : "Cambiar alimento"}
+                </button>
+                {changingIndex === index && (
+                  <div className="w-full">
+                    <FoodSearchBox onSelect={(food) => onChangeDraftFood(index, food)} />
+                  </div>
+                )}
               </div>
             ))}
             {importMeta.unresolved_lines.length > 0 && (
-              <p className="text-xs text-neutral-500">
-                Sin resolver: {importMeta.unresolved_lines.join(", ")} — añádelos a mano tras
-                guardar la receta.
-              </p>
+              <div className="flex flex-col gap-2 text-sm">
+                <p className="font-medium">Líneas que no se han podido resolver</p>
+                {importMeta.unresolved_lines.map((line) => (
+                  <div key={line} className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-neutral-600 dark:text-neutral-400">
+                        &quot;{line}&quot;
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setAddingFor(addingFor === line ? null : line)}
+                        className="text-neutral-500 underline"
+                      >
+                        {addingFor === line ? "Cancelar" : "Buscar alimento"}
+                      </button>
+                    </div>
+                    {addingFor === line && (
+                      <FoodSearchBox onSelect={(food) => onAddDraftIngredient(line, food)} />
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
+            <div className="flex flex-col gap-2 text-sm">
+              <button
+                type="button"
+                onClick={() => setAddingFor(addingFor === "" ? null : "")}
+                className="self-start text-neutral-500 underline"
+              >
+                {addingFor === "" ? "Cancelar" : "Añadir otro ingrediente"}
+              </button>
+              {addingFor === "" && (
+                <FoodSearchBox onSelect={(food) => onAddDraftIngredient("", food)} />
+              )}
+            </div>
             <div className="flex gap-3">
               <button
                 type="button"

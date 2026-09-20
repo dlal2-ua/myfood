@@ -1,6 +1,7 @@
 "use client";
 
 import { ScoreBadges } from "@/components/ScoreBadges";
+import { MICRO_LABELS, microUnit } from "@/lib/micros";
 import { FoodImage } from "@/components/FoodImage";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -104,6 +105,16 @@ export default function FoodDetailPage() {
             <td className="py-1 text-neutral-500">Energía</td>
             <td className="py-1 text-right">{food.kcal_100g} kcal / 100 g</td>
           </tr>
+          {food.serving_size_g != null && food.serving_size_g > 0 && (
+            <tr className="border-b border-neutral-200 dark:border-neutral-800">
+              <td className="py-1 text-neutral-500">
+                Por porción ({food.serving_size_g} g{food.serving_label ? ` · ${food.serving_label}` : ""})
+              </td>
+              <td className="py-1 text-right">
+                {Math.round((food.kcal_100g * food.serving_size_g) / 100)} kcal
+              </td>
+            </tr>
+          )}
           <tr className="border-b border-neutral-200 dark:border-neutral-800">
             <td className="py-1 text-neutral-500">Proteína</td>
             <td className="py-1 text-right">{food.protein_100g} g</td>
@@ -112,10 +123,22 @@ export default function FoodDetailPage() {
             <td className="py-1 text-neutral-500">Grasa</td>
             <td className="py-1 text-right">{food.fat_100g} g</td>
           </tr>
+          {food.saturated_100g != null && (
+            <tr className="border-b border-neutral-200 dark:border-neutral-800">
+              <td className="py-1 pl-4 text-neutral-500">de las cuales saturadas</td>
+              <td className="py-1 text-right">{food.saturated_100g} g</td>
+            </tr>
+          )}
           <tr className="border-b border-neutral-200 dark:border-neutral-800">
             <td className="py-1 text-neutral-500">Carbohidratos</td>
             <td className="py-1 text-right">{food.carbs_100g} g</td>
           </tr>
+          {food.sugars_100g != null && (
+            <tr className="border-b border-neutral-200 dark:border-neutral-800">
+              <td className="py-1 pl-4 text-neutral-500">de los cuales azúcares</td>
+              <td className="py-1 text-right">{food.sugars_100g} g</td>
+            </tr>
+          )}
           {food.fiber_100g != null && (
             <tr className="border-b border-neutral-200 dark:border-neutral-800">
               <td className="py-1 text-neutral-500">Fibra</td>
@@ -130,6 +153,24 @@ export default function FoodDetailPage() {
           )}
         </tbody>
       </table>
+
+      {Object.keys(food.micros).length > 0 && (
+        <details className="max-w-sm text-sm">
+          <summary className="cursor-pointer font-semibold">Vitaminas y minerales (por 100 g)</summary>
+          <table className="mt-2 w-full">
+            <tbody>
+              {Object.entries(food.micros).map(([key, value]) => (
+                <tr key={key} className="border-b border-neutral-200 dark:border-neutral-800">
+                  <td className="py-1 text-neutral-500">{MICRO_LABELS[key] ?? key}</td>
+                  <td className="py-1 text-right">
+                    {value} {microUnit(key)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
 
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold">Alérgenos</h2>
@@ -163,7 +204,17 @@ export default function FoodDetailPage() {
         </MedicalDisclaimer>
       </section>
 
-      <AddToLogForm foodId={food.id} foodName={food.name_es} />
+      <p className="text-xs text-neutral-500">
+        Fuente: {food.attribution ?? food.source} · Licencia: {food.license}
+        {food.barcode_ean && ` · EAN ${food.barcode_ean}`}
+      </p>
+
+      <AddToLogForm
+            foodId={food.id}
+            foodName={food.name_es}
+            servingSizeG={food.serving_size_g}
+            servingLabel={food.serving_label}
+          />
     </main>
   );
 }

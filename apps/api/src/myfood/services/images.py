@@ -45,12 +45,17 @@ ALLOWED_REMOTE_HOSTS = ("images.openfoodfacts.org", "static.openfoodfacts.org")
 
 MAX_DOWNLOAD_BYTES = 5 * 1024 * 1024
 DOWNLOAD_TIMEOUT_SECONDS = 8.0
+# La imagen de OFF tarda 8–10 s en llegar desde este servidor: la petición del usuario espera
+# poco y, si no llega, sirve el placeholder y deja la descarga al worker (sección 12).
+INLINE_DOWNLOAD_TIMEOUT_SECONDS = 2.5
 WEBP_QUALITY = 82
 # Formatos aceptados por su cabecera real (Pillow los identifica por los primeros bytes).
 _ACCEPTED_FORMATS = {"JPEG", "PNG", "WEBP"}
 
 IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 PLACEHOLDER_CACHE_CONTROL = "public, max-age=3600"
+# Placeholder de una imagen que se está descargando: que el navegador vuelva a pedirla enseguida.
+PENDING_CACHE_CONTROL = "public, max-age=10"
 
 
 class ImageRejected(Exception):
@@ -240,6 +245,10 @@ class ImageOutcome:
 
 IMAGE_JOBS_QUEUE_KEY = "images:jobs:fetch"
 _NEGATIVE_TTL_SECONDS = 24 * 60 * 60
+# Valor de la caché negativa: `retry` = fallo transitorio que reintenta el worker (el placeholder
+# es provisional); `rejected` = imagen inválida (el placeholder es definitivo).
+_NEGATIVE_RETRY = "retry"
+_NEGATIVE_REJECTED = "rejected"
 _LOCK_TTL_SECONDS = 30
 _TOUCH_INTERVAL_SQL = "interval '1 hour'"
 _redis = redis.from_url(get_settings().redis_url, decode_responses=True)
@@ -257,12 +266,12 @@ def _lock_key(food_id: str, image_type: str) -> str:
     return f"images:lock:{food_id}:{image_type}"
 
 
-def placeholder_outcome(category: str | None) -> ImageOutcome:
+def placeholder_outcome(category: str | None, *, pending: bool = False) -> ImageOutcome:
     return ImageOutcome(
         path=None,
         placeholder=placeholder_svg(category),
         media_type="image/svg+xml",
-        cache_control=PLACEHOLDER_CACHE_CONTROL,
+        cache_control=PENDING_CACHE_CONTROL if pending else PLACEHOLDER_CACHE_CONTROL,
     )
 
 
@@ -302,8 +311,13 @@ async def fetch_and_store(
         )
     except (ImageRejected, httpx.HTTPError, TimeoutError, OSError) as exc:
         logger.info("imagen %s/%s no disponible: %s", food_id, image.type, exc)
-        await _redis.set(_negative_key(food_id, image.type), "1", ex=_NEGATIVE_TTL_SECONDS)
-        return "rejected" if isinstance(exc, ImageRejected) else "failed"
+        rejected = isinstance(exc, ImageRejected)
+        await _redis.set(
+            _negative_key(food_id, image.type),
+            _NEGATIVE_REJECTED if rejected else _NEGATIVE_RETRY,
+            ex=_NEGATIVE_TTL_SECONDS,
+        )
+        return "rejected" if rejected else "failed"
     await session.execute(
         update(FoodImage)
         .where(FoodImage.id == image.id)
@@ -338,14 +352,17 @@ async def resolve_image(
         await _touch(session, image)
         return _file_outcome(path)
 
-    if not image.remote_url or await _redis.exists(_negative_key(food_id, image_type)):
+    if not image.remote_url:
         return placeholder_outcome(food.category)
+    negative = await _redis.get(_negative_key(food_id, image_type))
+    if negative is not None:
+        return placeholder_outcome(food.category, pending=negative == _NEGATIVE_RETRY)
 
     # Un solo intento simultáneo por imagen: los demás reciben el placeholder al momento.
     if not await _redis.set(_lock_key(food_id, image_type), "1", nx=True, ex=_LOCK_TTL_SECONDS):
-        return placeholder_outcome(food.category)
+        return placeholder_outcome(food.category, pending=True)
     try:
-        status = await fetch_and_store(session, image, timeout=DOWNLOAD_TIMEOUT_SECONDS)
+        status = await fetch_and_store(session, image, timeout=INLINE_DOWNLOAD_TIMEOUT_SECONDS)
     finally:
         await _redis.delete(_lock_key(food_id, image_type))
     if status == "stored":
@@ -354,6 +371,7 @@ async def resolve_image(
         # Lenta o caída ahora mismo: se sirve el placeholder y el worker lo reintenta
         # sin bloquear a nadie (sección 12: "nunca bloquear la petición del usuario").
         await enqueue_job(IMAGE_JOBS_QUEUE_KEY, f"{food_id}:{image_type}")
+        return placeholder_outcome(food.category, pending=True)
     return placeholder_outcome(food.category)
 
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { localDateIso } from "@/lib/dates";
+import { mealTypeForTime } from "@/lib/meals";
 import { FoodImage } from "@/components/FoodImage";
 import { useEffect, useRef, useState } from "react";
 import { useCurrentUserId } from "@/components/CurrentUser";
@@ -45,7 +46,7 @@ export default function LogPage() {
   const [foodNames, setFoodNames] = useState<Record<string, string>>({});
 
   const [selectedFood, setSelectedFood] = useState<FoodSearchItem | null>(null);
-  const [mealType, setMealType] = useState<MealType>("lunch");
+  const [mealType, setMealType] = useState<MealType>(() => mealTypeForTime());
   const [grams, setGrams] = useState("100");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -58,6 +59,14 @@ export default function LogPage() {
   const [editMealType, setEditMealType] = useState<MealType>("lunch");
   const [rowBusy, setRowBusy] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+
+  const [copyFrom, setCopyFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return localDateIso(d);
+  });
+  const [copying, setCopying] = useState(false);
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
   const [smartText, setSmartText] = useState("");
   const [smartConsent, setSmartConsent] = useState(false);
@@ -192,6 +201,40 @@ export default function LogPage() {
       setAddError(errorMessage(err));
     } finally {
       setAdding(false);
+    }
+  }
+
+  async function onCopyDay() {
+    if (copyFrom === logDate) {
+      setCopyMsg("Elige un día distinto del que estás viendo.");
+      return;
+    }
+    const existing = day?.food.length ?? 0;
+    if (
+      existing > 0 &&
+      !window.confirm(
+        `El ${logDate} ya tiene ${existing} registro(s). Lo copiado se añadirá además de lo que hay. ¿Continuar?`,
+      )
+    ) {
+      return;
+    }
+    setCopying(true);
+    setCopyMsg(null);
+    try {
+      const copied = await apiFetch<LogFoodEntry[]>(
+        `/api/log/copy-day?from_date=${copyFrom}&to_date=${logDate}`,
+        { method: "POST" },
+      );
+      setCopyMsg(
+        copied.length === 0
+          ? `El ${copyFrom} no tiene registros que copiar.`
+          : `Copiados ${copied.length} registro(s) del ${copyFrom}.`,
+      );
+      await loadDay(logDate);
+    } catch (err) {
+      setCopyMsg(errorMessage(err));
+    } finally {
+      setCopying(false);
     }
   }
 
@@ -344,6 +387,27 @@ export default function LogPage() {
           onChange={(e) => setLogDate(e.target.value)}
         />
       </div>
+
+      <section className="flex flex-wrap items-end gap-3 text-sm">
+        <label className="flex flex-col gap-1">
+          Copiar los registros del día
+          <input
+            type="date"
+            className={inputClass}
+            value={copyFrom}
+            onChange={(e) => setCopyFrom(e.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => void onCopyDay()}
+          disabled={copying}
+          className="rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60 dark:border-neutral-700"
+        >
+          {copying ? "Copiando…" : `Copiar al ${logDate}`}
+        </button>
+        {copyMsg && <span className="text-neutral-600 dark:text-neutral-400">{copyMsg}</span>}
+      </section>
 
       {favorites.length > 0 && (
         <section>
