@@ -7,8 +7,8 @@ Agent SDK de todo el proyecto corre aquí, nunca en el proceso `api`.
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import redis.asyncio as redis
 from sqlalchemy import select, update
@@ -27,9 +27,10 @@ from myfood.ai.queue import (
 )
 from myfood.chat.flow import process_chat_job
 from myfood.config import get_settings
-from myfood.db.models import AiSession, NotificationRule, PushSubscription
+from myfood.db.models import AiSession, NotificationRule, PushSubscription, User
 from myfood.db.session import AdminSessionLocal
-from myfood.notifications import is_rule_due, message_for_rule
+from myfood.notification_content import build_notification, low_stock_notifications
+from myfood.notifications import is_rule_due
 from myfood.push import PushSubscriptionExpired, send_push
 from myfood.services.images import IMAGE_JOBS_QUEUE_KEY, process_image_job, purge_cache
 
@@ -52,40 +53,73 @@ async def _already_sent(rule_id, day: str, slot) -> bool:
     return not claimed
 
 
+def _zone(timezone: str | None) -> ZoneInfo:
+    try:
+        return ZoneInfo(timezone or settings.tz)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo(settings.tz)
+
+
+_LOW_STOCK_HOUR = time(10, 0)
+_LOW_STOCK_TOLERANCE_MINUTES = 2
+
+
+async def _send_to_user(session, user_id, payload: dict) -> int:
+    """Envía `payload` a todas las suscripciones del usuario; borra las caducadas."""
+    sent = 0
+    subs = list(
+        await session.scalars(select(PushSubscription).where(PushSubscription.user_id == user_id))
+    )
+    for sub in subs:
+        try:
+            send_push(sub, payload)
+            sent += 1
+        except PushSubscriptionExpired:
+            await session.delete(sub)
+        except Exception:
+            # Un fallo de red/servicio de push de UN suscriptor no debe bloquear el envío a los
+            # demás ni al resto de reglas de este mismo tick.
+            logger.exception("fallo enviando push a %s", sub.endpoint)
+    return sent
+
+
 async def run_tick(now: datetime) -> int:
-    """Un ciclo del bucle: revisa todas las reglas activas de todos los
-    usuarios (sesión admin — sin contexto de un usuario concreto, igual
-    justificación que `/admin/*`, sección 22) y envía lo que toque. Devuelve
-    cuántas notificaciones se enviaron (solo para logging/tests)."""
+    """Un ciclo del bucle: revisa todas las reglas activas de todos los usuarios (sesión admin —
+    sin contexto de un usuario concreto, igual justificación que `/admin/*`, sección 22) y envía
+    lo que toque, evaluando cada regla en la zona horaria de su dueño. `now` es un instante con
+    zona (UTC en producción). Devuelve cuántas notificaciones se enviaron (logging/tests)."""
+    if now.tzinfo is None:
+        raise ValueError("run_tick necesita un datetime con zona horaria")
     sent = 0
     async with AdminSessionLocal() as session:
-        rules = await session.scalars(
-            select(NotificationRule).where(NotificationRule.is_enabled.is_(True))
-        )
-        for rule in rules:
-            due, slot = is_rule_due(rule, now)
-            if not due or await _already_sent(rule.id, now.date().isoformat(), slot):
-                continue
-
-            subs = list(
-                await session.scalars(
-                    select(PushSubscription).where(PushSubscription.user_id == rule.user_id)
-                )
+        rules = list(
+            await session.scalars(
+                select(NotificationRule).where(NotificationRule.is_enabled.is_(True))
             )
-            payload = message_for_rule(rule)
-            for sub in subs:
-                try:
-                    send_push(sub, payload)
-                    sent += 1
-                except PushSubscriptionExpired:
-                    await session.delete(sub)
-                except Exception:
-                    # Un fallo de red/servicio de push de UN suscriptor no
-                    # debe bloquear el envío a los demás ni al resto de
-                    # reglas de este mismo tick (antes: cualquier excepción
-                    # aquí abortaba todo el `run_tick`, incluido el commit
-                    # de borrados de suscripciones ya caducadas).
-                    logger.exception("fallo enviando push a %s", sub.endpoint)
+        )
+        timezones = dict((await session.execute(select(User.id, User.timezone))).all())
+        for rule in rules:
+            local_now = now.astimezone(_zone(timezones.get(rule.user_id)))
+            due, slot = is_rule_due(rule, local_now)
+            if not due or await _already_sent(rule.id, local_now.date().isoformat(), slot):
+                continue
+            payload = await build_notification(session, rule, local_now)
+            if payload is None:
+                continue
+            sent += await _send_to_user(session, rule.user_id, payload)
+
+        # Stock bajo: un aviso al día por suplemento, a las 10:00 hora del usuario.
+        for user_id, supplement_id, payload in await low_stock_notifications(session):
+            local_now = now.astimezone(_zone(timezones.get(user_id)))
+            minutes = local_now.hour * 60 + local_now.minute
+            slot_minutes = _LOW_STOCK_HOUR.hour * 60 + _LOW_STOCK_HOUR.minute
+            if abs(minutes - slot_minutes) > _LOW_STOCK_TOLERANCE_MINUTES:
+                continue
+            if await _already_sent(
+                f"lowstock-{supplement_id}", local_now.date().isoformat(), _LOW_STOCK_HOUR
+            ):
+                continue
+            sent += await _send_to_user(session, user_id, payload)
         await session.commit()
     return sent
 
@@ -94,10 +128,9 @@ _AI_QUEUE_POLL_TIMEOUT_SECONDS = 5
 
 
 async def _notifications_loop() -> None:
-    tz = ZoneInfo(settings.tz)
     while True:
         try:
-            sent = await run_tick(datetime.now(tz))
+            sent = await run_tick(datetime.now(UTC))
             if sent:
                 logger.info("enviadas %s notificaciones", sent)
         except Exception:
@@ -158,8 +191,7 @@ async def _receipt_scan_jobs_loop() -> None:
             await process_receipt_scan_job(ai_session_id)
         except Exception:
             logger.exception(
-                "fallo procesando un trabajo de escaneo de ticket — se reintenta "
-                "con el siguiente"
+                "fallo procesando un trabajo de escaneo de ticket — se reintenta con el siguiente"
             )
 
 
@@ -171,9 +203,7 @@ async def _chat_jobs_loop() -> None:
                 continue
             await process_chat_job(ai_session_id)
         except Exception:
-            logger.exception(
-                "fallo procesando un trabajo de chat — se reintenta con el siguiente"
-            )
+            logger.exception("fallo procesando un trabajo de chat — se reintenta con el siguiente")
 
 
 # Una sesión de iafood que sigue `running` pasado este tiempo ya no la va a
@@ -251,9 +281,7 @@ async def _image_purge_loop() -> None:
 
 
 async def main() -> None:
-    logger.info(
-        "MyFood worker arrancado — recordatorios cada %ss + colas de iafood", _TICK_SECONDS
-    )
+    logger.info("MyFood worker arrancado — recordatorios cada %ss + colas de iafood", _TICK_SECONDS)
     await asyncio.gather(
         _notifications_loop(),
         _diet_plan_jobs_loop(),

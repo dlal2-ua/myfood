@@ -21,18 +21,22 @@ import type { NotificationRule } from "@/lib/types";
 interface DueTime {
   hour: number;
   minute: number;
+  /** Días ISO (1 = lunes … 7 = domingo) en los que dispara; vacío = todos. */
+  days: number[];
 }
 
 function dueTimesForRule(rule: NotificationRule): DueTime[] {
+  const days = (rule.schedule.days_of_week as number[] | undefined) ?? [];
   const parse = (value: string): DueTime => {
     const [hh, mm] = value.split(":").map(Number);
-    return { hour: hh, minute: mm };
+    return { hour: hh, minute: mm, days };
   };
   if (rule.kind === "water") {
-    const times = (rule.schedule.times as string[] | undefined) ?? [];
+    // Como mucho 8 avisos de agua al día (mismo tope que el servidor).
+    const times = ((rule.schedule.times as string[] | undefined) ?? []).slice(0, 8);
     return times.map(parse);
   }
-  if (rule.kind === "supplement") {
+  if (rule.kind === "supplement" || rule.kind === "meal" || rule.kind === "weigh_in") {
     const raw = rule.schedule.time as string | undefined;
     return raw ? [parse(raw)] : [];
   }
@@ -49,11 +53,27 @@ function inQuietHours(t: DueTime, quietFrom: string, quietTo: string): boolean {
   return minutes >= from || minutes < to; // rango que cruza medianoche
 }
 
-function messageForRule(rule: NotificationRule): string {
+const MEAL_LABELS: Record<string, string> = {
+  breakfast: "el desayuno",
+  morning_snack: "el tentempié de media mañana",
+  lunch: "la comida",
+  afternoon_snack: "la merienda",
+  dinner: "la cena",
+  supper: "la cena tardía",
+};
+
+function messageForRule(rule: NotificationRule, supplementNames: Record<string, string>): string {
   const custom = rule.schedule.message as string | undefined;
   if (custom) return custom;
   if (rule.kind === "water") return "Hora de beber agua.";
-  if (rule.kind === "supplement") return "Toca un suplemento.";
+  if (rule.kind === "supplement") {
+    const name = supplementNames[rule.schedule.supplement_id as string];
+    return name ? `Toca ${name}.` : "Toca un suplemento.";
+  }
+  if (rule.kind === "meal") {
+    return `Cuando termines, apunta ${MEAL_LABELS[rule.schedule.meal_type as string] ?? "tu comida"}.`;
+  }
+  if (rule.kind === "weigh_in") return "Cuando quieras, apunta tu peso de hoy.";
   return "Tienes un recordatorio pendiente.";
 }
 
@@ -85,6 +105,11 @@ export async function syncLocalNotifications(): Promise<void> {
   }
 
   const rules = await apiFetch<NotificationRule[]>("/api/notification-rules");
+  const supplementNames = await apiFetch<{ items: { id: string; name: string }[] }>(
+    "/api/supplements",
+  )
+    .then((res) => Object.fromEntries(res.items.map((s) => [s.id, s.name])))
+    .catch(() => ({}) as Record<string, string>);
   const toSchedule = rules
     .filter((rule) => rule.is_enabled)
     .flatMap((rule) =>
@@ -95,12 +120,23 @@ export async function syncLocalNotifications(): Promise<void> {
 
   if (toSchedule.length === 0) return;
 
+  // Capacitor numera los días de la semana de 1 (domingo) a 7 (sábado); el servidor, de 1 (lunes)
+  // a 7 (domingo). Las notificaciones locales son estáticas: no pueden saber si ya has bebido o
+  // pesado hoy (para eso están los avisos push, que sí lo comprueban).
+  const toCapacitorWeekday = (isoDay: number) => (isoDay % 7) + 1;
   await LocalNotifications.schedule({
-    notifications: toSchedule.map(({ rule, time }) => ({
-      id: stableId(`${rule.id}:${time.hour}:${time.minute}`),
-      title: "MyFood",
-      body: messageForRule(rule),
-      schedule: { on: { hour: time.hour, minute: time.minute }, allowWhileIdle: true },
-    })),
+    notifications: toSchedule.flatMap(({ rule, time }) => {
+      const body = messageForRule(rule, supplementNames);
+      const weekdays = time.days.length > 0 ? time.days.map(toCapacitorWeekday) : [undefined];
+      return weekdays.map((weekday) => ({
+        id: stableId(`${rule.id}:${time.hour}:${time.minute}:${weekday ?? "all"}`),
+        title: "MyFood",
+        body,
+        schedule: {
+          on: { hour: time.hour, minute: time.minute, ...(weekday ? { weekday } : {}) },
+          allowWhileIdle: true,
+        },
+      }));
+    }),
   });
 }

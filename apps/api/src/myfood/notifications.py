@@ -7,6 +7,9 @@ from datetime import datetime, time
 
 from myfood.db.models import NotificationRule
 
+# Anti-spam (sección 13): como mucho 8 avisos de agua al día por regla.
+MAX_WATER_REMINDERS_PER_DAY = 8
+
 
 def in_quiet_hours(now_time: time, quiet_from: time, quiet_to: time) -> bool:
     if quiet_from <= quiet_to:
@@ -19,14 +22,17 @@ def _parse_time(value: str) -> time:
     return time(int(hh), int(mm))
 
 
-def due_times_for_rule(schedule: dict, kind: str) -> list[time]:
-    """Extrae los horarios programados de `schedule` — su forma depende de
-    `kind` (sección 9): 'water' trae varias horas al día, 'supplement' una
-    sola. 'meal'/'weigh_in' no tienen productor todavía (llegan en fases
-    posteriores) — devuelve lista vacía, nunca inventa un horario."""
+def due_times_for_rule(schedule: dict, kind: str, weekday: int | None = None) -> list[time]:
+    """Extrae los horarios programados de `schedule` — su forma depende de `kind` (sección 9):
+    'water' trae varias horas al día (máximo 8), el resto una sola `time`. Si la regla trae
+    `days_of_week` (1 = lunes … 7 = domingo) y se indica el `weekday` de hoy, solo dispara esos
+    días. Nunca inventa un horario que la regla no tenga."""
+    days = schedule.get("days_of_week")
+    if weekday is not None and days and weekday not in days:
+        return []
     if kind == "water":
-        return [_parse_time(t) for t in schedule.get("times", [])]
-    if kind == "supplement":
+        return [_parse_time(t) for t in schedule.get("times", [])][:MAX_WATER_REMINDERS_PER_DAY]
+    if kind in ("supplement", "meal", "weigh_in"):
         raw = schedule.get("time")
         return [_parse_time(raw)] if raw else []
     return []
@@ -45,7 +51,7 @@ def is_rule_due(
         return False, None
 
     now_minutes = now_time.hour * 60 + now_time.minute
-    for slot in due_times_for_rule(rule.schedule, rule.kind):
+    for slot in due_times_for_rule(rule.schedule, rule.kind, now.isoweekday()):
         slot_minutes = slot.hour * 60 + slot.minute
         if abs(now_minutes - slot_minutes) <= tolerance_minutes:
             return True, slot

@@ -23,20 +23,33 @@ el cliente tenga que conocer el valor actual para no pisarlo por accidente.
 
 from collections import defaultdict
 from datetime import UTC, date, datetime, time
+from typing import Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from myfood.db.models import Food, Supplement, SupplementLog, SupplementSchedule, SupplementStock
+from myfood.config import get_settings
+from myfood.db.models import (
+    Food,
+    NotificationRule,
+    Supplement,
+    SupplementLog,
+    SupplementSchedule,
+    SupplementStock,
+    User,
+)
 from myfood.deps import get_current_user_id, get_db
+from myfood.domain import supplements as supplements_calc
 from myfood.errors import AppError
+from myfood.notification_rules_defaults import default_quiet_hours
 
 router = APIRouter(prefix="/supplements", tags=["supplements"])
 
-LOW_STOCK_DAYS_THRESHOLD = 5
+LOW_STOCK_DAYS_THRESHOLD = supplements_calc.LOW_STOCK_DAYS_THRESHOLD
 
 
 async def _get_supplement(session: AsyncSession, user_id: UUID, supplement_id: UUID) -> Supplement:
@@ -65,27 +78,14 @@ async def _get_food(session: AsyncSession, food_id: UUID) -> Food:
     return food
 
 
-def _doses_per_day(schedules: list[SupplementSchedule]) -> float:
-    """Estimación simple: cada horario aporta una toma en los días que
-    cubre — se promedia esa frecuencia semanal a un valor diario. No
-    distingue horarios duplicados ni tamaños de dosis distintos entre sí
-    (todas las tomas cuentan como 1 dosis, igual que el log)."""
-    if not schedules:
-        return 0.0
-    weekly_doses = sum(len(s.days_of_week) for s in schedules)
-    return weekly_doses / 7
+def _days(schedules: list[SupplementSchedule]) -> list[list[int]]:
+    return [list(s.days_of_week) for s in schedules]
 
 
 def _stock_projection(
     doses_remaining: float | None, schedules: list[SupplementSchedule]
 ) -> tuple[float | None, bool]:
-    if doses_remaining is None:
-        return None, False
-    doses_per_day = _doses_per_day(schedules)
-    if doses_per_day <= 0:
-        return None, False
-    days_remaining = round(doses_remaining / doses_per_day, 1)
-    return days_remaining, days_remaining <= LOW_STOCK_DAYS_THRESHOLD
+    return supplements_calc.stock_projection(doses_remaining, _days(schedules))
 
 
 class SupplementIn(BaseModel):
@@ -115,6 +115,8 @@ class ScheduleIn(BaseModel):
     time_of_day: time
     days_of_week: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
     with_food: bool = False
+    # Crea a la vez el recordatorio push de esta toma (`notification_rules`, kind 'supplement').
+    remind: bool = False
 
     @field_validator("days_of_week")
     @classmethod
@@ -140,14 +142,16 @@ class ScheduleOut(BaseModel):
     time_of_day: str
     days_of_week: list[int]
     with_food: bool
+    has_reminder: bool = False
 
 
-def _schedule_to_out(schedule: SupplementSchedule) -> ScheduleOut:
+def _schedule_to_out(schedule: SupplementSchedule, has_reminder: bool = False) -> ScheduleOut:
     return ScheduleOut(
         id=schedule.id,
         time_of_day=schedule.time_of_day.strftime("%H:%M"),
         days_of_week=list(schedule.days_of_week),
         with_food=schedule.with_food,
+        has_reminder=has_reminder,
     )
 
 
@@ -167,6 +171,8 @@ class SupplementOut(BaseModel):
     last_restock_at: datetime | None
     days_remaining: float | None
     low_stock: bool
+    # Coste estimado de 30 días con las tomas programadas; `None` si falta el precio o las dosis.
+    monthly_cost: float | None = None
 
 
 def _to_out(
@@ -196,6 +202,13 @@ def _to_out(
         last_restock_at=stock.last_restock_at if stock is not None else None,
         days_remaining=days_remaining,
         low_stock=low_stock,
+        monthly_cost=supplements_calc.monthly_cost(
+            float(supplement.price_per_container)
+            if supplement.price_per_container is not None
+            else None,
+            supplement.doses_per_container,
+            _days(schedules),
+        ),
     )
 
 
@@ -205,6 +218,8 @@ class SupplementDetailOut(SupplementOut):
 
 class SupplementListOut(BaseModel):
     items: list[SupplementOut]
+    # Suma del coste mensual de los suplementos activos que tienen precio y horario.
+    total_monthly_cost: float | None = None
 
 
 class SupplementLogEntryOut(BaseModel):
@@ -285,10 +300,12 @@ async def list_supplements(
     ):
         schedules_by_supplement[schedule.supplement_id].append(schedule)
 
+    items = [
+        _to_out(s, stocks.get(s.id), schedules_by_supplement.get(s.id, [])) for s in supplements
+    ]
+    costs = [i.monthly_cost for i in items if i.is_active and i.monthly_cost is not None]
     return SupplementListOut(
-        items=[
-            _to_out(s, stocks.get(s.id), schedules_by_supplement.get(s.id, [])) for s in supplements
-        ]
+        items=items, total_monthly_cost=round(sum(costs), 2) if costs else None
     )
 
 
@@ -340,6 +357,102 @@ async def delete_log_entry(
     await session.commit()
 
 
+class TodayDoseOut(BaseModel):
+    supplement_id: UUID
+    supplement_name: str
+    dose_amount: float
+    dose_unit: str
+    schedule_id: UUID
+    time_of_day: str
+    with_food: bool
+    # 'overdue' = pendiente y su hora ya pasó.
+    status: Literal["taken", "skipped", "pending", "overdue"]
+
+
+class TodayOut(BaseModel):
+    date: date
+    doses: list[TodayDoseOut]
+    pending_count: int
+
+
+def _user_zone(timezone: str | None) -> ZoneInfo:
+    try:
+        return ZoneInfo(timezone or get_settings().tz)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo(get_settings().tz)
+
+
+@router.get("/today")
+async def get_today(
+    user_id: UUID = Depends(get_current_user_id), session: AsyncSession = Depends(get_db)
+) -> TodayOut:
+    """Tomas de hoy con su hora y si ya están hechas, según la zona horaria del usuario. Un
+    suplemento con varias tomas al día consume sus registros de hoy en orden: la primera toma
+    registrada cubre la primera hora, y así sucesivamente."""
+    user = await session.get(User, user_id)
+    now = datetime.now(_user_zone(user.timezone if user else None))
+    today = now.date()
+    weekday = now.isoweekday()
+
+    supplements = {
+        s.id: s
+        for s in await session.scalars(
+            select(Supplement).where(Supplement.user_id == user_id, Supplement.is_active.is_(True))
+        )
+    }
+    if not supplements:
+        return TodayOut(date=today, doses=[], pending_count=0)
+
+    schedules = list(
+        await session.scalars(
+            select(SupplementSchedule)
+            .where(SupplementSchedule.supplement_id.in_(list(supplements)))
+            .order_by(SupplementSchedule.time_of_day)
+        )
+    )
+    logs = defaultdict(list)
+    for entry in await session.scalars(
+        select(SupplementLog)
+        .where(SupplementLog.user_id == user_id, SupplementLog.log_date == today)
+        .order_by(SupplementLog.taken_at)
+    ):
+        logs[entry.supplement_id].append(entry)
+
+    doses: list[TodayDoseOut] = []
+    consumed: dict[UUID, int] = defaultdict(int)
+    for schedule in schedules:
+        if weekday not in schedule.days_of_week:
+            continue
+        supplement = supplements[schedule.supplement_id]
+        done = logs[supplement.id]
+        index = consumed[supplement.id]
+        consumed[supplement.id] += 1
+        if index < len(done):
+            status = "skipped" if done[index].skipped else "taken"
+        elif schedule.time_of_day < now.time():
+            status = "overdue"
+        else:
+            status = "pending"
+        doses.append(
+            TodayDoseOut(
+                supplement_id=supplement.id,
+                supplement_name=supplement.name,
+                dose_amount=float(supplement.dose_amount),
+                dose_unit=supplement.dose_unit,
+                schedule_id=schedule.id,
+                time_of_day=schedule.time_of_day.strftime("%H:%M"),
+                with_food=schedule.with_food,
+                status=status,
+            )
+        )
+    doses.sort(key=lambda d: (d.time_of_day, d.supplement_name))
+    return TodayOut(
+        date=today,
+        doses=doses,
+        pending_count=sum(d.status in ("pending", "overdue") for d in doses),
+    )
+
+
 @router.get("/{supplement_id}")
 async def get_supplement_detail(
     supplement_id: UUID,
@@ -356,8 +469,10 @@ async def get_supplement_detail(
         )
     )
     base = _to_out(supplement, stock, schedules)
+    reminders = await _reminder_schedule_ids(session, user_id)
     return SupplementDetailOut(
-        **base.model_dump(), schedules=[_schedule_to_out(s) for s in schedules]
+        **base.model_dump(),
+        schedules=[_schedule_to_out(s, str(s.id) in reminders) for s in schedules],
     )
 
 
@@ -425,6 +540,15 @@ async def delete_supplement(
     await session.commit()
 
 
+async def _reminder_schedule_ids(session: AsyncSession, user_id: UUID) -> set[str]:
+    rules = await session.scalars(
+        select(NotificationRule).where(
+            NotificationRule.user_id == user_id, NotificationRule.kind == "supplement"
+        )
+    )
+    return {r.schedule["schedule_id"] for r in rules if r.schedule.get("schedule_id")}
+
+
 @router.post("/{supplement_id}/schedules", status_code=201)
 async def add_schedule(
     supplement_id: UUID,
@@ -440,9 +564,26 @@ async def add_schedule(
         with_food=body.with_food,
     )
     session.add(schedule)
+    await session.flush()
+    if body.remind:
+        quiet_from, quiet_to = await default_quiet_hours(session, user_id)
+        session.add(
+            NotificationRule(
+                user_id=user_id,
+                kind="supplement",
+                schedule={
+                    "time": body.time_of_day.strftime("%H:%M"),
+                    "days_of_week": sorted(body.days_of_week),
+                    "supplement_id": str(supplement_id),
+                    "schedule_id": str(schedule.id),
+                },
+                quiet_from=quiet_from,
+                quiet_to=quiet_to,
+            )
+        )
     await session.commit()
     await session.refresh(schedule)
-    return _schedule_to_out(schedule)
+    return _schedule_to_out(schedule, body.remind)
 
 
 @router.delete("/{supplement_id}/schedules/{schedule_id}", status_code=204)
@@ -454,6 +595,13 @@ async def delete_schedule(
 ) -> None:
     await _get_supplement(session, user_id, supplement_id)
     schedule = await _get_schedule(session, supplement_id, schedule_id)
+    await session.execute(
+        delete(NotificationRule).where(
+            NotificationRule.user_id == user_id,
+            NotificationRule.kind == "supplement",
+            NotificationRule.schedule["schedule_id"].astext == str(schedule_id),
+        )
+    )
     await session.delete(schedule)
     await session.commit()
 

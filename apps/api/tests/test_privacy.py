@@ -1,6 +1,7 @@
 """Panel de privacidad — ver, exportar y borrar los propios datos (Fase 7,
 documento 2 sección 17, RGPD art. 15/17/20)."""
 
+import uuid
 from datetime import date
 
 import pytest
@@ -227,3 +228,67 @@ async def test_no_export_format_leaks_credentials(registered_client, test_food, 
 async def test_an_unknown_export_format_is_rejected(registered_client):
     client, _ = registered_client
     assert (await client.get("/api/privacy/export", params={"format": "xml"})).status_code == 422
+
+
+# --- el administrador que puso la credencial de iafood puede borrar su cuenta -------------------
+
+
+async def _make_admin(conn, user_id):
+    await conn.execute(text("UPDATE users SET role = 'admin' WHERE id = :id"), {"id": str(user_id)})
+
+
+async def test_an_admin_who_set_the_ai_credential_can_delete_their_account(
+    registered_client, superuser_conn
+):
+    client, user_id = registered_client
+    other_admin = uuid.uuid4()
+    await _make_admin(superuser_conn, user_id)
+    await superuser_conn.execute(
+        text(
+            "INSERT INTO users (id, email, password_hash, display_name, role) "
+            "VALUES (:id, :email, 'x', 'Otro admin', 'admin')"
+        ),
+        {"id": str(other_admin), "email": f"admin-{other_admin}@test.myfood"},
+    )
+    await superuser_conn.execute(
+        text(
+            "INSERT INTO ai_credentials (id, provider, token_encrypted, updated_by) "
+            "VALUES (1, 'anthropic', 'x', :u) "
+            "ON CONFLICT (id) DO UPDATE SET updated_by = :u"
+        ),
+        {"u": str(user_id)},
+    )
+    await superuser_conn.commit()
+    try:
+        resp = await client.post(
+            "/api/privacy/delete-account", json={"password": _REGISTERED_PASSWORD}
+        )
+        assert resp.status_code == 204, resp.text
+
+        row = (
+            await superuser_conn.execute(text("SELECT updated_by FROM ai_credentials WHERE id = 1"))
+        ).first()
+        assert row is not None, "la credencial se conserva"
+        assert row.updated_by is None
+    finally:
+        await superuser_conn.execute(
+            text("DELETE FROM users WHERE id = :id"), {"id": str(other_admin)}
+        )
+        await superuser_conn.commit()
+
+
+async def test_the_only_admin_cannot_delete_their_account(registered_client, superuser_conn):
+    client, user_id = registered_client
+    # `myfood_test` puede traer otros administradores de otros tests: se deja a este como único
+    await superuser_conn.execute(
+        text("UPDATE users SET role = 'user' WHERE role = 'admin' AND id != :id"),
+        {"id": str(user_id)},
+    )
+    await _make_admin(superuser_conn, user_id)
+    await superuser_conn.commit()
+
+    resp = await client.post("/api/privacy/delete-account", json={"password": _REGISTERED_PASSWORD})
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "LAST_ADMIN"
+    assert (await client.get("/api/profile")).status_code == 200  # la cuenta sigue viva

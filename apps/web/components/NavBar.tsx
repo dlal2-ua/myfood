@@ -56,6 +56,7 @@ export function NavBar({ user }: { user: CurrentUser | null }) {
             <Link href="/ayuno">Ayuno</Link>
             <Link href="/calculadoras">Calculadoras</Link>
             <Link href="/supplements">Suplementos</Link>
+            <Link href="/recordatorios">Recordatorios</Link>
             <Link href="/diet-plans">Planes</Link>
             <Link href="/recipes">Recetas</Link>
             <Link href="/wearables">Wearables</Link>

@@ -153,8 +153,8 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
-// Web Push autoalojado con VAPID (Fase 3, sección 10) — el payload ya viene
-// listo para mostrar (título/cuerpo), lo construye el worker del backend.
+// Web Push autoalojado con VAPID (Fase 3, sección 10) — el payload ya viene listo para mostrar
+// (título, cuerpo, botones y a qué se refiere), lo construye el worker del backend.
 self.addEventListener("push", (event) => {
   let payload = { title: "MyFood", body: "Tienes un recordatorio pendiente." };
   if (event.data) {
@@ -169,11 +169,75 @@ self.addEventListener("push", (event) => {
       body: payload.body,
       icon: "/icon-192.png",
       badge: "/icon-192.png",
+      actions: Array.isArray(payload.actions) ? payload.actions.slice(0, 2) : [],
+      data: payload.data || {},
+      // Un aviso nuevo del mismo tipo sustituye al anterior en vez de apilarse.
+      tag: payload.data && payload.data.kind ? payload.data.kind : undefined,
     }),
   );
 });
 
+function localDate() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Los botones de una notificación ejecutan la acción contra el API sin abrir la app.
+async function runAction(action, data) {
+  if (action === "add-water") {
+    return fetch("/api/water/log", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ log_date: localDate(), ml: data.ml || 200 }),
+    });
+  }
+  if ((action === "supplement-taken" || action === "supplement-skip") && data.supplement_id) {
+    return fetch(`/api/supplements/${data.supplement_id}/log`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ log_date: localDate(), skipped: action === "supplement-skip" }),
+    });
+  }
+  return null;
+}
+
+async function openApp(url) {
+  const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  for (const client of windows) {
+    if ("focus" in client) {
+      await client.focus();
+      if ("navigate" in client) await client.navigate(url).catch(() => {});
+      return;
+    }
+  }
+  await self.clients.openWindow(url);
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  event.waitUntil(self.clients.openWindow("/"));
+  const data = event.notification.data || {};
+  const url = data.url || "/";
+  if (!event.action) {
+    event.waitUntil(openApp(url));
+    return;
+  }
+  event.waitUntil(
+    runAction(event.action, data)
+      .then((res) => {
+        if (res && res.ok) {
+          return self.registration.showNotification("MyFood", {
+            body: event.action === "supplement-skip" ? "Saltada." : "Anotado.",
+            icon: "/icon-192.png",
+            silent: true,
+            tag: "action-result",
+          });
+        }
+        // Sin sesión o el API no responde: se abre la app para que lo haga a mano.
+        return openApp(url);
+      })
+      .catch(() => openApp(url)),
+  );
 });

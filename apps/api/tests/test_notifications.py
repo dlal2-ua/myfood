@@ -46,8 +46,33 @@ def test_due_times_for_supplement_rule():
     assert due_times_for_rule({"time": "09:00"}, "supplement") == [time(9, 0)]
 
 
-def test_due_times_for_unimplemented_kind_returns_empty():
-    assert due_times_for_rule({"time": "09:00"}, "meal") == []
+def test_due_times_for_meal_and_weigh_in_rules():
+    assert due_times_for_rule({"time": "14:00", "meal_type": "lunch"}, "meal") == [time(14, 0)]
+    assert due_times_for_rule({"time": "08:00"}, "weigh_in") == [time(8, 0)]
+
+
+def test_due_times_for_an_unknown_kind_returns_empty():
+    assert due_times_for_rule({"time": "09:00"}, "otra_cosa") == []
+
+
+def test_water_reminders_are_capped_at_eight_a_day():
+    schedule = {"times": [f"{h:02d}:00" for h in range(9, 21)]}
+    assert len(due_times_for_rule(schedule, "water")) == 8
+
+
+def test_a_rule_with_days_of_week_only_fires_those_days():
+    schedule = {"time": "08:00", "days_of_week": [1, 3, 5]}
+    assert due_times_for_rule(schedule, "weigh_in", weekday=3) == [time(8, 0)]
+    assert due_times_for_rule(schedule, "weigh_in", weekday=2) == []
+    assert due_times_for_rule(schedule, "weigh_in") == [time(8, 0)]  # sin día: no se filtra
+
+
+def test_is_rule_due_uses_the_weekday_of_now():
+    rule = _rule("weigh_in", {"time": "08:00", "days_of_week": [1]})
+    monday = datetime(2026, 1, 12, 8, 0)
+    tuesday = datetime(2026, 1, 13, 8, 0)
+    assert is_rule_due(rule, monday)[0] is True
+    assert is_rule_due(rule, tuesday)[0] is False
 
 
 def test_is_rule_due_within_tolerance():
@@ -75,8 +100,8 @@ def test_is_rule_due_respects_quiet_hours():
     assert due is False
 
 
-def test_is_rule_due_disabled_kind_never_fires():
-    rule = _rule("weigh_in", {"time": "08:00"}, quiet_from=time(0, 0), quiet_to=time(0, 0))
+def test_is_rule_due_kind_without_producer_never_fires():
+    rule = _rule("otra_cosa", {"time": "08:00"}, quiet_from=time(0, 0), quiet_to=time(0, 0))
     now = datetime(2026, 1, 15, 8, 0)
     due, _slot = is_rule_due(rule, now)
     assert due is False

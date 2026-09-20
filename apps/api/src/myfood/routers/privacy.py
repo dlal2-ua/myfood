@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import delete, inspect, select
+from sqlalchemy import delete, func, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import (
@@ -326,6 +326,15 @@ async def delete_account(
         await record_failure(*rules)
         raise AppError("INVALID_CREDENTIALS", "Contraseña incorrecta.", status_code=401)
     await reset(*rules)
+
+    if user.role == "admin":
+        admins = await session.scalar(select(func.count()).where(User.role == "admin"))
+        if (admins or 0) <= 1:
+            raise AppError(
+                "LAST_ADMIN",
+                "Eres el único administrador: nombra a otro antes de eliminar tu cuenta.",
+                status_code=409,
+            )
 
     # DELETE en SQL directo, no `session.delete(user)`: el ORM intentaría
     # gestionar la relación `User.profile` a mano (poner NULL en una PK, lo
