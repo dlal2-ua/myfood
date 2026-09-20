@@ -986,10 +986,11 @@ async def test_read_plan_day_returns_reusable_aliases_and_never_real_ids(
         "Arroz blanco cocido (test)",
     }
     # Mismo alimento -> mismo alias en las dos comidas, sin duplicados en el mapa.
-    assert lunch[0]["alias"] == dinner[0]["alias"]
+    chicken_in_lunch = next(i for i in lunch if i["name"].startswith("Pechuga"))
+    assert chicken_in_lunch["alias"] == dinner[0]["alias"]
     assert len(alias_map) == 2
     # El alias resuelve al alimento real, pero el id real nunca sale hacia el modelo (R5).
-    assert alias_map[lunch[0]["alias"]].id == four_real_foods["c1"]
+    assert alias_map[chicken_in_lunch["alias"]].id == four_real_foods["c1"]
     assert four_real_foods["c1"] not in result["content"][0]["text"]
 
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
@@ -42,7 +43,7 @@ from myfood.ai.prompts import (
 from myfood.ai.queue import enqueue_recipe_import_job
 from myfood.db.models import AiSession
 from myfood.db.session import AdminSessionLocal
-from myfood.domain.url_safety import UnsafeUrlError, ensure_public_http_url
+from myfood.domain.url_safety import UnsafeUrlError, ensure_public_http_url, resolve_public_ip
 from myfood.errors import AppError
 
 _AGENT_TIMEOUT_SECONDS = 20.0
@@ -82,25 +83,65 @@ async def request_recipe_import(session: AsyncSession, user_id: UUID, *, url: st
     return ai_session
 
 
+_MAX_REDIRECTS = 5
+
+
+def _pinned_request(url: str) -> tuple[str, dict[str, str], dict[str, str]]:
+    """URL con la IP ya validada en lugar del nombre, más la cabecera `Host` y el
+    `sni_hostname` originales: se conecta a esa IP (sin resolver otra vez, para que
+    un DNS rebinding no sirva) y el certificado HTTPS se sigue verificando contra
+    el nombre real."""
+    try:
+        ip = resolve_public_ip(url)
+    except UnsafeUrlError as exc:
+        raise AppError("UNSAFE_URL", str(exc), status_code=422) from exc
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    ip_host = f"[{ip}]" if ":" in ip else ip
+    pinned = urlunsplit(parts._replace(netloc=f"{ip_host}:{port}"))
+    host_header = host if parts.port is None else f"{host}:{parts.port}"
+    return pinned, {"Host": host_header}, {"sni_hostname": host}
+
+
 async def _fetch_html(url: str) -> str:
+    """Descarga la página validando CADA salto: `follow_redirects=True` seguía
+    redirecciones sin comprobar el destino, así que una página pública podía
+    mandar al servidor a `http://169.254.169.254/...` u otra red interna (SSRF por
+    redirección)."""
+    current = url
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True, timeout=_FETCH_TIMEOUT_SECONDS
+            follow_redirects=False, timeout=_FETCH_TIMEOUT_SECONDS
         ) as http_client:
-            async with http_client.stream("GET", url) as response:
-                response.raise_for_status()
-                chunks: list[bytes] = []
-                total = 0
-                async for chunk in response.aiter_bytes():
-                    total += len(chunk)
-                    if total > _MAX_RESPONSE_BYTES:
-                        raise AppError(
-                            "RECIPE_PAGE_TOO_LARGE",
-                            "La página supera el tamaño máximo permitido (3 MB).",
-                            status_code=422,
-                        )
-                    chunks.append(chunk)
-                return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace")
+            for _hop in range(_MAX_REDIRECTS + 1):
+                pinned, headers, extensions = _pinned_request(current)
+                async with http_client.stream(
+                    "GET", pinned, headers=headers, extensions=extensions
+                ) as response:
+                    if response.is_redirect and response.headers.get("location"):
+                        current = urljoin(current, response.headers["location"])
+                        continue
+                    response.raise_for_status()
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in response.aiter_bytes():
+                        total += len(chunk)
+                        if total > _MAX_RESPONSE_BYTES:
+                            raise AppError(
+                                "RECIPE_PAGE_TOO_LARGE",
+                                "La página supera el tamaño máximo permitido (3 MB).",
+                                status_code=422,
+                            )
+                        chunks.append(chunk)
+                    return b"".join(chunks).decode(
+                        response.encoding or "utf-8", errors="replace"
+                    )
+            raise AppError(
+                "RECIPE_FETCH_FAILED",
+                "La página redirige demasiadas veces.",
+                status_code=422,
+            )
     except httpx.HTTPError as exc:
         raise AppError(
             "RECIPE_FETCH_FAILED",

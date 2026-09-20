@@ -7,6 +7,8 @@ export interface CurrentUser {
   display_name: string;
   role: string;
   granted_consents: string[];
+  /** Consentimientos obligatorios que faltan (R4): mientras haya alguno se bloquea el uso. */
+  pending_consents: string[];
   totp_enabled: boolean;
 }
 

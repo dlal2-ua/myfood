@@ -107,12 +107,33 @@ def isolated_test_redis():
     _flush_test_redis()
 
 
+_TEST_EMAIL_DOMAIN = "@test.myfood"
+
+
+def _real_users_present(conn) -> int:
+    """Usuarios que NO son de test: si hay alguno, esta BD es una instalación real."""
+    return conn.execute(
+        text("SELECT count(*) FROM users WHERE email NOT LIKE :pattern"),
+        {"pattern": f"%{_TEST_EMAIL_DOMAIN}"},
+    ).scalar_one()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def protect_real_ai_credential():
     engine = create_engine(settings.database_url_superuser_sync)
     payload: dict | None = None
     try:
         with engine.begin() as conn:
+            # La suite crea y borra usuarios, alimentos y planes a mansalva: contra la BD de
+            # producción dejaba restos (decenas de usuarios y alimentos de test) y rozaba
+            # datos reales. Se niega a correr donde haya usuarios reales.
+            if _real_users_present(conn) and os.environ.get("MYFOOD_TESTS_ALLOW_REAL_DB") != "1":
+                pytest.exit(
+                    "Esta base de datos tiene usuarios reales: la suite no corre contra ella. "
+                    "Usa scripts/test-api.sh (crea una BD desechable), o define "
+                    "MYFOOD_TESTS_ALLOW_REAL_DB=1 si sabes lo que haces.",
+                    returncode=2,
+                )
             row = conn.execute(_SELECT_CREDENTIAL).first()
             if row is None and _CREDENTIAL_BACKUP_PATH.exists():
                 _restore_credential(conn, json.loads(_CREDENTIAL_BACKUP_PATH.read_text()))
@@ -205,6 +226,31 @@ async def registered_client(superuser_conn):
         resp = await client.post(
             "/api/auth/register",
             json={"email": email, "password": "correcthorse123", "display_name": "Test User"},
+        )
+        user_id = resp.json()["id"]
+        # R4: sin el consentimiento de datos de salud no se puede guardar perfil ni
+        # medidas; los tests que necesitan un usuario SIN él usan `fresh_client`.
+        await client.post("/api/consents", json={"kind": "health_data", "version": "v1"})
+        yield client, uuid.UUID(user_id)
+
+    await superuser_conn.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
+    await superuser_conn.commit()
+
+
+@pytest_asyncio.fixture
+async def fresh_client(superuser_conn):
+    """Usuario recién registrado que todavía NO ha aceptado ningún consentimiento."""
+    from myfood.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="https://test") as client:
+        resp = await client.post(
+            "/api/auth/register",
+            json={
+                "email": f"fresh-{uuid.uuid4()}@test.myfood",
+                "password": "correcthorse123",
+                "display_name": "Fresh",
+            },
         )
         user_id = resp.json()["id"]
         yield client, uuid.UUID(user_id)

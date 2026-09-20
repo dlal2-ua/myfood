@@ -191,7 +191,7 @@ def _build_read_plan_day_tool(
                     LEFT JOIN food_nutrients fn ON fn.food_id = pi.food_id
                     LEFT JOIN recipes r ON r.id = pi.recipe_id
                     WHERE pd.plan_id = :plan_id AND pd.day_index = :day_index
-                    ORDER BY pm.sort_order
+                    ORDER BY pm.sort_order, coalesce(f.name_es, r.name), pi.id
                 """),
                 {"plan_id": str(plan.id), "day_index": day_index},
             )

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { ConsentGate } from "@/components/ConsentGate";
 import { LocalNotificationsSync } from "@/components/LocalNotificationsSync";
 import { NavBar } from "@/components/NavBar";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
@@ -28,6 +29,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <ServiceWorkerRegister />
         <LocalNotificationsSync authenticated={user != null} />
         <NavBar user={user} />
+        <ConsentGate pending={user?.pending_consents ?? []} />
         <div className="mx-auto max-w-3xl px-4 py-6">{children}</div>
       </body>
     </html>
