@@ -51,7 +51,7 @@ const local = () => { const d = new Date(); return `${d.getFullYear()}-${String(
     log("status bar shows 1 pending");
 
     await page.goto(BASE + "/water"); // desde caché de páginas
-    await page.waitForSelector("text=Agua", { timeout: 8000 });
+    await page.waitForSelector("main h1:has-text(\"Agua\")", { timeout: 8000 });
     await page.click('button:has-text("+ Vaso")');
     await page.waitForSelector("text=2 registros pendientes", { timeout: 8000 });
     log("water queued offline, bar shows 2 pending");
