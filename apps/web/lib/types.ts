@@ -113,6 +113,32 @@ export interface FoodDetail {
   fiber_100g: number | null;
   salt_100g: number | null;
   micros: Record<string, number>;
+  allergens: FoodAllergen[];
+}
+
+/** origin: 'declared' (etiqueta del fabricante), 'trace' ("puede contener") o
+ * 'inferred' (alimento genérico clasificado por palabras clave: orientativo). */
+export interface FoodAllergen {
+  code: string;
+  name_es: string;
+  origin: "declared" | "trace" | "inferred";
+}
+
+export interface Allergen {
+  code: string;
+  name_es: string;
+}
+
+export type RestrictionKind = "allergen" | "intolerance" | "disliked_food" | "banned_food";
+
+export interface Restriction {
+  id: string;
+  kind: RestrictionKind;
+  allergen_code: string | null;
+  allergen_name: string | null;
+  food_id: string | null;
+  food_name: string | null;
+  note: string | null;
 }
 
 export interface LogFoodEntry {

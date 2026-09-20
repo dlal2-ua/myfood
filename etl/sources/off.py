@@ -23,8 +23,9 @@ from pathlib import Path
 import duckdb
 import httpx
 
-from etl.db import LoadStats, ParsedFood, get_connection, upsert_foods
+from etl.db import LoadStats, ParsedFood, get_connection, replace_allergens, upsert_foods
 from etl.rejected import Rejection, log_rejections
+from etl.transform.allergens import off_tags_to_codes
 from etl.transform.nutrient_map import OFF_MACRO_KEYS, OFF_MICRO_KEYS
 
 DUMP_URL = "https://static.openfoodfacts.org/data/openfoodfacts-products.jsonl.gz"
@@ -408,7 +409,11 @@ def _api_get(client: httpx.Client, params: dict, retries: int = 8) -> dict:
 
 
 def fetch_brand_products(
-    client: httpx.Client, brand: str, country: str = "spain", page_size: int = 100
+    client: httpx.Client,
+    brand: str,
+    country: str = "spain",
+    page_size: int = 100,
+    fields: str = _API_FIELDS,
 ) -> Iterator[dict]:
     """Pagina la Search API v2 para una marca — para cuando una página viene corta."""
     page = 1
@@ -420,7 +425,7 @@ def fetch_brand_products(
                 "countries_tags_en": country,
                 "page_size": page_size,
                 "page": page,
-                "fields": _API_FIELDS,
+                "fields": fields,
             },
         )
         products = data.get("products", [])
@@ -509,3 +514,67 @@ def load_by_brand(
 
     rejected_path = log_rejections("off_brands", all_rejections) if all_rejections else None
     return OffLoadResult(stats=stats, rejected_path=rejected_path)
+
+
+_ALLERGEN_FIELDS = "code,allergens_tags,traces_tags"
+
+
+def load_allergens_by_brand(
+    brands: Sequence[str] = DEFAULT_TARGET_BRANDS, country: str = "spain"
+) -> LoadStats:
+    """Carga las etiquetas de alérgenos DECLARADAS por el fabricante (`allergens_tags`)
+    y las trazas (`traces_tags`) de los productos de marca que ya están en `foods`.
+
+    El ETL inicial (`load_by_brand`) solo pedía nutrientes, así que `food_allergens`
+    se quedó vacía y el filtro de alérgenos no excluía nada. Se vuelve a paginar la
+    misma Search API por marca pidiendo solo `code,allergens_tags,traces_tags`, y se
+    enlaza por código de barras con los productos ya cargados. Marca a marca, como
+    `load_by_brand`: si una falla tras agotar reintentos, lo ya cargado se conserva."""
+    stats = LoadStats()
+    failed: list[str] = []
+    seen: set[str] = set()
+    with httpx.Client(headers={"User-Agent": USER_AGENT}) as client:
+        for brand in brands:
+            by_code: dict[str, tuple[set[str], set[str]]] = {}
+            try:
+                for raw in fetch_brand_products(client, brand, country, fields=_ALLERGEN_FIELDS):
+                    code = str(raw.get("code") or "")
+                    if not code or code in seen:
+                        continue
+                    seen.add(code)
+                    stats.read += 1
+                    declared = off_tags_to_codes(raw.get("allergens_tags"))
+                    traces = off_tags_to_codes(raw.get("traces_tags")) - declared
+                    by_code[code] = (declared, traces)
+            except RuntimeError as exc:
+                print(f"[off_allergens] {brand}: FALLÓ tras agotar reintentos ({exc})")
+                failed.append(brand)
+
+            conn = get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, barcode_ean FROM foods "
+                        "WHERE source = 'off' AND barcode_ean = ANY(%s)",
+                        (list(by_code),),
+                    )
+                    id_by_code = {row[1]: row[0] for row in cur.fetchall()}
+                rows = []
+                for code, (declared, traces) in by_code.items():
+                    food_id = id_by_code.get(code)
+                    if food_id is None:
+                        stats.rejected += 1  # en OFF pero no cargado en `foods`
+                        continue
+                    rows += [(food_id, c, "declared") for c in sorted(declared)]
+                    rows += [(food_id, c, "trace") for c in sorted(traces)]
+                stats.upserted += replace_allergens(
+                    conn, id_by_code.values(), rows, origins=("declared", "trace")
+                )
+            finally:
+                conn.close()
+            print(f"[off_allergens] {brand}: productos={len(by_code)} filas={stats.upserted}")
+            time.sleep(2.0)
+
+    if failed:
+        print(f"[off_allergens] marcas fallidas (reintentar aparte): {failed}")
+    return stats

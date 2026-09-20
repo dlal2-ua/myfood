@@ -168,6 +168,9 @@ class FoodAllergen(Base):
     allergen_code: Mapped[str] = mapped_column(
         String, ForeignKey("allergens.code"), primary_key=True
     )
+    # 'declared' | 'trace' (OFF) | 'inferred' (genéricos, por palabras clave) —
+    # migración 0012.
+    origin: Mapped[str] = mapped_column(String, nullable=False, default="declared")
 
 
 class UserRestriction(Base):

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { AddToLogForm } from "@/components/AddToLogForm";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { Favorite, FoodDetail } from "@/lib/types";
@@ -116,6 +117,38 @@ export default function FoodDetailPage() {
           )}
         </tbody>
       </table>
+
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold">Alérgenos</h2>
+        {food.allergens.length === 0 ? (
+          <p className="text-sm text-neutral-500">
+            Sin alérgenos registrados para este alimento (no es una garantía: revisa la etiqueta).
+          </p>
+        ) : (
+          <ul className="flex flex-wrap gap-2">
+            {food.allergens.map((a) => (
+              <li
+                key={a.code}
+                className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                title={
+                  a.origin === "declared"
+                    ? "Declarado por el fabricante"
+                    : a.origin === "trace"
+                      ? "Puede contener trazas"
+                      : "Inferido por el nombre del alimento (orientativo)"
+                }
+              >
+                {a.name_es}
+                {a.origin === "trace" && " (trazas)"}
+                {a.origin === "inferred" && " (estimado)"}
+              </li>
+            ))}
+          </ul>
+        )}
+        <MedicalDisclaimer>
+          Información de alérgenos orientativa. Revisa siempre la etiqueta del producto.
+        </MedicalDisclaimer>
+      </section>
 
       <AddToLogForm foodId={food.id} />
     </main>

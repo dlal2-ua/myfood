@@ -59,11 +59,18 @@ CANDIDATE_BUCKETS = (
 MIN_REALISTIC_KCAL_100G = 20
 MAX_REALISTIC_KCAL_100G = 600
 
+# Alergias E intolerancias (sección 9: "restricciones duras: alergias,
+# intolerancias y alimentos vetados"): una intolerancia a la lactosa es un
+# `user_restrictions` con `allergen_code='lacteos'` igual que una alergia, y
+# para el plan de un usuario ambas se tratan igual — excluir el alimento.
+# `food_allergens` recoge tanto lo declarado como las trazas ("puede contener")
+# y lo inferido para genéricos (`origin`, migración 0012): para una alergia
+# todo cuenta.
 EXCLUDE_RESTRICTED_SQL = """
     f.id NOT IN (
         SELECT fa.food_id FROM food_allergens fa
         JOIN user_restrictions ur
-          ON ur.allergen_code = fa.allergen_code AND ur.kind = 'allergen'
+          ON ur.allergen_code = fa.allergen_code AND ur.kind IN ('allergen', 'intolerance')
         WHERE ur.user_id = :user_id
     )
     AND f.id NOT IN (

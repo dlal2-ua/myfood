@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { BmrResponse, Measurement, Profile, TargetsResponse } from "@/lib/types";
 import { BarChart, LineChart } from "@/components/charts";
+import { RestrictionsPanel } from "@/components/RestrictionsPanel";
 
 const ACTIVITY_LEVELS: { value: Profile["activity_level"]; label: string }[] = [
   { value: "sedentary", label: "Sedentario" },
@@ -302,6 +303,8 @@ export default function ProfilePage() {
           </div>
         </form>
       </section>
+
+      <RestrictionsPanel />
 
       <section>
         <h2 className="mb-4 text-xl font-semibold">Nueva medida corporal</h2>
