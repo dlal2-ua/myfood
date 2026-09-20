@@ -14,6 +14,8 @@ SERVICES=("$@")
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "== esperando al CI del PR #$PR =="
+# Justo tras un `push` `gh pr checks` aún devuelve los resultados del commit anterior.
+sleep 45
 for _ in $(seq 1 40); do
   out="$(gh pr checks "$PR" 2>&1 || true)"
   if ! grep -q "pending" <<<"$out"; then break; fi

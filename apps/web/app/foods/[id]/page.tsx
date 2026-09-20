@@ -1,5 +1,7 @@
 "use client";
 
+import { ScoreBadges } from "@/components/ScoreBadges";
+import { FoodImage } from "@/components/FoodImage";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -82,6 +84,17 @@ export default function FoodDetailPage() {
           </button>
         </div>
         {food.brand && <p className="text-sm text-neutral-500">{food.brand}</p>}
+        <div className="mt-3 flex flex-col gap-1">
+          <FoodImage foodId={food.id} size={400} px={160} />
+          <ScoreBadges
+            nutriscore={food.nutriscore_grade}
+            nova={food.nova_group}
+            ecoscore={food.ecoscore_grade}
+          />
+          {food.image_credit && (
+            <p className="text-xs text-neutral-500">Imagen: {food.image_credit}</p>
+          )}
+        </div>
         {favoriteError && <p className="text-sm text-red-600">{favoriteError}</p>}
       </div>
 

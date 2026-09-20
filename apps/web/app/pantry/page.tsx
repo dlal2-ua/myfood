@@ -1,5 +1,6 @@
 "use client";
 
+import { FoodImage } from "@/components/FoodImage";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
@@ -146,7 +147,8 @@ export default function PantryPage() {
                     key={item.id}
                     className="flex flex-wrap items-center justify-between gap-2 py-3"
                   >
-                    <span className="text-sm">
+                    <span className="flex items-center gap-3 text-sm">
+                      <FoodImage foodId={item.food_id} px={36} />
                       {item.food_name} · {item.quantity_g} g
                       {item.expires_on && ` · caduca ${item.expires_on}`}
                       {!item.is_mine && (

@@ -1,5 +1,7 @@
 "use client";
 
+import { ScoreBadges } from "@/components/ScoreBadges";
+import { FoodImage } from "@/components/FoodImage";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { FoodSearchItem, FoodSearchResponse } from "@/lib/types";
@@ -48,9 +50,19 @@ export function FoodSearchBox({ onSelect }: { onSelect: (item: FoodSearchItem) =
                 onClick={() => onSelect(item)}
                 className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-900"
               >
-                <span>
-                  {item.name_es}
-                  {item.brand && <span className="text-neutral-500"> · {item.brand}</span>}
+                <span className="flex items-center gap-3">
+                  <FoodImage foodId={item.id} />
+                  <span>
+                    {item.name_es}
+                    {item.brand && <span className="text-neutral-500"> · {item.brand}</span>}
+                    <span className="block">
+                      <ScoreBadges
+                        nutriscore={item.nutriscore_grade}
+                        nova={item.nova_group}
+                        ecoscore={item.ecoscore_grade}
+                      />
+                    </span>
+                  </span>
                 </span>
                 <span className="whitespace-nowrap text-neutral-500">
                   {item.kcal_100g != null ? `${item.kcal_100g} kcal/100g` : "—"}

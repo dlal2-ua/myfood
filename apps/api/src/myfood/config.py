@@ -28,6 +28,9 @@ class Settings(BaseSettings):
 
     meili_url: str = "http://meilisearch:7700"
     meili_master_key: str = ""
+    # Índice de alimentos. Los tests usan otro (`MEILI_INDEX=foods_test`, ver
+    # scripts/test-api.sh) para no escribir en el índice de producción.
+    meili_index: str = "foods"
 
     usda_api_key: str = ""
     off_user_agent: str = "MyFood/1.0 (dev@example.com)"

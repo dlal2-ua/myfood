@@ -80,6 +80,9 @@ export interface FoodSearchItem {
   protein_100g: number | null;
   image_url: string | null;
   source: string;
+  nutriscore_grade?: string | null;
+  nova_group?: number | null;
+  ecoscore_grade?: string | null;
 }
 
 export interface FoodSearchResponse {
@@ -114,6 +117,8 @@ export interface FoodDetail {
   salt_100g: number | null;
   micros: Record<string, number>;
   allergens: FoodAllergen[];
+  /** Atribución obligatoria de la imagen (Open Food Facts, CC BY-SA), si tiene. */
+  image_credit: string | null;
 }
 
 /** origin: 'declared' (etiqueta del fabricante), 'trace' ("puede contener") o

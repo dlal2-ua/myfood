@@ -13,7 +13,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB="myfood_test"
 ENV_TMP="$(mktemp)"
-trap 'rm -f "$ENV_TMP"; sudo docker exec infra-postgres-1 psql -U myfood -d myfood -q -c "DROP DATABASE IF EXISTS ${DB};" >/dev/null 2>&1 || true' EXIT
+trap 'rm -f "$ENV_TMP"; curl -s -o /dev/null -X DELETE -H "Authorization: Bearer ${MEILI_MASTER_KEY:-}" "${MEILI_URL:-http://127.0.0.1:1}/indexes/foods_test"; sudo docker exec infra-postgres-1 psql -U myfood -d myfood -q -c "DROP DATABASE IF EXISTS ${DB};" >/dev/null 2>&1 || true' EXIT
 
 sudo install -m 600 -o "$(id -un)" "$ROOT/infra/.env" "$ENV_TMP"
 container_ip() { sudo docker inspect "$1" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'; }
@@ -28,6 +28,8 @@ set +a
 export POSTGRES_HOST="$(container_ip infra-postgres-1)" POSTGRES_DB="$DB"
 export REDIS_URL="redis://$(container_ip infra-redis-1):6379/0"
 export MEILI_URL="http://$(container_ip infra-meilisearch-1):7700"
+# Índice propio: los tests indexan y borran alimentos, no deben tocar el de producción.
+export MEILI_INDEX="foods_test"
 
 cd "$ROOT/apps/api"
 uv run alembic upgrade head >/dev/null

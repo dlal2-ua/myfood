@@ -1,5 +1,6 @@
 "use client";
 
+import { FoodImage } from "@/components/FoodImage";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { useEffect, useRef, useState } from "react";
 import { AddToLogForm } from "@/components/AddToLogForm";
@@ -158,12 +159,15 @@ export default function ScanPage() {
 
       {food && (
         <>
-          <div>
+          <div className="flex items-start gap-3">
+            <FoodImage foodId={food.id} size={200} px={72} />
+            <div>
             <h2 className="text-lg font-semibold">{food.name_es}</h2>
             {food.brand && <p className="text-sm text-neutral-500">{food.brand}</p>}
             <p className="text-sm text-neutral-500">
               {food.kcal_100g} kcal · {food.protein_100g} g prot. / 100 g
             </p>
+            </div>
           </div>
           <AddToLogForm foodId={food.id} />
         </>

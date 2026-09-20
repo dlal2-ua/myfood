@@ -20,6 +20,7 @@ from myfood.ai.flows.smart_log import process_smart_log_job
 from myfood.ai.queue import (
     dequeue_chat_job,
     dequeue_diet_plan_job,
+    dequeue_job,
     dequeue_receipt_scan_job,
     dequeue_recipe_import_job,
     dequeue_smart_log_job,
@@ -30,6 +31,7 @@ from myfood.db.models import AiSession, NotificationRule, PushSubscription
 from myfood.db.session import AdminSessionLocal
 from myfood.notifications import is_rule_due, message_for_rule
 from myfood.push import PushSubscriptionExpired, send_push
+from myfood.services.images import IMAGE_JOBS_QUEUE_KEY, process_image_job, purge_cache
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("myfood.worker")
@@ -215,6 +217,35 @@ async def _stale_sessions_loop() -> None:
         await asyncio.sleep(_STALE_SWEEP_SECONDS)
 
 
+async def _image_jobs_loop() -> None:
+    """Reintenta las descargas de imágenes que fallaron en la petición del usuario."""
+    while True:
+        try:
+            payload = await dequeue_job(IMAGE_JOBS_QUEUE_KEY, _AI_QUEUE_POLL_TIMEOUT_SECONDS)
+            if payload is None:
+                continue
+            await process_image_job(payload)
+        except Exception:
+            logger.exception("fallo descargando una imagen — se sigue con la siguiente")
+
+
+_IMAGE_PURGE_SECONDS = 6 * 60 * 60
+
+
+async def _image_purge_loop() -> None:
+    """Purga LRU de la caché de imágenes cuando supera `IMAGE_CACHE_BUDGET_GB` (sección 12)."""
+    budget_bytes = settings.image_cache_budget_gb * 1024**3
+    while True:
+        try:
+            async with AdminSessionLocal() as session:
+                purged = await purge_cache(session, budget_bytes)
+            if purged:
+                logger.info("caché de imágenes: purgadas %s (LRU)", purged)
+        except Exception:
+            logger.exception("fallo purgando la caché de imágenes — se reintenta")
+        await asyncio.sleep(_IMAGE_PURGE_SECONDS)
+
+
 async def main() -> None:
     logger.info(
         "MyFood worker arrancado — recordatorios cada %ss + colas de iafood", _TICK_SECONDS
@@ -227,6 +258,8 @@ async def main() -> None:
         _receipt_scan_jobs_loop(),
         _chat_jobs_loop(),
         _stale_sessions_loop(),
+        _image_jobs_loop(),
+        _image_purge_loop(),
     )
 
 

@@ -7,6 +7,7 @@ import uuid
 from datetime import date, datetime, time
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -171,6 +172,30 @@ class FoodAllergen(Base):
     # 'declared' | 'trace' (OFF) | 'inferred' (genéricos, por palabras clave) —
     # migración 0012.
     origin: Mapped[str] = mapped_column(String, nullable=False, default="declared")
+
+
+class FoodImage(Base):
+    """Imagen de un alimento (sección 6.3/12). `remote_url` la registra el ETL; la API
+    descarga la imagen la primera vez que se pide y rellena `local_path`/`bytes` (caché
+    en disco con purga LRU por `last_access_at`, que conserva `remote_url`)."""
+
+    __tablename__ = "food_images"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    food_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id", ondelete="CASCADE"), nullable=False
+    )
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    remote_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    local_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    license: Mapped[str | None] = mapped_column(String, nullable=True)
+    attribution: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_access_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class UserRestriction(Base):
