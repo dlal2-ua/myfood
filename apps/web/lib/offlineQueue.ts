@@ -96,7 +96,9 @@ export function onQueueChanged(listener: () => void): () => void {
 
 export async function listQueue(userId: string): Promise<QueueItem[]> {
   const all = await withStore<QueueItem[]>("readonly", (s) => s.getAll());
-  return all.filter((i) => i.userId === userId).sort((a, b) => a.createdAt - b.createdAt);
+  return all
+    .filter((i) => i.userId === userId)
+    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
 async function putItem(item: QueueItem): Promise<void> {
@@ -130,6 +132,14 @@ export function isNetworkFailure(err: unknown): boolean {
   return true;
 }
 
+let lastStamp = 0;
+
+/** Marca de tiempo estrictamente creciente: dos registros en el mismo milisegundo conservan su orden. */
+function nextStamp(): number {
+  lastStamp = Math.max(Date.now(), lastStamp + 1);
+  return lastStamp;
+}
+
 export type SubmitOutcome<T> = { queued: false; result: T } | { queued: true; item: QueueItem };
 
 interface SubmitOptions {
@@ -155,7 +165,7 @@ export async function submitOrQueue<T>(
     path,
     payload,
     label: opts.label,
-    createdAt: Date.now(),
+    createdAt: nextStamp(),
     status: "pending",
   };
 

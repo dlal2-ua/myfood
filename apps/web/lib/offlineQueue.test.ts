@@ -189,6 +189,18 @@ describe("flushQueue", () => {
   });
 });
 
+describe("ordering", () => {
+  it("keeps the order of records queued within the same millisecond", async () => {
+    const labels = Array.from({ length: 30 }, (_, i) => `registro ${i}`);
+    for (const label of labels) await submitOrQueue(foodOpts(USER, label), networkDown);
+
+    const sent: string[] = [];
+    await flushQueue(USER, async (item) => void sent.push(item.label));
+
+    expect(sent).toEqual(labels);
+  });
+});
+
 describe("clearQueue", () => {
   it("only removes the given user's records", async () => {
     await submitOrQueue(foodOpts(USER), networkDown);
