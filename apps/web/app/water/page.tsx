@@ -1,8 +1,11 @@
 "use client";
 
+import { localDateIso } from "@/lib/dates";
 import { useEffect, useState } from "react";
 import { PushSubscribeButton } from "@/components/PushSubscribeButton";
+import { useCurrentUserId } from "@/components/CurrentUser";
 import { apiFetch, errorMessage } from "@/lib/api";
+import { QUEUE_FLUSHED_EVENT, submitOrQueue } from "@/lib/offlineQueue";
 import type { NotificationRule, WaterContainer, WaterDay, WaterSettings } from "@/lib/types";
 
 const WATER_REMINDER_SCHEDULE = { times: ["10:00", "13:00", "16:00", "19:00"] };
@@ -11,10 +14,17 @@ const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateIso();
 }
 
+const DEFAULT_CONTAINERS: WaterContainer[] = [
+  { label: "Vaso", ml: 200 },
+  { label: "Botella", ml: 500 },
+];
+
 export default function WaterPage() {
+  const userId = useCurrentUserId();
+  const [queuedNote, setQueuedNote] = useState<string | null>(null);
   const [date] = useState(todayIso());
   const [day, setDay] = useState<WaterDay | null>(null);
   const [settings, setSettings] = useState<WaterSettings | null>(null);
@@ -38,6 +48,7 @@ export default function WaterPage() {
   async function load() {
     setLoading(true);
     setError(null);
+    const containersKey = `myfood:water-containers:${userId}`;
     try {
       const [dayRes, settingsRes, rulesRes] = await Promise.all([
         apiFetch<WaterDay>(`/api/water/log?date=${date}`),
@@ -50,8 +61,20 @@ export default function WaterPage() {
       setManualTarget(String(settingsRes.daily_target_ml));
       setContainers(settingsRes.containers);
       setWaterReminderRule(rulesRes[0] ?? null);
+      try {
+        localStorage.setItem(containersKey, JSON.stringify(settingsRes.containers));
+      } catch {
+        // sin almacenamiento local: solo se pierde el modo sin conexión
+      }
     } catch (err) {
       setError(errorMessage(err));
+      // Sin red los botones de agua siguen disponibles con los últimos contenedores conocidos.
+      try {
+        const saved = localStorage.getItem(containersKey);
+        setContainers(saved ? (JSON.parse(saved) as WaterContainer[]) : DEFAULT_CONTAINERS);
+      } catch {
+        setContainers(DEFAULT_CONTAINERS);
+      }
     } finally {
       setLoading(false);
     }
@@ -59,18 +82,30 @@ export default function WaterPage() {
 
   useEffect(() => {
     void load();
+    const onFlushed = () => void load();
+    window.addEventListener(QUEUE_FLUSHED_EVENT, onFlushed);
+    return () => window.removeEventListener(QUEUE_FLUSHED_EVENT, onFlushed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function addMl(ml: number) {
     setAdding(true);
     setError(null);
+    setQueuedNote(null);
     try {
-      await apiFetch("/api/water/log", {
-        method: "POST",
-        body: JSON.stringify({ log_date: date, ml }),
+      const outcome = await submitOrQueue({
+        userId: userId ?? "",
+        kind: "water",
+        label: `Agua — ${ml} ml (${date})`,
+        payload: { log_date: date, ml },
       });
-      await load();
+      if (outcome.queued) {
+        setQueuedNote(
+          "Sin conexión: guardado en este dispositivo. Se registrará solo al volver la red.",
+        );
+      } else {
+        await load();
+      }
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -160,6 +195,7 @@ export default function WaterPage() {
     <main className="flex flex-col gap-6">
       <h1 className="text-xl font-semibold">Agua</h1>
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {queuedNote && <p className="text-sm text-amber-700 dark:text-amber-300">{queuedNote}</p>}
 
       <section>
         <div className="mb-2 flex items-baseline justify-between">
@@ -189,7 +225,7 @@ export default function WaterPage() {
       </section>
 
       <section className="flex flex-wrap items-end gap-3">
-        {(settings?.containers ?? []).map((c) => (
+        {(settings?.containers ?? containers).map((c) => (
           <button
             key={c.label}
             type="button"

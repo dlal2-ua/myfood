@@ -1,5 +1,6 @@
 "use client";
 
+import { localDateIso } from "@/lib/dates";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -13,7 +14,7 @@ const MAX_POLL_ATTEMPTS = 60; // 60 × 2s = 120s (sección 10.6)
 const POLL_INTERVAL_MS = 2000;
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateIso();
 }
 
 export default function DietPlansPage() {

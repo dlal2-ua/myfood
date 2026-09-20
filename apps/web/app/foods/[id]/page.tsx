@@ -163,7 +163,7 @@ export default function FoodDetailPage() {
         </MedicalDisclaimer>
       </section>
 
-      <AddToLogForm foodId={food.id} />
+      <AddToLogForm foodId={food.id} foodName={food.name_es} />
     </main>
   );
 }

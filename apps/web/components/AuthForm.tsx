@@ -4,6 +4,7 @@ import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
+import { clearUserCaches } from "@/lib/offlineQueue";
 
 type Mode = "login" | "register";
 
@@ -41,6 +42,7 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
         setMfaToken(result.mfa_token);
         return;
       }
+      await clearUserCaches();
       router.push("/");
       router.refresh();
     } catch (err) {
@@ -60,6 +62,7 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
         method: "POST",
         body: JSON.stringify({ mfa_token: mfaToken, code: totpCode }),
       });
+      await clearUserCaches();
       router.push("/");
       router.refresh();
     } catch (err) {

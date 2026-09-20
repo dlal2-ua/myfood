@@ -111,3 +111,20 @@ async def test_cross_user_isolation_on_delete(registered_client, two_users, supe
         text("DELETE FROM water_log WHERE id = :id"), {"id": str(other_entry_id)}
     )
     await superuser_conn.commit()
+
+
+async def test_water_log_with_client_id_is_idempotent(registered_client):
+    import uuid
+
+    client, _user_id = registered_client
+    client_id = str(uuid.uuid4())
+    payload = {"log_date": "2026-01-10", "ml": 250, "client_id": client_id}
+
+    first = await client.post("/api/water/log", json=payload)
+    second = await client.post("/api/water/log", json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == client_id == second.json()["id"]
+    day = await client.get("/api/water/log?date=2026-01-10")
+    assert day.json()["total_ml"] == 250

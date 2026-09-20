@@ -1,5 +1,6 @@
 "use client";
 
+import { localDateIso } from "@/lib/dates";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { Supplement, SupplementList } from "@/lib/types";
@@ -19,7 +20,7 @@ const SUPPLEMENT_TYPES: { value: string; label: string }[] = [
 ];
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateIso();
 }
 
 /** Traduce "veces al día" a filas de `supplement_schedules` — una franja

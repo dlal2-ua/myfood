@@ -1,8 +1,11 @@
 "use client";
 
+import { localDateIso } from "@/lib/dates";
 import { FoodImage } from "@/components/FoodImage";
 import { useEffect, useRef, useState } from "react";
+import { useCurrentUserId } from "@/components/CurrentUser";
 import { apiFetch, errorMessage } from "@/lib/api";
+import { QUEUE_FLUSHED_EVENT, submitOrQueue } from "@/lib/offlineQueue";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
 import { MicronutrientsPanel } from "@/components/MicronutrientsPanel";
 import {
@@ -29,10 +32,12 @@ interface SmartLogReviewItem extends SmartLogItem {
 }
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateIso();
 }
 
 export default function LogPage() {
+  const userId = useCurrentUserId();
+  const [queuedNote, setQueuedNote] = useState<string | null>(null);
   const [logDate, setLogDate] = useState(todayIso());
   const [day, setDay] = useState<LogDay | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,13 +74,34 @@ export default function LogPage() {
   }, [logDate]);
 
   useEffect(() => {
+    const onFlushed = () => void loadDay(logDate);
+    window.addEventListener(QUEUE_FLUSHED_EVENT, onFlushed);
+    return () => window.removeEventListener(QUEUE_FLUSHED_EVENT, onFlushed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logDate]);
+
+  useEffect(() => {
+    // Los favoritos son el atajo para registrar sin conexión: se guardan en el dispositivo
+    // para poder ofrecerlos aunque no haya red.
+    const key = `myfood:favorites:${userId}`;
     apiFetch<{ items: Favorite[] }>("/api/favorites?limit=8")
-      .then((res) => setFavorites(res.items))
+      .then((res) => {
+        setFavorites(res.items);
+        try {
+          localStorage.setItem(key, JSON.stringify(res.items));
+        } catch {
+          // sin almacenamiento local: solo se pierde el modo sin conexión
+        }
+      })
       .catch(() => {
-        // los favoritos son un atajo opcional — si falla la carga, el
-        // formulario de registro normal sigue funcionando
+        try {
+          const saved = localStorage.getItem(key);
+          if (saved) setFavorites(JSON.parse(saved) as Favorite[]);
+        } catch {
+          // los favoritos son un atajo opcional
+        }
       });
-  }, []);
+  }, [userId]);
 
   function onQuickAddFromFavorite(fav: Favorite) {
     setSelectedFood({
@@ -136,17 +162,25 @@ export default function LogPage() {
     }
     setAdding(true);
     setAddError(null);
+    setQueuedNote(null);
     try {
-      await apiFetch("/api/log/food", {
-        method: "POST",
-        body: JSON.stringify({
+      const outcome = await submitOrQueue({
+        userId: userId ?? "",
+        kind: "food",
+        label: `${selectedFood.name_es} — ${Number(grams)} g (${MEAL_TYPE_LABELS[mealType]}, ${logDate})`,
+        payload: {
           log_date: logDate,
           meal_type: mealType,
           food_id: selectedFood.id,
           grams: Number(grams),
-        }),
+        },
       });
-      if (quickAddFoodId === selectedFood.id) {
+      if (outcome.queued) {
+        setQueuedNote(
+          "Sin conexión: guardado en este dispositivo. Se registrará solo al volver la red.",
+        );
+      }
+      if (quickAddFoodId === selectedFood.id && !outcome.queued) {
         // registra el uso del favorito (no bloquea el flujo si falla)
         apiFetch(`/api/favorites/${selectedFood.id}/use`, { method: "POST" }).catch(() => {});
       }
@@ -279,14 +313,16 @@ export default function LogPage() {
     setSmartConfirmingIndex(index);
     setSmartError(null);
     try {
-      await apiFetch("/api/log/food", {
-        method: "POST",
-        body: JSON.stringify({
+      await submitOrQueue({
+        userId: userId ?? "",
+        kind: "food",
+        label: `${item.name_es} — ${Number(item.gramsInput)} g (${MEAL_TYPE_LABELS[item.mealType]}, ${logDate})`,
+        payload: {
           log_date: logDate,
           meal_type: item.mealType,
           food_id: item.food_id,
           grams: Number(item.gramsInput),
-        }),
+        },
       });
       discardSmartReviewItem(index);
       await loadDay(logDate);
@@ -474,6 +510,9 @@ export default function LogPage() {
           </form>
         )}
         {addError && <p className="mt-2 text-sm text-red-600">{addError}</p>}
+        {queuedNote && (
+          <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">{queuedNote}</p>
+        )}
       </section>
 
       <section>
