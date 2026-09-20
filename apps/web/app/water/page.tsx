@@ -7,6 +7,7 @@ import { useCurrentUserId } from "@/components/CurrentUser";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { QUEUE_FLUSHED_EVENT, submitOrQueue } from "@/lib/offlineQueue";
 import type { NotificationRule, WaterContainer, WaterDay, WaterSettings } from "@/lib/types";
+import { ErrorState, Skeleton } from "@/components/ui/states";
 
 const WATER_REMINDER_SCHEDULE = { times: ["10:00", "13:00", "16:00", "19:00"] };
 
@@ -185,7 +186,7 @@ export default function WaterPage() {
     setContainers(containers.filter((_, i) => i !== index));
   }
 
-  if (loading) return <p className="text-sm text-neutral-500">Cargando…</p>;
+  if (loading) return <Skeleton lines={3} />;
 
   const totalMl = day?.total_ml ?? 0;
   const targetMl = day?.target_ml ?? settings?.daily_target_ml ?? 2500;
@@ -194,7 +195,7 @@ export default function WaterPage() {
   return (
     <main className="flex flex-col gap-6">
       <h1 className="text-xl font-semibold">Agua</h1>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <ErrorState message={error} onRetry={() => void load()} />}
       {queuedNote && <p className="text-sm text-amber-700 dark:text-amber-300">{queuedNote}</p>}
 
       <section>

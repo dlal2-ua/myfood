@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "node e2e/offline.cjs && node e2e/ui.cjs && node e2e/f7.cjs"
   },
   "dependencies": {
     "@capacitor/core": "8.5.2",
@@ -21,12 +22,17 @@
   "devDependencies": {
     "@eslint/eslintrc": "3.3.1",
     "@tailwindcss/postcss": "4.3.3",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/node": "22.20.2",
     "@types/react": "19.0.0",
     "@types/react-dom": "19.0.0",
     "eslint": "9.39.5",
     "eslint-config-next": "15.5.25",
     "fake-indexeddb": "^6.2.5",
+    "jsdom": "^30.1.0",
+    "playwright-core": "1.59.1",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vitest": "^3.2.7"

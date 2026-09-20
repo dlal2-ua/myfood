@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { Household } from "@/lib/types";
+import { ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -95,8 +96,8 @@ export default function HouseholdPage() {
         </p>
       </div>
 
-      {loading && <p className="text-sm text-neutral-500">Cargando…</p>}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {loading && <Skeleton lines={3} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} />}
 
       {!loading && household && (
         <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">

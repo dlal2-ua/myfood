@@ -3,17 +3,73 @@
 :root {
   --color-primary: #16a34a;
   --color-bg: #fafaf9;
+  --color-surface: #ffffff;
   --color-text: #1c1917;
+  --color-muted: #57534e;
+  /* Un macro tiene SIEMPRE el mismo color en toda la app (y siempre lleva su etiqueta de texto). */
+  --color-protein: #ef4444;
+  --color-fat: #f59e0b;
+  --color-carbs: #3b82f6;
+  --color-water: #0ea5e9;
+  --radius-control: 8px;
+  --radius-card: 16px;
 }
 
 body {
   background: var(--color-bg);
   color: var(--color-text);
+  font-family: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --color-bg: #1c1917;
+    --color-surface: #292524;
     --color-text: #fafaf9;
+    --color-muted: #d6d3d1;
   }
+}
+
+/* Accesibilidad: foco visible en todo lo interactivo y objetivos táctiles de al menos 44 px en
+   pantallas táctiles (WCAG 2.5.5). */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  :where(button, select, input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"])) {
+    min-height: 44px;
+  }
+  :where(input[type="checkbox"], input[type="radio"]) {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  :where(nav a, label:has(> input[type="checkbox"]), label:has(> input[type="radio"])) {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes myfood-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.skeleton {
+  animation: myfood-pulse 1.5s ease-in-out infinite;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: var(--radius-control);
 }

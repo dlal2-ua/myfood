@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch, ApiError, errorMessage } from "@/lib/api";
 import type { AiCredentialStatus, IafoodLimits } from "@/lib/types";
+import { Skeleton } from "@/components/ui/states";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -96,7 +97,7 @@ export default function AdminPage() {
   }
 
   if (loading) {
-    return <p className="text-sm text-neutral-500">Cargando…</p>;
+    return <Skeleton lines={3} />;
   }
 
   if (forbidden) {

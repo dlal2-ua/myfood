@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import type { Fasting, FastingStats } from "@/lib/types";
+import { Skeleton } from "@/components/ui/states";
 
 const PRESETS = [
   { hours: 12, label: "12:12" },
@@ -140,7 +141,7 @@ export default function FastingPage() {
   const remaining = current ? Math.max(0, current.target_hours - elapsedHours) : 0;
   const reached = current ? elapsedHours >= current.target_hours : false;
 
-  if (loading) return <p className="text-sm text-neutral-500">Cargando…</p>;
+  if (loading) return <Skeleton lines={3} />;
 
   return (
     <main className="mx-auto flex max-w-xl flex-col gap-6">

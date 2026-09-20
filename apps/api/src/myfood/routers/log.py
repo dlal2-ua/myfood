@@ -52,6 +52,8 @@ class LogFoodOut(BaseModel):
     food_id: UUID | None
     recipe_id: UUID | None = None
     recipe_name: str | None = None
+    # Nombre del alimento (solo en el registro de un día): evita una petición por cada línea.
+    food_name: str | None = None
     grams: float
     weighed_as: str = "raw"
     entered_grams: float | None = None
@@ -302,10 +304,18 @@ async def get_day_log(
             r.id: r.name
             for r in await session.scalars(select(Recipe).where(Recipe.id.in_(recipe_ids)))
         }
+    food_ids = {e.food_id for e in entries if e.food_id is not None}
+    food_names: dict[UUID, str] = {}
+    if food_ids:
+        food_names = {
+            f.id: f.name_es
+            for f in await session.scalars(select(Food).where(Food.id.in_(food_ids)))
+        }
     out = []
     for entry in entries:
         item = _to_out(entry)
         item.recipe_name = recipe_names.get(entry.recipe_id) if entry.recipe_id else None
+        item.food_name = food_names.get(entry.food_id) if entry.food_id else None
         out.append(item)
     return LogDayOut(date=date, food=out, totals=totals)
 

@@ -247,3 +247,14 @@ async def test_copy_day_onto_itself_is_rejected(registered_client):
 
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "SAME_DATE"
+
+
+async def test_the_day_log_includes_the_food_name(registered_client, test_food):
+    client, _ = registered_client
+    today = date.today().isoformat()
+    await client.post(
+        "/api/log/food",
+        json={"log_date": today, "meal_type": "lunch", "food_id": str(test_food), "grams": 100},
+    )
+    day = (await client.get("/api/log", params={"date": today})).json()
+    assert day["food"][0]["food_name"] == "Pechuga de pollo de prueba"

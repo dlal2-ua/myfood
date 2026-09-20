@@ -159,6 +159,7 @@ export interface LogFoodEntry {
   food_id: string | null;
   recipe_id?: string | null;
   recipe_name?: string | null;
+  food_name?: string | null;
   grams: number;
   /** "cooked": el usuario pesó el plato ya cocinado; `grams` es el peso crudo equivalente. */
   weighed_as?: "raw" | "cooked";
