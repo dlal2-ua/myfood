@@ -264,7 +264,12 @@ async def _build_pantry_proposal(
             continue
         food = await session.get(Food, uuid.UUID(candidate.id))
         serving_size_g = float(food.serving_size_g) if food and food.serving_size_g else None
-        grams = resolve_grams(entry.get("approx_quantity_text", ""), serving_size_g)
+        grams = resolve_grams(
+            entry.get("approx_quantity_text", ""),
+            serving_size_g,
+            food_name=candidate.name_es,
+            category=food.category if food else None,
+        )
         items_out.append(
             {"food_id": candidate.id, "food_name": candidate.name_es, "quantity_g": grams}
         )

@@ -268,10 +268,8 @@ async def test_today_lists_the_doses_of_today_with_their_state(registered_client
     client, _ = registered_client
     now = _local_now()
     supplement = await _new_supplement(client)
-    early = (now - timedelta(hours=2)).strftime("%H:%M")
-    late = (now + timedelta(hours=2)).strftime("%H:%M")
-    if now.hour < 2 or now.hour > 21:
-        pytest.skip("la ventana de la prueba cruza la medianoche")
+    # una toma que ya pasó siempre (00:00) y otra que aún no ha llegado (23:59:59)
+    early, late = "00:00", "23:59:59"
     await _schedule(client, supplement["id"], early)
     await _schedule(client, supplement["id"], late)
 

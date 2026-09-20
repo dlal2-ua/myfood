@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
 from myfood.ai.schemas import AiSessionOut, ai_session_to_out
 from myfood.db.models import Food, FoodNutrient, Recipe, RecipeIngredient
 from myfood.deps import get_current_user_id, get_db
+from myfood.domain.ean import ean13_svg, generate_internal_ean
 from myfood.errors import AppError
 
 router = APIRouter(prefix="/recipes", tags=["recipes"])
@@ -70,6 +71,8 @@ class NutritionTotals(BaseModel):
 class RecipeOut(BaseModel):
     id: UUID
     name: str
+    # EAN-13 interno (prefijo 20) para imprimir una etiqueta y escanearla al registrar la receta.
+    internal_ean: str | None = None
     servings: int
     prep_minutes: int | None
     instructions: str | None
@@ -94,6 +97,21 @@ async def _get_recipe(session: AsyncSession, user_id: UUID, recipe_id: UUID) -> 
     if recipe is None or recipe.user_id != user_id:
         raise AppError("RECIPE_NOT_FOUND", "No existe esa receta.", status_code=404)
     return recipe
+
+
+async def _ensure_internal_ean(session: AsyncSession, recipe: Recipe) -> str:
+    """Asigna un EAN interno a la receta si todavía no lo tiene (las anteriores a esta función no
+    lo traen). Los códigos son aleatorios y únicos: si uno choca, se genera otro."""
+    if recipe.internal_ean:
+        return recipe.internal_ean
+    for _ in range(20):
+        candidate = generate_internal_ean()
+        taken = await session.scalar(select(Recipe.id).where(Recipe.internal_ean == candidate))
+        if taken is None:
+            recipe.internal_ean = candidate
+            await session.commit()
+            return candidate
+    raise AppError("EAN_GENERATION_FAILED", "No se pudo generar un código.", status_code=500)
 
 
 async def _load_ingredients(session: AsyncSession, recipe_id: UUID) -> list[RecipeIngredient]:
@@ -141,6 +159,7 @@ async def _to_out(session: AsyncSession, recipe: Recipe) -> RecipeOut:
     return RecipeOut(
         id=recipe.id,
         name=recipe.name,
+        internal_ean=recipe.internal_ean,
         servings=recipe.servings,
         prep_minutes=recipe.prep_minutes,
         instructions=recipe.instructions,
@@ -165,6 +184,7 @@ async def create_recipe(
     )
     session.add(recipe)
     await session.flush()
+    await _ensure_internal_ean(session, recipe)
 
     for item in body.ingredients:
         session.add(
@@ -192,6 +212,34 @@ async def list_recipes(
     ]
 
 
+@router.get("/by-ean/{ean}")
+async def get_recipe_by_ean(
+    ean: str,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> RecipeOut:
+    """Resuelve el código de una etiqueta impresa a la receta del usuario."""
+    recipe = await session.scalar(
+        select(Recipe).where(Recipe.internal_ean == ean, Recipe.user_id == user_id)
+    )
+    if recipe is None:
+        raise AppError("RECIPE_NOT_FOUND", "No existe esa receta.", status_code=404)
+    return await _to_out(session, recipe)
+
+
+@router.get("/{recipe_id}/label.svg")
+async def get_recipe_label(
+    recipe_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    """Etiqueta imprimible de la receta: código de barras, nombre y raciones."""
+    recipe = await _get_recipe(session, user_id, recipe_id)
+    ean = await _ensure_internal_ean(session, recipe)
+    svg = ean13_svg(ean, recipe.name[:40], f"{recipe.servings} raciones")
+    return Response(content=svg, media_type="image/svg+xml")
+
+
 @router.get("/{recipe_id}")
 async def get_recipe(
     recipe_id: UUID,
@@ -199,6 +247,7 @@ async def get_recipe(
     session: AsyncSession = Depends(get_db),
 ) -> RecipeOut:
     recipe = await _get_recipe(session, user_id, recipe_id)
+    await _ensure_internal_ean(session, recipe)
     return await _to_out(session, recipe)
 
 

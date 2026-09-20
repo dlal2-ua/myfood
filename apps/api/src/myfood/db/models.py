@@ -231,6 +231,10 @@ class FoodLog(Base):
     )
     recipe_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     grams: Mapped[object] = mapped_column(Numeric(8, 2), nullable=False)
+    # `grams` es siempre el peso crudo equivalente; `weighed_as` = cómo lo pesó el usuario y
+    # `entered_grams` = lo que escribió (solo si lo pesó cocinado). Ver migración 0016.
+    weighed_as: Mapped[str] = mapped_column(String, nullable=False, default="raw")
+    entered_grams: Mapped[object | None] = mapped_column(Numeric(8, 2), nullable=True)
     entry_source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
     # Snapshot nutricional congelado en el momento del registro (sección 6.5)
     # — si el catálogo cambia después, el histórico del usuario no cambia.

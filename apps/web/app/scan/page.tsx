@@ -4,8 +4,9 @@ import { FoodImage } from "@/components/FoodImage";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { useEffect, useRef, useState } from "react";
 import { AddToLogForm } from "@/components/AddToLogForm";
+import { LogRecipeForm } from "@/components/LogRecipeForm";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
-import type { FoodDetail } from "@/lib/types";
+import type { FoodDetail, Recipe } from "@/lib/types";
 
 const SCANNER_ELEMENT_ID = "barcode-scanner";
 
@@ -38,6 +39,7 @@ export default function ScanPage() {
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [barcode, setBarcode] = useState<string | null>(null);
   const [food, setFood] = useState<FoodDetail | null>(null);
+  const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [manual, setManual] = useState<ManualForm>(EMPTY_MANUAL);
@@ -91,7 +93,17 @@ export default function ScanPage() {
     setLookupLoading(true);
     setNotFound(false);
     setFood(null);
+    setRecipe(null);
     try {
+      // Los códigos 20… son etiquetas internas de las recetas del usuario (rango de uso interno).
+      if (/^20\d{11}$/.test(decodedText)) {
+        try {
+          setRecipe(await apiFetch<Recipe>(`/api/recipes/by-ean/${decodedText}`));
+          return;
+        } catch (err) {
+          if (!(err instanceof ApiError && err.status === 404)) throw err;
+        }
+      }
       const result = await apiFetch<FoodDetail>(`/api/foods/barcode/${decodedText}`);
       setFood(result);
     } catch (err) {
@@ -108,6 +120,7 @@ export default function ScanPage() {
   function onRescan() {
     setBarcode(null);
     setFood(null);
+    setRecipe(null);
     setNotFound(false);
     setScannerError(null);
     setManual(EMPTY_MANUAL);
@@ -157,6 +170,16 @@ export default function ScanPage() {
       {scannerError && <p className="text-sm text-red-600">{scannerError}</p>}
       {!scanning && lookupLoading && <p className="text-sm text-neutral-500">Buscando…</p>}
 
+      {recipe && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-lg font-semibold">{recipe.name}</h2>
+          <p className="text-sm text-neutral-500">
+            Tu receta · {recipe.servings} raciones · {recipe.totals_per_serving.kcal} kcal por ración
+          </p>
+          <LogRecipeForm recipe={recipe} />
+        </section>
+      )}
+
       {food && (
         <>
           <div className="flex items-start gap-3">
@@ -174,6 +197,7 @@ export default function ScanPage() {
             foodName={food.name_es}
             servingSizeG={food.serving_size_g}
             servingLabel={food.serving_label}
+            cookingYieldFactor={food.cooking_yield_factor}
             redirectTo="/log"
           />
         </>

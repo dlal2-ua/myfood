@@ -100,6 +100,8 @@ class FoodDetail(BaseModel):
     category: str | None
     serving_size_g: float | None
     serving_label: str | None
+    # gramos cocido / gramos crudo; si lo tiene, el registro admite pesar el plato ya cocinado.
+    cooking_yield_factor: float | None = None
     quality_rank: int
     nutriscore_grade: str | None
     nova_group: int | None
@@ -170,6 +172,7 @@ def _to_detail(
         category=food.category,
         serving_size_g=_f(food.serving_size_g),
         serving_label=food.serving_label,
+        cooking_yield_factor=_f(food.cooking_yield_factor),
         quality_rank=food.quality_rank,
         nutriscore_grade=food.nutriscore_grade,
         nova_group=food.nova_group,

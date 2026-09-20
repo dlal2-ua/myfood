@@ -91,7 +91,12 @@ async def resolve_food_mentions(
             if food is None:
                 continue
             serving_size_g = float(food.serving_size_g) if food.serving_size_g else None
-            grams = resolve_grams(item.get("approx_quantity_text", ""), serving_size_g)
+            grams = resolve_grams(
+                item.get("approx_quantity_text", ""),
+                serving_size_g,
+                food_name=food.name_es,
+                category=food.category,
+            )
             items_out.append(
                 {
                     "food_id": food_id,

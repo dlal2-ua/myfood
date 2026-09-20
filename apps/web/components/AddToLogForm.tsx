@@ -24,6 +24,7 @@ export function AddToLogForm({
   foodName,
   servingSizeG,
   servingLabel,
+  cookingYieldFactor,
   redirectTo,
 }: {
   foodId: string;
@@ -31,6 +32,8 @@ export function AddToLogForm({
   /** Porción habitual del producto: es la cantidad por defecto (y un atajo). */
   servingSizeG?: number | null;
   servingLabel?: string | null;
+  /** gramos cocido / gramos crudo: si el alimento lo tiene, se puede indicar que se pesó cocinado. */
+  cookingYieldFactor?: number | null;
   /** Adónde ir tras registrar (el flujo de escaneo vuelve al registro del día). */
   redirectTo?: string;
 }) {
@@ -43,6 +46,7 @@ export function AddToLogForm({
   const [logError, setLogError] = useState<string | null>(null);
   const [logged, setLogged] = useState<LogFoodEntry | null>(null);
   const [queued, setQueued] = useState(false);
+  const [weighedAs, setWeighedAs] = useState<"raw" | "cooked">("raw");
 
   async function onLog(e: React.FormEvent) {
     e.preventDefault();
@@ -55,7 +59,13 @@ export function AddToLogForm({
         userId: userId ?? "",
         kind: "food",
         label: `${foodName ?? "Alimento"} — ${Number(grams)} g (${MEAL_TYPE_LABELS[mealType]}, ${logDate})`,
-        payload: { log_date: logDate, meal_type: mealType, food_id: foodId, grams: Number(grams) },
+        payload: {
+          log_date: logDate,
+          meal_type: mealType,
+          food_id: foodId,
+          grams: Number(grams),
+          weighed_as: cookingYieldFactor ? weighedAs : "raw",
+        },
       });
       if (outcome.queued) setQueued(true);
       else if (redirectTo) {
@@ -109,6 +119,30 @@ export function AddToLogForm({
             onChange={(e) => setGrams(e.target.value)}
           />
         </label>
+        {cookingYieldFactor ? (
+          <fieldset className="flex flex-col gap-1 text-sm">
+            <legend className="mb-1">¿Lo pesaste crudo o ya cocinado?</legend>
+            <div className="flex gap-3">
+              {(["raw", "cooked"] as const).map((v) => (
+                <label key={v} className="flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name="weighed-as"
+                    checked={weighedAs === v}
+                    onChange={() => setWeighedAs(v)}
+                  />
+                  {v === "raw" ? "Crudo" : "Cocinado"}
+                </label>
+              ))}
+            </div>
+            {weighedAs === "cooked" && Number(grams) > 0 && (
+              <span className="text-xs text-neutral-500">
+                ≈ {Math.round(Number(grams) / cookingYieldFactor)} g en crudo: se calcula sobre el peso
+                crudo.
+              </span>
+            )}
+          </fieldset>
+        ) : null}
         {servingSizeG && servingSizeG > 0 ? (
           <button
             type="button"

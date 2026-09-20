@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from etl.sources import bedca, ciqual, generic_allergens, off, usda
+from etl.sources import bedca, ciqual, cooking_yields, generic_allergens, off, usda
 
 _USDA_SOURCES = ("usda_foundation", "usda_sr")
 
@@ -29,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
             "off_allergens",
             "generic_allergens",
             "off_images",
+            "cooking_yields",
         ],
     )
     parser.add_argument("--country", default=None, help="Solo aplica a --source off")
@@ -72,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         if result.rejected_path:
             print(f"  descartes registrados en {result.rejected_path}")
+        return 0
+
+    if args.source == "cooking_yields":
+        stats = cooking_yields.load()
+        print(f"[cooking_yields] leídos={stats.read} factores actualizados={stats.upserted}")
         return 0
 
     if args.source == "off_images":

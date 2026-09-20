@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
+import { LogRecipeForm } from "@/components/LogRecipeForm";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
 import type {
   AiSession,
@@ -624,6 +625,7 @@ export default function RecipesPage() {
                     <p className="font-semibold">{selected.totals_per_serving.kcal} kcal</p>
                   </div>
                 </div>
+                <LogRecipeForm recipe={selected} />
               </>
             )}
           </div>
