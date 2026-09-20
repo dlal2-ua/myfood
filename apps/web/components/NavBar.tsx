@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { clearQueue, clearUserCaches, listQueue } from "@/lib/offlineQueue";
 import type { CurrentUser } from "@/lib/session";
 
 export function NavBar({ user }: { user: CurrentUser | null }) {
@@ -11,9 +12,22 @@ export function NavBar({ user }: { user: CurrentUser | null }) {
   const [loggingOut, setLoggingOut] = useState(false);
 
   async function onLogout() {
+    if (user) {
+      const pending = await listQueue(user.id).catch(() => []);
+      if (
+        pending.length > 0 &&
+        !window.confirm(
+          `Tienes ${pending.length} registro(s) sin sincronizar. Si sales ahora se perderán. ¿Salir igualmente?`,
+        )
+      ) {
+        return;
+      }
+    }
     setLoggingOut(true);
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });
+      if (user) await clearQueue(user.id).catch(() => {});
+      await clearUserCaches();
     } finally {
       setLoggingOut(false);
       router.push("/login");

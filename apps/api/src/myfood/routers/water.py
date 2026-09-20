@@ -10,6 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import BodyMeasurement, Profile, WaterLog, WaterSettings
@@ -112,6 +113,8 @@ async def update_settings(
 class WaterLogIn(BaseModel):
     log_date: date
     ml: int = Field(gt=0, le=5000)
+    # Ver `LogFoodIn.client_id`: hace idempotente el reenvío de un registro hecho sin conexión.
+    client_id: UUID | None = None
 
 
 class WaterLogEntry(BaseModel):
@@ -130,9 +133,24 @@ async def log_water(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> WaterLogEntry:
-    entry = WaterLog(user_id=user_id, log_date=body.log_date, ml=body.ml)
+    if body.client_id is not None:
+        existing = await session.get(WaterLog, body.client_id)
+        if existing is not None and existing.user_id == user_id:
+            return _log_to_out(existing)
+    entry = WaterLog(
+        **({"id": body.client_id} if body.client_id is not None else {}),
+        user_id=user_id,
+        log_date=body.log_date,
+        ml=body.ml,
+    )
     session.add(entry)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise AppError(
+            "CLIENT_ID_CONFLICT", "Ese identificador de registro ya está en uso.", status_code=409
+        ) from exc
     await session.refresh(entry)
     return _log_to_out(entry)
 

@@ -1,45 +1,49 @@
 "use client";
 
+import { localDateIso } from "@/lib/dates";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { apiFetch, errorMessage } from "@/lib/api";
+import { useCurrentUserId } from "@/components/CurrentUser";
+import { errorMessage } from "@/lib/api";
+import { submitOrQueue } from "@/lib/offlineQueue";
 import { MEAL_TYPES, MEAL_TYPE_LABELS, type LogFoodEntry, type MealType } from "@/lib/types";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateIso();
 }
 
 /** Formulario de "añadir al registro diario" — compartido entre la ficha de
  * producto (`/foods/[id]`) y el flujo de escaneo (`/scan`), misma lógica en
  * los dos sitios. */
-export function AddToLogForm({ foodId }: { foodId: string }) {
+export function AddToLogForm({ foodId, foodName }: { foodId: string; foodName?: string }) {
   const router = useRouter();
+  const userId = useCurrentUserId();
   const [logDate, setLogDate] = useState(todayIso());
   const [mealType, setMealType] = useState<MealType>("lunch");
   const [grams, setGrams] = useState("100");
   const [logging, setLogging] = useState(false);
   const [logError, setLogError] = useState<string | null>(null);
   const [logged, setLogged] = useState<LogFoodEntry | null>(null);
+  const [queued, setQueued] = useState(false);
 
   async function onLog(e: React.FormEvent) {
     e.preventDefault();
     setLogging(true);
     setLogError(null);
     setLogged(null);
+    setQueued(false);
     try {
-      const entry = await apiFetch<LogFoodEntry>("/api/log/food", {
-        method: "POST",
-        body: JSON.stringify({
-          log_date: logDate,
-          meal_type: mealType,
-          food_id: foodId,
-          grams: Number(grams),
-        }),
+      const outcome = await submitOrQueue<LogFoodEntry>({
+        userId: userId ?? "",
+        kind: "food",
+        label: `${foodName ?? "Alimento"} — ${Number(grams)} g (${MEAL_TYPE_LABELS[mealType]}, ${logDate})`,
+        payload: { log_date: logDate, meal_type: mealType, food_id: foodId, grams: Number(grams) },
       });
-      setLogged(entry);
+      if (outcome.queued) setQueued(true);
+      else setLogged(outcome.result);
     } catch (err) {
       setLogError(errorMessage(err));
     } finally {
@@ -96,6 +100,11 @@ export function AddToLogForm({ foodId }: { foodId: string }) {
         </button>
       </form>
       {logError && <p className="mt-2 text-sm text-red-600">{logError}</p>}
+      {queued && (
+        <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+          Sin conexión: guardado en este dispositivo. Se registrará solo al volver la red.
+        </p>
+      )}
       {logged && (
         <p className="mt-2 text-sm text-[var(--color-primary)]">
           Registrado: {logged.kcal} kcal.{" "}

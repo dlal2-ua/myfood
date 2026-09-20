@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai.consent import require_ai_processing_consent
@@ -36,6 +37,9 @@ class LogFoodIn(BaseModel):
     meal_type: MealType
     food_id: UUID
     grams: float = Field(gt=0, le=5000)
+    # Id generado en el cliente para los registros hechos sin conexión: reenviar el mismo
+    # registro (respuesta perdida, reintento de la cola) no lo duplica.
+    client_id: UUID | None = None
 
 
 class LogFoodOut(BaseModel):
@@ -82,9 +86,14 @@ async def log_food(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> LogFoodOut:
+    if body.client_id is not None:
+        existing = await session.get(FoodLog, body.client_id)
+        if existing is not None and existing.user_id == user_id:
+            return _to_out(existing)
     _food, nutrients = await _get_food_with_nutrients(session, body.food_id)
 
     entry = FoodLog(
+        **({"id": body.client_id} if body.client_id is not None else {}),
         user_id=user_id,
         log_date=body.log_date,
         meal_type=body.meal_type,
@@ -97,7 +106,13 @@ async def log_food(
         micros=_scale_micros(nutrients.micros, body.grams),
     )
     session.add(entry)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise AppError(
+            "CLIENT_ID_CONFLICT", "Ese identificador de registro ya está en uso.", status_code=409
+        ) from exc
     await session.refresh(entry)
     return _to_out(entry)
 

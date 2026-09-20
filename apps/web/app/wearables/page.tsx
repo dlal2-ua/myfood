@@ -1,5 +1,6 @@
 "use client";
 
+import { localDateIso } from "@/lib/dates";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import {
@@ -14,7 +15,7 @@ const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateIso();
 }
 
 function startOfTodayIso(): string {

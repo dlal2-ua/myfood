@@ -1,5 +1,6 @@
 "use client";
 
+import { localDateIso } from "@/lib/dates";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
@@ -32,7 +33,7 @@ const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateIso();
 }
 
 export default function ProfilePage() {

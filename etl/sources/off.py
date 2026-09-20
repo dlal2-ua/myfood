@@ -399,6 +399,9 @@ def load_by_brand_dump(
     return OffLoadResult(stats=stats, rejected_path=rejected_path)
 
 
+_ANONYMOUS_RESULT_CAP = 1000
+
+
 def _api_get(client: httpx.Client, params: dict, retries: int = 8) -> dict:
     """GET contra la Search API con reintento exponencial (503 frecuente bajo carga)."""
     last_exc: Exception | None = None
@@ -422,9 +425,13 @@ def fetch_brand_products(
     page_size: int = 100,
     fields: str = _API_FIELDS,
 ) -> Iterator[dict]:
-    """Pagina la Search API v2 para una marca — para cuando una página viene corta."""
+    """Pagina la Search API v2 para una marca — para cuando una página viene corta.
+
+    La API anónima solo sirve los primeros `_ANONYMOUS_RESULT_CAP` resultados: la página
+    siguiente da 401/503 y reintentarla solo alarga la carga.
+    """
     page = 1
-    while True:
+    while page * page_size <= _ANONYMOUS_RESULT_CAP:
         data = _api_get(
             client,
             {

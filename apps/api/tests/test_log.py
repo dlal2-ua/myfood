@@ -191,3 +191,49 @@ async def test_copy_day_duplicates_entries(registered_client, test_food):
     day = await client.get("/api/log", params={"date": tomorrow.isoformat()})
     assert len(day.json()["food"]) == 1
     assert day.json()["food"][0]["kcal"] == 165.0
+
+
+async def test_log_food_with_client_id_is_idempotent(registered_client, test_food):
+    import uuid
+
+    client, _ = registered_client
+    client_id = str(uuid.uuid4())
+    payload = {
+        "log_date": date.today().isoformat(),
+        "meal_type": "lunch",
+        "food_id": str(test_food),
+        "grams": 100,
+        "client_id": client_id,
+    }
+
+    first = await client.post("/api/log/food", json=payload)
+    second = await client.post("/api/log/food", json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == client_id == second.json()["id"]
+    day = await client.get(f"/api/log?date={payload['log_date']}")
+    assert len([e for e in day.json()["food"] if e["id"] == client_id]) == 1
+
+
+async def test_log_food_client_id_of_another_user_is_a_conflict(
+    registered_client, fresh_client, test_food
+):
+    import uuid
+
+    client, _ = registered_client
+    client_id = str(uuid.uuid4())
+    payload = {
+        "log_date": date.today().isoformat(),
+        "meal_type": "lunch",
+        "food_id": str(test_food),
+        "grams": 100,
+        "client_id": client_id,
+    }
+    assert (await client.post("/api/log/food", json=payload)).status_code == 201
+
+    other, _ = fresh_client
+    resp = await other.post("/api/log/food", json=payload)
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "CLIENT_ID_CONFLICT"
