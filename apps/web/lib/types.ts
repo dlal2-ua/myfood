@@ -364,6 +364,10 @@ export interface PlanDay {
   day_index: number;
   meals: PlanMeal[];
   totals: DayMacroTotals;
+  /** `TARGETS_NOT_MET`: las kcal del día quedan a más de un 5 % del objetivo. */
+  warning: string | null;
+  /** `false`: el solver agotó el tiempo y esta es la mejor solución que encontró. */
+  is_optimal: boolean;
 }
 
 export type DietPlanStatus = "draft" | "active" | "archived";

@@ -13,7 +13,10 @@ para abajo, igual que el patrón ya usado para `supplement_schedules`.
 
 from __future__ import annotations
 
+import asyncio
+import random
 import uuid
+from collections import Counter
 from datetime import date, timedelta
 from typing import Literal
 from uuid import UUID
@@ -38,12 +41,24 @@ from myfood.db.models import (
 from myfood.deps import get_current_user_id, get_db
 from myfood.domain import formulas
 from myfood.domain.diet_engine import DayTargets, solve_day
-from myfood.domain.food_candidates import compute_alternatives_for_item, select_candidates
+from myfood.domain.food_candidates import (
+    EXCLUDE_RESTRICTED_SQL,
+    compute_alternatives_for_item,
+    sample_day_pool,
+    select_candidates,
+)
+from myfood.domain.food_groups import MEAL_KCAL_SHARES, MEAL_TEMPLATES
 from myfood.errors import AppError
 
 router = APIRouter(prefix="/diet-plans", tags=["diet-plans"])
 
 _MAX_DAYS = 14
+
+# Penalización por cada vez que un alimento ya se ha usado esa semana (sección 9). La especificación
+# da 0,15 sobre desviaciones en unidades absolutas (kcal), donde es un simple desempate; aquí las
+# desviaciones son relativas al objetivo, así que el peso equivalente es mucho menor: la variedad
+# decide entre menús que cumplen igual de bien los objetivos, nunca a costa de no cumplirlos.
+_VARIETY_PENALTY_PER_USE = 0.003
 
 _MEAL_TYPES_BY_COUNT: dict[int, list[str]] = {
     1: ["lunch"],
@@ -148,14 +163,33 @@ async def _generate_plan(
     session.add(plan)
     await session.flush()
 
-    recently_used: set[str] = set()
+    shares = MEAL_KCAL_SHARES[len(meal_types)]
+    times_used: Counter[str] = Counter()
     any_feasible = False
     for day_index in range(num_days):
-        day_plan = solve_day(candidates, targets, meal_types, frozenset(recently_used))
+        # Cada día se resuelve con un subconjunto distinto del catálogo (semilla = plan + día):
+        # así el modelo es pequeño y la semana no repite siempre los mismos alimentos.
+        pool = sample_day_pool(candidates, random.Random(f"{plan.id}:{day_index}"))
+        # CBC es un proceso externo que puede tardar segundos: fuera del bucle de eventos.
+        day_plan = await asyncio.to_thread(
+            solve_day,
+            pool,
+            targets,
+            meal_types,
+            dict(times_used),
+            variety_penalty_weight=_VARIETY_PENALTY_PER_USE,
+            meal_kcal_shares=shares,
+            meal_templates=MEAL_TEMPLATES,
+        )
         if not day_plan.feasible:
             continue
         any_feasible = True
-        plan_day = PlanDay(plan_id=plan.id, day_index=day_index)
+        plan_day = PlanDay(
+            plan_id=plan.id,
+            day_index=day_index,
+            warning=day_plan.warning,
+            is_optimal=day_plan.is_optimal,
+        )
         session.add(plan_day)
         await session.flush()
         for sort_order, meal in enumerate(day_plan.meals):
@@ -172,7 +206,7 @@ async def _generate_plan(
                 await compute_alternatives_for_item(
                     session, plan_item.id, food_uuid, item.grams, user_id
                 )
-                recently_used.add(item.food_id)
+                times_used[item.food_id] += 1
 
     if not any_feasible:
         await session.rollback()
@@ -230,6 +264,10 @@ class PlanDayOut(BaseModel):
     day_index: int
     meals: list[PlanMealOut]
     totals: DayTargets
+    # `TARGETS_NOT_MET` si las kcal del día quedan a más de un 5 % del objetivo.
+    warning: str | None = None
+    # `False` si el solver agotó el tiempo y esta es la mejor solución que encontró.
+    is_optimal: bool = True
 
 
 class DietPlanOut(BaseModel):
@@ -319,7 +357,7 @@ async def _load_plan_detail(session: AsyncSession, plan: DietPlan) -> DietPlanDe
         await session.execute(
             text("""
                 SELECT
-                    pd.id AS day_id, pd.day_index,
+                    pd.id AS day_id, pd.day_index, pd.warning, pd.is_optimal,
                     pm.id AS meal_id, pm.meal_type, pm.sort_order,
                     pi.id AS item_id, pi.food_id, pi.recipe_id, f.name_es, r.name AS recipe_name,
                     pi.grams, pi.is_substitutable,
@@ -350,6 +388,8 @@ async def _load_plan_detail(session: AsyncSession, plan: DietPlan) -> DietPlanDe
             row.day_index,
             {
                 "id": row.day_id,
+                "warning": row.warning,
+                "is_optimal": row.is_optimal,
                 "meals": {},
                 "kcal": 0.0,
                 "protein_g": 0.0,
@@ -426,6 +466,8 @@ async def _load_plan_detail(session: AsyncSession, plan: DietPlan) -> DietPlanDe
                 )
                 for meal_id, meal in day["meals"].items()
             ],
+            warning=day["warning"],
+            is_optimal=day["is_optimal"],
             totals=DayTargets(
                 kcal=round(day["kcal"], 1),
                 protein_g=round(day["protein_g"], 1),
@@ -482,6 +524,15 @@ async def update_plan_status(
     session: AsyncSession = Depends(get_db),
 ) -> DietPlanOut:
     plan = await _get_plan(session, user_id, plan_id)
+    if body.status == "active":
+        # Un solo plan activo por usuario (índice único parcial, migración 0013).
+        await session.execute(
+            text(
+                "UPDATE diet_plans SET status = 'archived' "
+                "WHERE user_id = :user_id AND status = 'active' AND id != :plan_id"
+            ),
+            {"user_id": str(user_id), "plan_id": str(plan_id)},
+        )
     plan.status = body.status
     await session.commit()
     await session.refresh(plan)
@@ -549,7 +600,10 @@ async def substitute_item(
     await session.flush()
     await compute_alternatives_for_item(session, item.id, item.food_id, float(item.grams), user_id)
     await session.commit()
+    return await _item_out(session, item)
 
+
+async def _item_out(session: AsyncSession, item: PlanItem) -> PlanItemOut:
     rows = (
         await session.execute(
             text("""
@@ -562,7 +616,7 @@ async def substitute_item(
                 WHERE f.id = :food_id
                 ORDER BY pia.rank
             """),
-            {"item_id": str(item_id), "food_id": str(item.food_id)},
+            {"item_id": str(item.id), "food_id": str(item.food_id)},
         )
     ).all()
     name_es = rows[0].item_name_es if rows else None
@@ -587,6 +641,65 @@ async def substitute_item(
         is_substitutable=item.is_substitutable,
         alternatives=alternatives,
     )
+
+
+class PlanItemUpdateIn(BaseModel):
+    food_id: UUID | None = None
+    grams: float | None = Field(default=None, gt=0, le=2000)
+
+
+@router.put("/{plan_id}/items/{item_id}")
+async def update_item(
+    plan_id: UUID,
+    item_id: UUID,
+    body: PlanItemUpdateIn,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> PlanItemOut:
+    """Edita a mano un elemento del plan: otro alimento y/o otros gramos (el usuario decide, no
+    hay solver de por medio). El alimento nuevo tiene que estar permitido por sus restricciones
+    — el motor nunca sirve un alérgeno y editar a mano no es una vía para colarlo."""
+    await _get_plan(session, user_id, plan_id)
+    item = await session.scalar(
+        select(PlanItem)
+        .join(PlanMeal, PlanMeal.id == PlanItem.plan_meal_id)
+        .join(PlanDay, PlanDay.id == PlanMeal.plan_day_id)
+        .where(PlanItem.id == item_id, PlanDay.plan_id == plan_id)
+    )
+    if item is None:
+        raise AppError("PLAN_ITEM_NOT_FOUND", "No existe ese elemento del plan.", status_code=404)
+    if item.recipe_id is not None:
+        raise AppError(
+            "ITEM_NOT_EDITABLE", "Un elemento que es una receta no se edita aquí.", status_code=422
+        )
+    if body.food_id is None and body.grams is None:
+        raise AppError("NOTHING_TO_UPDATE", "Indica un alimento o unos gramos.", status_code=422)
+
+    if body.food_id is not None and body.food_id != item.food_id:
+        allowed = await session.scalar(
+            text(f"SELECT 1 FROM foods f WHERE f.id = :food_id AND {EXCLUDE_RESTRICTED_SQL}"),
+            {"food_id": str(body.food_id), "user_id": str(user_id)},
+        )
+        if allowed is None:
+            exists = await session.scalar(
+                text("SELECT 1 FROM foods WHERE id = :id"), {"id": str(body.food_id)}
+            )
+            if exists is None:
+                raise AppError("FOOD_NOT_FOUND", "No existe ese alimento.", status_code=404)
+            raise AppError(
+                "RESTRICTED_FOOD", "Ese alimento no está permitido por tus restricciones.", 422
+            )
+        item.food_id = body.food_id
+    if body.grams is not None:
+        item.grams = body.grams
+
+    await session.execute(
+        delete(PlanItemAlternative).where(PlanItemAlternative.plan_item_id == item_id)
+    )
+    await session.flush()
+    await compute_alternatives_for_item(session, item.id, item.food_id, float(item.grams), user_id)
+    await session.commit()
+    return await _item_out(session, item)
 
 
 class BatchCookAssignmentIn(BaseModel):
