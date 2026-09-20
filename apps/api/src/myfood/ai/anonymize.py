@@ -94,14 +94,15 @@ async def _restrictions_out(session: AsyncSession, user_id: UUID) -> dict[str, l
         {
             restriction.allergen_code
             for restriction, _allergen_name, _food_name in rows
-            if restriction.kind == "allergen"
+            if restriction.kind in ("allergen", "intolerance") and restriction.allergen_code
         }
     )
     disliked = sorted(
         {
             food_name
             for restriction, _allergen_name, food_name in rows
-            if restriction.kind in ("disliked_food", "banned_food") and food_name is not None
+            if restriction.kind in ("disliked_food", "banned_food", "intolerance")
+            and food_name is not None
         }
     )
     return {"allergens": allergens, "disliked": disliked}

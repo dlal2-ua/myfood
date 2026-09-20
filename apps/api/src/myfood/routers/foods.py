@@ -69,6 +69,14 @@ def _image_url(hit: dict) -> str | None:
     return f"/api/foods/{hit['id']}/image?type=front&size=200"
 
 
+class FoodAllergenOut(BaseModel):
+    code: str
+    name_es: str
+    # 'declared' (etiqueta del fabricante), 'trace' ("puede contener") o
+    # 'inferred' (genérico clasificado por palabras clave: orientativo).
+    origin: str
+
+
 class FoodDetail(BaseModel):
     id: str
     kind: str
@@ -95,13 +103,30 @@ class FoodDetail(BaseModel):
     fiber_100g: float | None
     salt_100g: float | None
     micros: dict
+    allergens: list[FoodAllergenOut] = []
 
 
 def _f(value) -> float | None:
     return float(value) if value is not None else None
 
 
-def _to_detail(food: Food, nutrients: FoodNutrient) -> FoodDetail:
+async def _load_allergens(session: AsyncSession, food_id: UUID) -> list[FoodAllergenOut]:
+    rows = (
+        await session.execute(
+            text(
+                "SELECT fa.allergen_code, a.name_es, fa.origin FROM food_allergens fa "
+                "JOIN allergens a ON a.code = fa.allergen_code "
+                "WHERE fa.food_id = :food_id ORDER BY a.name_es"
+            ),
+            {"food_id": str(food_id)},
+        )
+    ).all()
+    return [FoodAllergenOut(code=r.allergen_code, name_es=r.name_es, origin=r.origin) for r in rows]
+
+
+def _to_detail(
+    food: Food, nutrients: FoodNutrient, allergens: list[FoodAllergenOut] | None = None
+) -> FoodDetail:
     return FoodDetail(
         id=str(food.id),
         kind=food.kind,
@@ -128,6 +153,7 @@ def _to_detail(food: Food, nutrients: FoodNutrient) -> FoodDetail:
         fiber_100g=_f(nutrients.fiber_100g),
         salt_100g=_f(nutrients.salt_100g),
         micros=nutrients.micros,
+        allergens=allergens or [],
     )
 
 
@@ -143,7 +169,7 @@ async def get_food(
     nutrients = await session.get(FoodNutrient, food_id)
     if nutrients is None:
         raise AppError("FOOD_NOT_FOUND", "No existe ese alimento.", status_code=404)
-    return _to_detail(food, nutrients)
+    return _to_detail(food, nutrients, await _load_allergens(session, food_id))
 
 
 async def _get_food_by_barcode(session: AsyncSession, ean: str) -> FoodDetail | None:
@@ -153,7 +179,7 @@ async def _get_food_by_barcode(session: AsyncSession, ean: str) -> FoodDetail | 
     nutrients = await session.get(FoodNutrient, food.id)
     if nutrients is None:
         return None
-    return _to_detail(food, nutrients)
+    return _to_detail(food, nutrients, await _load_allergens(session, food.id))
 
 
 @router.get("/barcode/{ean}")
@@ -235,14 +261,13 @@ class SimilarFoodsResponse(BaseModel):
 
 
 # Excluye alimentos que el usuario no puede/quiere comer (sección
-# "Alimentos similares (sustituciones)"): los que llevan un alérgeno que el
-# usuario tiene marcado como restricción de tipo 'allergen' (vía
+# "Alimentos similares (sustituciones)"): los que llevan un alérgeno al que el
+# usuario tiene una restricción de tipo 'allergen' o 'intolerance' (vía
 # `food_allergens`), y los que el propio usuario ha marcado como
-# 'disliked_food'/'banned_food' por `food_id`. `kind='intolerance'` no se
-# usa aquí a propósito — el enunciado de esta feature solo pide excluir por
-# alérgeno y por prohibido/no-me-gusta; una intolerancia no siempre implica
-# que el alimento sea inapto como sustituto (p. ej. en cantidades pequeñas),
-# así que se deja fuera de este filtro y queda para el motor de dietas.
+# 'disliked_food'/'banned_food' por `food_id`. Antes las intolerancias se
+# dejaban fuera de aquí, pero el motor de dietas y el validador de iafood ya
+# las tratan como restricción dura (sección 9): una sustitución que el plan
+# no aceptaría no debe ofrecerse.
 _SIMILAR_FOODS_SQL = text("""
     SELECT f.id, f.name_es, f.brand, n.kcal_100g,
            fv.vec <-> (SELECT vec FROM food_vectors WHERE food_id = :food_id) AS distance
@@ -254,7 +279,7 @@ _SIMILAR_FOODS_SQL = text("""
           SELECT fa.food_id
           FROM food_allergens fa
           JOIN user_restrictions ur ON ur.allergen_code = fa.allergen_code
-          WHERE ur.user_id = :user_id AND ur.kind = 'allergen'
+          WHERE ur.user_id = :user_id AND ur.kind IN ('allergen', 'intolerance')
       )
       AND fv.food_id NOT IN (
           SELECT ur2.food_id

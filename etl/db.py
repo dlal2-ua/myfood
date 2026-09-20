@@ -173,3 +173,36 @@ def upsert_foods(conn, foods: Iterable[ParsedFood], batch_size: int = _BATCH_SIZ
         flush(cur, batch)
         conn.commit()
     return count
+
+
+_DELETE_ALLERGENS_SQL = "DELETE FROM food_allergens WHERE food_id = ANY(%s) AND origin = ANY(%s)"
+_INSERT_ALLERGENS_SQL = """
+INSERT INTO food_allergens (food_id, allergen_code, origin) VALUES %s
+ON CONFLICT (food_id, allergen_code) DO NOTHING
+"""
+
+
+def replace_allergens(
+    conn,
+    food_ids: Iterable[UUID],
+    rows: Iterable[tuple[UUID, str, str]],
+    *,
+    origins: tuple[str, ...],
+    batch_size: int = 2000,
+) -> int:
+    """Sustituye los alérgenos de `origins` de esos alimentos (idempotente: repetir
+    la carga deja el mismo resultado, y si una etiqueta desaparece de la fuente
+    desaparece también de la tabla). Un alérgeno ya presente con otro origen no
+    se pisa (`ON CONFLICT DO NOTHING`): un `declared` gana a un `inferred`."""
+    ids = list(food_ids)
+    all_rows = list(rows)
+    inserted = 0
+    with conn.cursor() as cur:
+        for start in range(0, len(ids), batch_size):
+            cur.execute(_DELETE_ALLERGENS_SQL, (ids[start : start + batch_size], list(origins)))
+        for start in range(0, len(all_rows), batch_size):
+            chunk = all_rows[start : start + batch_size]
+            psycopg2.extras.execute_values(cur, _INSERT_ALLERGENS_SQL, chunk)
+            inserted += len(chunk)
+    conn.commit()
+    return inserted
