@@ -17,9 +17,14 @@ la única forma de que las columnas cifradas (perfil, medidas — R4) salgan
 descifradas en el export en vez de como texto cifrado ilegible.
 """
 
+import csv
+import io
+import json
+import zipfile
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -28,11 +33,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import (
     BodyMeasurement,
+    ChatMessage,
     Consent,
     DietPlan,
+    FastingWindow,
     FoodLog,
     NotificationRule,
     PantryItem,
+    PlanDay,
+    PlanItem,
+    PlanItemAlternative,
+    PlanMeal,
     Profile,
     Recipe,
     RecipeIngredient,
@@ -40,9 +51,11 @@ from myfood.db.models import (
     Supplement,
     SupplementLog,
     SupplementSchedule,
+    SupplementStock,
     TdeeEstimate,
     User,
     UserFavoriteFood,
+    UserRestriction,
     WaterLog,
     WaterSettings,
 )
@@ -105,15 +118,61 @@ async def get_summary(
     )
 
 
-@router.get("/export")
-async def export_data(
-    user_id: UUID = Depends(get_current_user_id),
-    session: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    user = await session.get(User, user_id)
-    if user is None:
-        raise AppError("NOT_AUTHENTICATED", "Se requiere iniciar sesión.", status_code=401)
+async def _diet_plans_with_content(session: AsyncSession, user_id: UUID) -> list[dict]:
+    """Cada plan con sus días, comidas, elementos y alternativas — antes solo salía la fila del plan
+    y el contenido (lo que de verdad importa de un plan) se quedaba fuera del export."""
+    plans = await _all_for_user(session, DietPlan, user_id)
+    if not plans:
+        return []
+    plan_ids = [p.id for p in plans]
+    days = list(await session.scalars(select(PlanDay).where(PlanDay.plan_id.in_(plan_ids))))
+    day_ids = [d.id for d in days]
+    meals = (
+        list(await session.scalars(select(PlanMeal).where(PlanMeal.plan_day_id.in_(day_ids))))
+        if day_ids
+        else []
+    )
+    meal_ids = [m.id for m in meals]
+    items = (
+        list(await session.scalars(select(PlanItem).where(PlanItem.plan_meal_id.in_(meal_ids))))
+        if meal_ids
+        else []
+    )
+    item_ids = [i.id for i in items]
+    alternatives = (
+        list(
+            await session.scalars(
+                select(PlanItemAlternative).where(PlanItemAlternative.plan_item_id.in_(item_ids))
+            )
+        )
+        if item_ids
+        else []
+    )
 
+    alternatives_by_item: dict[UUID, list[dict]] = {}
+    for alternative in alternatives:
+        alternatives_by_item.setdefault(alternative.plan_item_id, []).append(
+            _row_to_dict(alternative)
+        )
+    items_by_meal: dict[UUID, list[dict]] = {}
+    for item in items:
+        items_by_meal.setdefault(item.plan_meal_id, []).append(
+            {**_row_to_dict(item), "alternatives": alternatives_by_item.get(item.id, [])}
+        )
+    meals_by_day: dict[UUID, list[dict]] = {}
+    for meal in sorted(meals, key=lambda m: m.sort_order):
+        meals_by_day.setdefault(meal.plan_day_id, []).append(
+            {**_row_to_dict(meal), "items": items_by_meal.get(meal.id, [])}
+        )
+    days_by_plan: dict[UUID, list[dict]] = {}
+    for day in sorted(days, key=lambda d: d.day_index):
+        days_by_plan.setdefault(day.plan_id, []).append(
+            {**_row_to_dict(day), "meals": meals_by_day.get(day.id, [])}
+        )
+    return [{**_row_to_dict(p), "days": days_by_plan.get(p.id, [])} for p in plans]
+
+
+async def _build_export(session: AsyncSession, user_id: UUID, user: User) -> dict:
     profile = await session.get(Profile, user_id)
     water_settings = await session.get(WaterSettings, user_id)
 
@@ -130,14 +189,24 @@ async def export_data(
     supplements = await _all_for_user(session, Supplement, user_id)
     supplement_ids = [s.id for s in supplements]
     schedules_by_supplement: dict[str, list] = {str(sid): [] for sid in supplement_ids}
+    stock_rows: list[dict] = []
     if supplement_ids:
         schedules = await session.scalars(
             select(SupplementSchedule).where(SupplementSchedule.supplement_id.in_(supplement_ids))
         )
         for schedule in schedules:
             schedules_by_supplement[str(schedule.supplement_id)].append(_row_to_dict(schedule))
+        stock_rows = [
+            _row_to_dict(stock)
+            for stock in await session.scalars(
+                select(SupplementStock).where(SupplementStock.supplement_id.in_(supplement_ids))
+            )
+        ]
 
-    export = {
+    async def rows(model) -> list[dict]:
+        return [_row_to_dict(row) for row in await _all_for_user(session, model, user_id)]
+
+    return {
         "account": {
             "email": user.email,
             "display_name": user.display_name,
@@ -146,47 +215,95 @@ async def export_data(
             "created_at": user.created_at,
         },
         "profile": _row_to_dict(profile) if profile else None,
-        "body_measurements": [_row_to_dict(m) for m in await _all_for_user(
-            session, BodyMeasurement, user_id
-        )],
-        "food_log": [_row_to_dict(e) for e in await _all_for_user(session, FoodLog, user_id)],
+        "restrictions": await rows(UserRestriction),
+        "body_measurements": await rows(BodyMeasurement),
+        "food_log": await rows(FoodLog),
         "water_settings": _row_to_dict(water_settings) if water_settings else None,
-        "water_log": [_row_to_dict(e) for e in await _all_for_user(session, WaterLog, user_id)],
+        "water_log": await rows(WaterLog),
+        "fasting_windows": await rows(FastingWindow),
         "supplements": [
             {**_row_to_dict(s), "schedules": schedules_by_supplement[str(s.id)]}
             for s in supplements
         ],
-        "supplement_log": [
-            _row_to_dict(e) for e in await _all_for_user(session, SupplementLog, user_id)
-        ],
-        "diet_plans": [_row_to_dict(p) for p in await _all_for_user(session, DietPlan, user_id)],
+        "supplement_stock": stock_rows,
+        "supplement_log": await rows(SupplementLog),
+        "diet_plans": await _diet_plans_with_content(session, user_id),
         "recipes": [
             {**_row_to_dict(r), "ingredients": ingredients_by_recipe[str(r.id)]} for r in recipes
         ],
-        "pantry_items": [
-            _row_to_dict(i) for i in await _all_for_user(session, PantryItem, user_id)
-        ],
-        "shopping_list_items": [
-            _row_to_dict(i) for i in await _all_for_user(session, ShoppingListItem, user_id)
-        ],
-        "favorite_foods": [
-            _row_to_dict(f) for f in await _all_for_user(session, UserFavoriteFood, user_id)
-        ],
-        "tdee_estimates": [
-            _row_to_dict(e) for e in await _all_for_user(session, TdeeEstimate, user_id)
-        ],
-        "notification_rules": [
-            _row_to_dict(r) for r in await _all_for_user(session, NotificationRule, user_id)
-        ],
-        "consents": [_row_to_dict(c) for c in await _all_for_user(session, Consent, user_id)],
+        "pantry_items": await rows(PantryItem),
+        "shopping_list_items": await rows(ShoppingListItem),
+        "favorite_foods": await rows(UserFavoriteFood),
+        "tdee_estimates": await rows(TdeeEstimate),
+        "notification_rules": await rows(NotificationRule),
+        "chat_messages": await rows(ChatMessage),
+        "consents": await rows(Consent),
     }
 
-    content = jsonable_encoder(export)
-    return JSONResponse(
-        content=content,
-        headers={
-            "Content-Disposition": f'attachment; filename="myfood-export-{user_id}.json"'
-        },
+
+def _csv_cell(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict | list):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _to_csv(rows: list[dict]) -> str:
+    columns: list[str] = []
+    for row in rows:
+        for key in row:
+            if key not in columns:
+                columns.append(key)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow([_csv_cell(row.get(column)) for column in columns])
+    return buffer.getvalue()
+
+
+_README = (
+    "Exportación de tus datos de MyFood (RGPD art. 20).\n\n"
+    "- myfood-export.json: todo el histórico con su estructura completa (planes con sus días, "
+    "comidas y elementos; recetas con sus ingredientes; suplementos con sus horarios).\n"
+    "- csv/: una hoja por cada tabla con filas (registro de comidas, medidas, agua, ayunos, "
+    "suplementos, chat...) para abrir en una hoja de cálculo. Las columnas con estructura "
+    "(por ejemplo los días de un plan) van como JSON dentro de la celda.\n"
+    "Las contraseñas, las credenciales y las suscripciones push no se incluyen.\n"
+)
+
+
+@router.get("/export")
+async def export_data(
+    format: Literal["json", "zip"] = Query(default="json"),
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    """Volcado de todo el histórico del usuario: JSON (por defecto) o un zip con el JSON y un CSV
+    por cada tabla con filas."""
+    user = await session.get(User, user_id)
+    if user is None:
+        raise AppError("NOT_AUTHENTICATED", "Se requiere iniciar sesión.", status_code=401)
+
+    content = jsonable_encoder(await _build_export(session, user_id, user))
+    if format == "json":
+        return JSONResponse(
+            content=content,
+            headers={"Content-Disposition": f'attachment; filename="myfood-export-{user_id}.json"'},
+        )
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("LEEME.txt", _README)
+        zf.writestr("myfood-export.json", json.dumps(content, ensure_ascii=False, indent=2))
+        for name, value in content.items():
+            if isinstance(value, list) and value and all(isinstance(r, dict) for r in value):
+                zf.writestr(f"csv/{name}.csv", _to_csv(value))
+    return Response(
+        content=archive.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="myfood-export-{user_id}.zip"'},
     )
 
 

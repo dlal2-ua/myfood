@@ -50,6 +50,7 @@ export interface TargetsResponse {
   carbs_g: number;
   water_ml: number;
   source: "formula" | "adaptive_tdee";
+  bmr_formula: BmrFormula;
   warnings: string[];
 }
 
@@ -593,4 +594,91 @@ export interface ConsentStatus {
   version: string | null;
   granted_at: string | null;
   revoked_at: string | null;
+}
+
+export interface WeightPoint {
+  date: string;
+  weight_kg: number;
+  ma7_kg: number;
+}
+
+export interface DailyIntake {
+  date: string;
+  kcal: number;
+  protein_g: number;
+  fat_g: number;
+  carbs_g: number;
+}
+
+export interface ProgressSummary {
+  period_days: number;
+  from_date: string;
+  to_date: string;
+  weight: {
+    points: WeightPoint[];
+    start_kg: number | null;
+    end_kg: number | null;
+    change_kg: number | null;
+    trend_kg_per_week: number | null;
+  };
+  intake: {
+    logging_days: number;
+    adherence_pct: number;
+    avg_kcal: number | null;
+    avg_protein_g: number | null;
+    avg_fat_g: number | null;
+    avg_carbs_g: number | null;
+    target_kcal: number | null;
+    daily: DailyIntake[];
+  };
+  water_avg_ml: number | null;
+}
+
+export interface TdeeEstimate {
+  week_start: string;
+  estimated_tdee: number;
+  avg_intake_kcal: number;
+  weight_trend_kg: number;
+  weight_change_kg: number;
+  logging_days: number;
+  is_reliable: boolean;
+}
+
+export interface TdeeHistory {
+  current: TdeeEstimate | null;
+  source: "adaptive_tdee" | "formula";
+  history: TdeeEstimate[];
+}
+
+export interface Fasting {
+  id: string;
+  started_at: string;
+  ended_at: string | null;
+  target_hours: number;
+  elapsed_hours: number;
+  remaining_hours: number;
+  eating_window_hours: number;
+  reached_target: boolean;
+  warnings: string[];
+}
+
+export interface FastingStats {
+  period_days: number;
+  fasts: number;
+  reached_target: number;
+  adherence_pct: number | null;
+  avg_hours: number | null;
+  longest_hours: number | null;
+}
+
+export type BodyFatMethod = "navy" | "jackson3" | "jackson7" | "durnin" | "deurenberg";
+
+export interface BodyFatResult {
+  method: BodyFatMethod;
+  body_fat_pct: number;
+  lean_mass_kg: number | null;
+  ffmi: number | null;
+  bmi: number | null;
+  whtr: number | null;
+  warnings: string[];
 }

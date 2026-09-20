@@ -27,7 +27,6 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import (
-    BodyMeasurement,
     DietPlan,
     FoodNutrient,
     PlanDay,
@@ -39,7 +38,6 @@ from myfood.db.models import (
     RecipeIngredient,
 )
 from myfood.deps import get_current_user_id, get_db
-from myfood.domain import formulas
 from myfood.domain.diet_engine import DayTargets, solve_day
 from myfood.domain.food_candidates import (
     EXCLUDE_RESTRICTED_SQL,
@@ -48,6 +46,7 @@ from myfood.domain.food_candidates import (
     select_candidates,
 )
 from myfood.domain.food_groups import MEAL_KCAL_SHARES, MEAL_TEMPLATES
+from myfood.domain.targets import resolve_targets
 from myfood.errors import AppError
 
 router = APIRouter(prefix="/diet-plans", tags=["diet-plans"])
@@ -75,63 +74,9 @@ def _meal_types_for(meals_per_day: int) -> list[str]:
     return _MEAL_TYPES_BY_COUNT[clamped]
 
 
-def _age_years(birth_date: date) -> float:
-    return (date.today() - birth_date).days / 365.25
-
-
-async def _require_complete_profile(session: AsyncSession, user_id: UUID) -> Profile:
-    """Mismo requisito que `/calc/targets` (duplicado a propósito — módulos
-    independientes, ver el mismo patrón ya usado en `routers/water.py`)."""
-    profile = await session.get(Profile, user_id)
-    incomplete = (
-        profile is None
-        or profile.sex is None
-        or profile.birth_date is None
-        or profile.height_cm is None
-    )
-    if incomplete:
-        raise AppError(
-            "PROFILE_INCOMPLETE",
-            "Completa sexo, fecha de nacimiento y altura en tu perfil antes de generar un plan.",
-            status_code=422,
-        )
-    return profile
-
-
-async def _latest_weight_kg(session: AsyncSession, user_id: UUID) -> float | None:
-    stmt = (
-        select(BodyMeasurement)
-        .where(BodyMeasurement.user_id == user_id, BodyMeasurement.weight_kg.is_not(None))
-        .order_by(BodyMeasurement.measured_on.desc())
-        .limit(1)
-    )
-    measurement = await session.scalar(stmt)
-    return float(measurement.weight_kg) if measurement else None
-
-
 async def _day_targets(session: AsyncSession, user_id: UUID) -> tuple[Profile, DayTargets]:
-    profile = await _require_complete_profile(session, user_id)
-    weight_kg = await _latest_weight_kg(session, user_id)
-    if weight_kg is None:
-        raise AppError(
-            "MISSING_MEASUREMENTS",
-            "Registra tu peso en Medidas antes de generar un plan.",
-            status_code=422,
-        )
-    height_cm = float(profile.height_cm)
-    age_years = _age_years(profile.birth_date)
-
-    bmr = formulas.bmr_mifflin(profile.sex, weight_kg, height_cm, age_years)
-    tdee_value = formulas.tdee(bmr, profile.activity_level)
-    rate = float(profile.goal_rate_kg_week) if profile.goal_rate_kg_week is not None else 0.5
-    kcal, _ = formulas.calorie_target(tdee_value, profile.goal, rate, bmr, profile.sex)
-    protein_g, fat_g, carbs_g, _ = formulas.macro_targets(weight_kg, kcal, profile.goal)
-    return profile, DayTargets(
-        kcal=round(kcal, 1),
-        protein_g=round(protein_g, 1),
-        fat_g=round(fat_g, 1),
-        carbs_g=round(carbs_g, 1),
-    )
+    resolved = await resolve_targets(session, user_id, action="generar un plan")
+    return resolved.profile, resolved.day_targets()
 
 
 async def _generate_plan(

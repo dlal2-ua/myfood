@@ -566,6 +566,20 @@ class AiProposal(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class FastingWindow(Base):
+    """Ventana de ayuno intermitente (sección 6.6): abierta mientras `ended_at` es NULL."""
+
+    __tablename__ = "fasting_windows"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    target_hours: Mapped[object] = mapped_column(Numeric(4, 1), nullable=False, default=16)
+
+
 class TdeeEstimate(Base):
     """TDEE adaptativo semanal (sección 6.7 / Fase 7, `domain/tdee.py`).
 

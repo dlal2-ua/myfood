@@ -41,16 +41,14 @@ from myfood.chat.transcribe import TranscriptionUnavailable, transcribe
 from myfood.db.models import (
     AiProposal,
     AiSession,
-    BodyMeasurement,
     ChatMessage,
     DietPlan,
     Food,
-    Profile,
 )
 from myfood.db.session import AdminSessionLocal
-from myfood.domain import formulas
 from myfood.domain.diet_engine import DayTargets, solve_day_with_fixed_items
 from myfood.domain.quantity_text import resolve_grams
+from myfood.domain.targets import resolve_targets
 from myfood.errors import AppError
 
 _MAX_AUDIO_BYTES = 15 * 1024 * 1024
@@ -134,21 +132,6 @@ async def _recent_history(session: AsyncSession, user_id: UUID) -> list[tuple[st
     return [(m.role, m.content) for m in reversed(rows)]
 
 
-async def _latest_weight_kg(session: AsyncSession, user_id: UUID) -> float | None:
-    stmt = (
-        select(BodyMeasurement)
-        .where(BodyMeasurement.user_id == user_id, BodyMeasurement.weight_kg.is_not(None))
-        .order_by(BodyMeasurement.measured_on.desc())
-        .limit(1)
-    )
-    measurement = await session.scalar(stmt)
-    return float(measurement.weight_kg) if measurement else None
-
-
-def _age_years(birth_date: date) -> float:
-    return (date.today() - birth_date).days / 365.25
-
-
 async def _build_day_change_proposal(
     session: AsyncSession, user_id: UUID, ai_session: AiSession, turn: ChatTurnResult
 ) -> tuple[dict | None, str | None]:
@@ -226,24 +209,12 @@ async def _build_day_change_proposal(
     if not day_plan.feasible:
         return None, "No consigo cuadrar ese cambio numéricamente con lo que tienes disponible."
 
-    profile = await session.get(Profile, user_id)
-    weight_kg = await _latest_weight_kg(session, user_id)
-    if (
-        profile is None
-        or profile.sex is None
-        or profile.birth_date is None
-        or profile.height_cm is None
-        or weight_kg is None
-    ):
+    try:
+        resolved = await resolve_targets(session, user_id, action="pedirme cambios en el plan")
+    except AppError:
         return None, "Completa tu perfil y registra tu peso antes de pedirme cambios en el plan."
-
-    safety_floor_kcal = max(
-        formulas.bmr_mifflin(
-            profile.sex, weight_kg, float(profile.height_cm), _age_years(profile.birth_date)
-        ),
-        1200 if profile.sex == "female" else 1500,
-    )
-    min_fat_g = weight_kg * 0.5
+    safety_floor_kcal = resolved.safety_floor_kcal
+    min_fat_g = resolved.min_fat_g
     day_errors = validate_day_totals(
         day_plan.totals, targets, safety_floor_kcal=safety_floor_kcal, min_fat_g=min_fat_g
     )

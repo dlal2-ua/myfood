@@ -86,12 +86,24 @@ export default function PrivacyPage() {
               <li>{summary.diet_plans_count} planes de dieta</li>
               <li>{summary.recipes_count} recetas</li>
             </ul>
-            <a
-              href="/api/privacy/export"
-              className="mt-2 inline-block w-fit rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white"
-            >
-              Descargar todos mis datos (JSON)
-            </a>
+            <div className="mt-2 flex flex-wrap gap-3">
+              <a
+                href="/api/privacy/export"
+                className="inline-block w-fit rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white"
+              >
+                Descargar todos mis datos (JSON)
+              </a>
+              <a
+                href="/api/privacy/export?format=zip"
+                className="inline-block w-fit rounded-lg border border-neutral-300 px-4 py-2 text-sm dark:border-neutral-700"
+              >
+                Descargar en hojas de cálculo (ZIP con CSV)
+              </a>
+            </div>
+            <p className="text-xs text-neutral-500">
+              Incluye planes con sus comidas, restricciones, ayunos, suplementos y su stock, recetas y
+              el historial del chat. Las contraseñas y las credenciales no se exportan.
+            </p>
           </section>
 
           <ConsentsPanel />

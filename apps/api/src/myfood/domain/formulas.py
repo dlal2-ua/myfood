@@ -141,3 +141,122 @@ def ema_weight_trend(daily_weights: list[float], alpha: float = 0.25) -> list[fl
     for weight in daily_weights[1:]:
         trend.append(alpha * weight + (1 - alpha) * trend[-1])
     return trend
+
+
+# --- Más fórmulas de metabolismo basal (`bmr_formula`) y de grasa corporal (`bf_method`) ---
+
+
+def bmr_harris_benedict(sex: str, weight_kg: float, height_cm: float, age_years: float) -> float:
+    """Harris-Benedict revisada (Roza y Shizgal, 1984)."""
+    if sex == "male":
+        return 88.362 + 13.397 * weight_kg + 4.799 * height_cm - 5.677 * age_years
+    return 447.593 + 9.247 * weight_kg + 3.098 * height_cm - 4.330 * age_years
+
+
+def bmr_for(
+    formula: str,
+    *,
+    sex: str,
+    weight_kg: float,
+    height_cm: float,
+    age_years: float,
+    lean_mass: float | None = None,
+) -> float:
+    """BMR con la fórmula elegida. Katch y Cunningham necesitan la masa magra."""
+    if formula == "mifflin":
+        return bmr_mifflin(sex, weight_kg, height_cm, age_years)
+    if formula == "harris":
+        return bmr_harris_benedict(sex, weight_kg, height_cm, age_years)
+    if lean_mass is None:
+        raise ValueError(f"La fórmula {formula} necesita la masa magra")
+    return bmr_katch(lean_mass) if formula == "katch" else bmr_cunningham(lean_mass)
+
+
+def _siri(body_density: float) -> float:
+    """% de grasa a partir de la densidad corporal (ecuación de Siri)."""
+    return 495 / body_density - 450
+
+
+def _body_fat_result(pct: float) -> tuple[float, list[str]]:
+    return pct, ([] if 3 <= pct <= 60 else ["BODY_FAT_OUT_OF_RANGE"])
+
+
+JACKSON3_SITES = {
+    "male": ("chest", "abdomen", "thigh"),
+    "female": ("triceps", "suprailiac", "thigh"),
+}
+JACKSON7_SITES = (
+    "chest",
+    "midaxillary",
+    "triceps",
+    "subscapular",
+    "abdomen",
+    "suprailiac",
+    "thigh",
+)
+DURNIN_SITES = ("biceps", "triceps", "subscapular", "suprailiac")
+
+
+def body_fat_jackson3(
+    sex: str, age_years: float, skinfolds_mm: dict[str, float]
+) -> tuple[float, list[str]]:
+    """Jackson-Pollock de 3 pliegues: pecho, abdomen y muslo (hombres); tríceps, suprailíaco y
+    muslo (mujeres)."""
+    total = sum(skinfolds_mm[site] for site in JACKSON3_SITES[sex])
+    if sex == "male":
+        density = 1.10938 - 0.0008267 * total + 0.0000016 * total**2 - 0.0002574 * age_years
+    else:
+        density = 1.0994921 - 0.0009929 * total + 0.0000023 * total**2 - 0.0001392 * age_years
+    return _body_fat_result(_siri(density))
+
+
+def body_fat_jackson7(
+    sex: str, age_years: float, skinfolds_mm: dict[str, float]
+) -> tuple[float, list[str]]:
+    """Jackson-Pollock de 7 pliegues: pecho, axilar medio, tríceps, subescapular, abdomen,
+    suprailíaco y muslo."""
+    total = sum(skinfolds_mm[site] for site in JACKSON7_SITES)
+    if sex == "male":
+        density = 1.112 - 0.00043499 * total + 0.00000055 * total**2 - 0.00028826 * age_years
+    else:
+        density = 1.097 - 0.00046971 * total + 0.00000056 * total**2 - 0.00012828 * age_years
+    return _body_fat_result(_siri(density))
+
+
+# Coeficientes (c, m) de Durnin y Womersley (1974): densidad = c - m * log10(suma de 4 pliegues).
+_DURNIN = {
+    "male": [
+        (19, 1.1620, 0.0630),
+        (29, 1.1631, 0.0632),
+        (39, 1.1422, 0.0544),
+        (49, 1.1620, 0.0700),
+        (200, 1.1715, 0.0779),
+    ],
+    "female": [
+        (19, 1.1549, 0.0678),
+        (29, 1.1599, 0.0717),
+        (39, 1.1423, 0.0632),
+        (49, 1.1333, 0.0612),
+        (200, 1.1339, 0.0645),
+    ],
+}
+
+
+def body_fat_durnin(
+    sex: str, age_years: float, skinfolds_mm: dict[str, float]
+) -> tuple[float, list[str]]:
+    """Durnin-Womersley: bíceps, tríceps, subescapular y suprailíaco. Válida a partir de 17 años."""
+    total = sum(skinfolds_mm[site] for site in DURNIN_SITES)
+    _upper, c, m = next(row for row in _DURNIN[sex] if age_years <= row[0])
+    pct, warnings = _body_fat_result(_siri(c - m * log10(total)))
+    if age_years < 17:
+        warnings = [*warnings, "DURNIN_NOT_VALIDATED_UNDER_17"]
+    return pct, warnings
+
+
+def body_fat_deurenberg(sex: str, age_years: float, bmi_value: float) -> tuple[float, list[str]]:
+    """Deurenberg: estimación a partir del IMC, la edad y el sexo (sin pliegues ni cinta). Es la
+    menos precisa: infravalora la grasa en personas musculadas y la sobrevalora en mayores."""
+    pct = 1.20 * bmi_value + 0.23 * age_years - 10.8 * (1 if sex == "male" else 0) - 5.4
+    pct, warnings = _body_fat_result(pct)
+    return pct, [*warnings, "BMI_BASED_ESTIMATE"]

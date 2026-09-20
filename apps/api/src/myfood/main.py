@@ -9,6 +9,7 @@ from myfood.routers import (
     calc,
     consents,
     diet_plans,
+    fasting,
     favorites,
     foods,
     gamification,
@@ -19,6 +20,7 @@ from myfood.routers import (
     pantry,
     privacy,
     profile,
+    progress,
     push,
     receipts,
     recipes,
@@ -46,6 +48,8 @@ app.include_router(shopping_list.router, prefix="/api")
 app.include_router(pantry.router, prefix="/api")
 app.include_router(household.router, prefix="/api")
 app.include_router(gamification.router, prefix="/api")
+app.include_router(progress.router, prefix="/api")
+app.include_router(fasting.router, prefix="/api")
 app.include_router(privacy.router, prefix="/api")
 app.include_router(supplements.router, prefix="/api")
 app.include_router(water.router, prefix="/api")

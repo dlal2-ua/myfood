@@ -199,3 +199,79 @@ def test_ema_weight_trend_smooths_noise():
     assert trend == pytest.approx([80, 79.95, 79.8375, 79.853125, 79.78984375])
     # La EMA amortigua el pico de 79.9: la tendencia sube menos que el dato bruto.
     assert trend[3] < 79.9
+
+
+# --- Harris-Benedict y métodos de grasa corporal por pliegues -----------------------------------
+# Los valores esperados están calculados aparte con los coeficientes de cada publicación.
+
+import pytest  # noqa: E402
+
+from myfood.domain import formulas  # noqa: E402
+
+
+def test_harris_benedict_revised_male_and_female():
+    assert formulas.bmr_harris_benedict("male", 80, 180, 30) == pytest.approx(1853.632, abs=0.01)
+    assert formulas.bmr_harris_benedict("female", 60, 165, 30) == pytest.approx(1383.683, abs=0.01)
+
+
+def test_bmr_for_dispatches_by_formula():
+    kwargs = dict(sex="male", weight_kg=80, height_cm=180, age_years=30)
+    assert formulas.bmr_for("mifflin", **kwargs) == formulas.bmr_mifflin("male", 80, 180, 30)
+    assert formulas.bmr_for("harris", **kwargs) == formulas.bmr_harris_benedict("male", 80, 180, 30)
+    assert formulas.bmr_for("katch", lean_mass=65, **kwargs) == formulas.bmr_katch(65)
+    assert formulas.bmr_for("cunningham", lean_mass=65, **kwargs) == formulas.bmr_cunningham(65)
+
+
+def test_katch_and_cunningham_need_the_lean_mass():
+    with pytest.raises(ValueError):
+        formulas.bmr_for("katch", sex="male", weight_kg=80, height_cm=180, age_years=30)
+
+
+def test_jackson_pollock_3_sites_male_and_female():
+    male = {"chest": 10, "abdomen": 20, "thigh": 15, "triceps": 99}
+    female = {"triceps": 15, "suprailiac": 12, "thigh": 20, "chest": 99}
+    assert formulas.body_fat_jackson3("male", 30, male)[0] == pytest.approx(13.61, abs=0.05)
+    assert formulas.body_fat_jackson3("female", 28, female)[0] == pytest.approx(19.64, abs=0.05)
+
+
+def test_jackson_pollock_7_sites_male_and_female():
+    male = dict(
+        chest=10, midaxillary=12, triceps=10, subscapular=14, abdomen=20, suprailiac=15, thigh=15
+    )
+    female = dict(
+        chest=12, midaxillary=10, triceps=15, subscapular=14, abdomen=18, suprailiac=16, thigh=20
+    )
+    assert formulas.body_fat_jackson7("male", 35, male)[0] == pytest.approx(14.69, abs=0.05)
+    assert formulas.body_fat_jackson7("female", 40, female)[0] == pytest.approx(22.0, abs=0.05)
+
+
+@pytest.mark.parametrize(
+    ("sex", "age", "folds", "expected"),
+    [
+        ("male", 25, dict(biceps=6, triceps=10, subscapular=12, suprailiac=14), 16.76),
+        ("male", 55, dict(biceps=6, triceps=10, subscapular=12, suprailiac=14), 23.66),
+        ("female", 45, dict(biceps=8, triceps=15, subscapular=14, suprailiac=16), 31.62),
+    ],
+)
+def test_durnin_womersley_uses_the_coefficients_of_the_age_group(sex, age, folds, expected):
+    pct, warnings = formulas.body_fat_durnin(sex, age, folds)
+    assert pct == pytest.approx(expected, abs=0.05)
+    assert warnings == []
+
+
+def test_durnin_warns_under_seventeen():
+    folds = dict(biceps=6, triceps=10, subscapular=12, suprailiac=14)
+    assert "DURNIN_NOT_VALIDATED_UNDER_17" in formulas.body_fat_durnin("male", 15, folds)[1]
+
+
+def test_deurenberg_from_bmi_and_always_says_it_is_an_estimate():
+    male, warnings = formulas.body_fat_deurenberg("male", 30, 24.0)
+    female, _ = formulas.body_fat_deurenberg("female", 30, 24.0)
+    assert male == pytest.approx(19.5)
+    assert female == pytest.approx(30.3)
+    assert "BMI_BASED_ESTIMATE" in warnings
+
+
+def test_an_impossible_body_fat_is_flagged():
+    _, warnings = formulas.body_fat_deurenberg("male", 20, 10.0)
+    assert "BODY_FAT_OUT_OF_RANGE" in warnings
