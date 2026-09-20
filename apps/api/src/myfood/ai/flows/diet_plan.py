@@ -25,6 +25,7 @@ POST /ai/diet-plan            (api)
 
 from __future__ import annotations
 
+import random
 import uuid
 from datetime import date, timedelta
 from uuid import UUID
@@ -52,7 +53,11 @@ from myfood.domain.diet_engine import (
     DayTargets,
     solve_day_with_fixed_items,
 )
-from myfood.domain.food_candidates import select_candidates
+from myfood.domain.food_candidates import (
+    IAFOOD_POOL_PER_GROUP,
+    sample_day_pool,
+    select_candidates,
+)
 from myfood.errors import AppError
 
 _MAX_RETRY_ATTEMPTS = 2
@@ -153,7 +158,11 @@ async def request_diet_plan(session: AsyncSession, user_id: UUID, *, num_days: i
     profile, _weight_kg, targets = await _day_targets(session, user_id)
     meal_types = _meal_types_for(profile.meals_per_day)
 
-    candidates = await select_candidates(session, user_id)
+    candidates = sample_day_pool(
+        await select_candidates(session, user_id),
+        random.Random(uuid.uuid4().hex),
+        per_group=IAFOOD_POOL_PER_GROUP,
+    )
     if not candidates:
         raise AppError(
             "NO_CANDIDATE_FOODS",

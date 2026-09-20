@@ -12,6 +12,7 @@ from myfood.cache import get_cached_barcode_lookup, set_cached_barcode_lookup
 from myfood.db.models import Food, FoodNutrient
 from myfood.db.session import get_session
 from myfood.deps import get_current_user_id, get_db
+from myfood.domain.food_candidates import find_alternatives
 from myfood.errors import AppError
 from myfood.off_client import fetch_product
 from myfood.search import search_foods
@@ -320,57 +321,28 @@ class SimilarFoodItem(BaseModel):
     brand: str | None
     kcal_100g: float | None
     distance: float
+    # Cantidad de esta alternativa que equivale a `grams` del original (conserva kcal o proteína).
+    grams: float
 
 
 class SimilarFoodsResponse(BaseModel):
     items: list[SimilarFoodItem]
 
 
-# Excluye alimentos que el usuario no puede/quiere comer (sección
-# "Alimentos similares (sustituciones)"): los que llevan un alérgeno al que el
-# usuario tiene una restricción de tipo 'allergen' o 'intolerance' (vía
-# `food_allergens`), y los que el propio usuario ha marcado como
-# 'disliked_food'/'banned_food' por `food_id`. Antes las intolerancias se
-# dejaban fuera de aquí, pero el motor de dietas y el validador de iafood ya
-# las tratan como restricción dura (sección 9): una sustitución que el plan
-# no aceptaría no debe ofrecerse.
-_SIMILAR_FOODS_SQL = text("""
-    SELECT f.id, f.name_es, f.brand, n.kcal_100g,
-           fv.vec <-> (SELECT vec FROM food_vectors WHERE food_id = :food_id) AS distance
-    FROM food_vectors fv
-    JOIN foods f ON f.id = fv.food_id
-    JOIN food_nutrients n ON n.food_id = f.id
-    WHERE fv.food_id != :food_id
-      AND fv.food_id NOT IN (
-          SELECT fa.food_id
-          FROM food_allergens fa
-          JOIN user_restrictions ur ON ur.allergen_code = fa.allergen_code
-          WHERE ur.user_id = :user_id AND ur.kind IN ('allergen', 'intolerance')
-      )
-      AND fv.food_id NOT IN (
-          SELECT ur2.food_id
-          FROM user_restrictions ur2
-          WHERE ur2.user_id = :user_id
-            AND ur2.kind IN ('disliked_food', 'banned_food')
-            AND ur2.food_id IS NOT NULL
-      )
-    ORDER BY distance
-    LIMIT :limit
-""")
-
-
 @router.get("/{food_id}/similar")
 async def get_similar_foods(
     food_id: UUID,
     limit: int = Query(default=3, ge=1, le=20),
+    keep: Literal["kcal", "protein"] = "kcal",
+    grams: float = Query(default=100, gt=0, le=5000),
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> SimilarFoodsResponse:
-    """Alimentos nutricionalmente similares para sustitución (distancia L2
-    sobre `food_vectors`, ver `domain/food_vector.py`) — usado por el
-    frontend en la sección "Alimentos similares (sustituciones)" y, más
-    adelante, por el motor de dietas para proponer alternativas
-    (`plan_item_alternatives.distance`, que este endpoint no escribe)."""
+    """Alternativas para sustituir un alimento: nutricionalmente parecidas (distancia L2 sobre
+    `food_vectors`, ver `domain/food_vector.py`), del mismo grupo alimentario y permitidas por
+    las restricciones del usuario (alérgenos, intolerancias, vetados). Cada una trae los gramos
+    ya recalculados para conservar las kcal (`keep=kcal`) o la proteína (`keep=protein`) de
+    `grams` del original — nunca se ofrece una alternativa sin ajustar."""
     food = await session.get(Food, food_id)
     if food is None:
         raise AppError("FOOD_NOT_FOUND", "No existe ese alimento.", status_code=404)
@@ -385,22 +357,20 @@ async def get_similar_foods(
             status_code=404,
         )
 
-    rows = (
-        await session.execute(
-            _SIMILAR_FOODS_SQL,
-            {"food_id": str(food_id), "user_id": str(user_id), "limit": limit},
-        )
-    ).all()
+    alternatives = await find_alternatives(
+        session, food_id, grams, user_id, keep=keep, limit=limit
+    )
     return SimilarFoodsResponse(
         items=[
             SimilarFoodItem(
-                id=str(row.id),
-                name_es=row.name_es,
-                brand=row.brand,
-                kcal_100g=_f(row.kcal_100g),
-                distance=float(row.distance),
+                id=str(alt.food_id),
+                name_es=alt.name_es,
+                brand=alt.brand,
+                kcal_100g=alt.kcal_100g,
+                distance=alt.distance,
+                grams=alt.grams,
             )
-            for row in rows
+            for alt in alternatives
         ]
     )
 

@@ -35,15 +35,41 @@ estiman para "completar" el modelo — R9 aplica también a precios/tiempos):
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import pulp
+
+from myfood.domain.food_groups import MealTemplate
 
 MAX_GRAMS_PER_ITEM = 400.0
 MIN_GRAMS_PER_ITEM = 20.0
 MAX_ITEMS_PER_MEAL = 4
 VARIETY_PENALTY_WEIGHT = 0.05
 SOLVER_TIME_LIMIT_SECONDS = 10
+GRAMS_STEP = 5.0
+# El solver para cuando está a menos de este margen relativo del óptimo: pulir el último 1 % cuesta
+# segundos y no cambia el plan.
+SOLVER_GAP_REL = 0.01
+
+# Pesos de las desviaciones (sección 9): la proteína pesa más porque es el macro que peor tolera
+# quedarse corto. Se aplican sobre la desviación relativa al propio objetivo.
+DEVIATION_WEIGHTS = {"kcal": 1.0, "protein": 1.5, "fat": 0.6, "carbs": 0.4}
+# Margen relativo dentro del cual no se penaliza la desviación de cada objetivo: clavar los
+# números al gramo obliga a añadir «rellenos» de 20 g que nadie pondría en un plato, y un plan que
+# se queda a un 2 % de las kcal es igual de bueno.
+DEVIATION_DEADBAND = {"kcal": 0.02, "protein": 0.03, "fat": 0.06, "carbs": 0.06}
+# Peso de acercar cada comida a su parte de las kcal del día: sin él el solver concentra casi todo
+# en una sola comida (probado a mano: desayuno enorme y cena de 20 g de judías verdes).
+MEAL_SHARE_WEIGHT = 0.25
+# Una comida con muy pocos alimentos vale más que una con muchos que apenas aportan.
+ITEM_COUNT_TIEBREAK = 0.003
+# Bonificación por cada alimento «de diario» (pollo, merluza, tomate…) que entra en una comida:
+# a igualdad de macros, el solver prefiere lo que la gente cocina de verdad.
+STAPLE_BONUS = 0.01
+# Si las kcal del día se desvían más de esto del objetivo, el día se marca `TARGETS_NOT_MET`.
+KCAL_TOLERANCE = 0.05
+TARGETS_NOT_MET = "TARGETS_NOT_MET"
 
 
 @dataclass
@@ -57,6 +83,17 @@ class CandidateFood:
     # Solo la usa `ai/anonymize.py` (sección 10.2) para dar contexto de
     # categoría al LLM — el solver de este módulo nunca la lee.
     category: str | None = None
+    # Grupo alimentario (`domain/food_groups.py`) y cantidades razonables para ese alimento. Con
+    # `group` el solver arma cada comida con los grupos que le tocan; sin él (candidatos genéricos,
+    # como en los tests puros) se comporta como antes.
+    group: str | None = None
+    min_grams: float | None = None
+    max_grams: float | None = None
+    # Solo los usa la selección del pool de cada día (`food_candidates.sample_day_pool`), no el
+    # solver: fuente del dato y si el producto trae los datos nutricionales completos.
+    source: str | None = None
+    complete_data: bool = False
+    staple: bool = False
 
 
 @dataclass
@@ -84,90 +121,188 @@ class DayPlan:
     feasible: bool
     meals: list[PlannedMeal]
     totals: DayTargets
+    # `False` si el solver agotó el tiempo y devuelve la mejor solución que encontró.
+    is_optimal: bool = True
+    # `TARGETS_NOT_MET` si las kcal del día quedan a más de un 5 % del objetivo.
+    warning: str | None = None
+
+
+def _round_to_step(grams: float, step: float) -> float:
+    return round(grams / step) * step if step > 0 else round(grams, 1)
+
+
+# A partir de cuatro usos repetir un alimento ya no cuesta más: sin tope, en un catálogo pequeño la
+# penalización acumulada acabaría pesando más que cumplir los objetivos.
+MAX_COUNTED_USES = 4
+
+
+def _used_count(recently_used: frozenset[str] | Mapping[str, int], food_id: str) -> int:
+    if isinstance(recently_used, Mapping):
+        return min(int(recently_used.get(food_id, 0)), MAX_COUNTED_USES)
+    return 1 if food_id in recently_used else 0
 
 
 def solve_day(
     candidates: list[CandidateFood],
     targets: DayTargets,
     meal_types: list[str],
-    recently_used_food_ids: frozenset[str] = frozenset(),
+    recently_used_food_ids: frozenset[str] | Mapping[str, int] = frozenset(),
     *,
     max_items_per_meal: int = MAX_ITEMS_PER_MEAL,
     min_grams_per_item: float = MIN_GRAMS_PER_ITEM,
     max_grams_per_item: float = MAX_GRAMS_PER_ITEM,
     variety_penalty_weight: float = VARIETY_PENALTY_WEIGHT,
+    meal_kcal_shares: Mapping[str, float] | None = None,
+    meal_templates: Mapping[str, MealTemplate] | None = None,
+    grams_step: float = GRAMS_STEP,
+    time_limit_seconds: int = SOLVER_TIME_LIMIT_SECONDS,
 ) -> DayPlan:
     """Genera un único día de plan. El llamador itera esta función día a día
-    para una semana completa, acumulando `recently_used_food_ids` — resolver
-    la semana entera de una vez dispararía el tamaño del MIP sin necesidad
-    (sección "Motor de generación de dietas" no exige optimalidad conjunta,
-    solo variedad razonable entre días)."""
+    para una semana completa, acumulando `recently_used_food_ids` (o cuántas
+    veces se ha usado cada alimento) — resolver la semana entera de una vez
+    dispararía el tamaño del MIP sin necesidad (sección "Motor de generación
+    de dietas" no exige optimalidad conjunta, solo variedad razonable entre días).
+
+    - `meal_kcal_shares`: parte de las kcal del día que le toca a cada comida; se persigue
+      como meta blanda, no como restricción, para que el problema nunca sea infactible.
+    - `meal_templates`: qué grupos alimentarios entran en cada comida (y cuántos), para los
+      candidatos que traen `group`. Un candidato sin grupo puede ir en cualquier comida.
+    - Los gramos se redondean a múltiplos de `grams_step` y los totales se recalculan con ellos.
+    """
     if not candidates or not meal_types:
         return DayPlan(feasible=False, meals=[], totals=DayTargets(0, 0, 0, 0))
 
+    def _allowed(food: CandidateFood, meal: str) -> bool:
+        if meal_templates is None or food.group is None:
+            return True
+        template = meal_templates.get(meal)
+        return template is None or food.group in template.caps
+
+    def _bounds(food: CandidateFood) -> tuple[float, float]:
+        low = food.min_grams if food.min_grams is not None else min_grams_per_item
+        high = food.max_grams if food.max_grams is not None else max_grams_per_item
+        return low, high
+
     food_by_id = {f.id: f for f in candidates}
+    meal_candidates = {m: [f for f in candidates if _allowed(f, m)] for m in meal_types}
+    active_meals = [m for m in meal_types if meal_candidates[m]]
+    if not active_meals:
+        return DayPlan(feasible=False, meals=[], totals=DayTargets(0, 0, 0, 0))
+
     prob = pulp.LpProblem("myfood_day_plan", pulp.LpMinimize)
 
     x: dict[tuple[str, str], pulp.LpVariable] = {}
     y: dict[tuple[str, str], pulp.LpVariable] = {}
-    for meal in meal_types:
-        for food in candidates:
+    for meal in active_meals:
+        template = meal_templates.get(meal) if meal_templates else None
+        for food in meal_candidates[meal]:
+            low, high = _bounds(food)
             key = (meal, food.id)
-            x[key] = pulp.LpVariable(f"x_{meal}_{food.id}", lowBound=0, upBound=max_grams_per_item)
+            x[key] = pulp.LpVariable(f"x_{meal}_{food.id}", lowBound=0, upBound=high)
             y[key] = pulp.LpVariable(f"y_{meal}_{food.id}", cat="Binary")
-            prob += x[key] <= max_grams_per_item * y[key]
-            prob += x[key] >= min_grams_per_item * y[key]
-        prob += pulp.lpSum(y[meal, f.id] for f in candidates) <= max_items_per_meal
-        prob += pulp.lpSum(y[meal, f.id] for f in candidates) >= 1
+            prob += x[key] <= high * y[key]
+            prob += x[key] >= low * y[key]
+        cap = template.max_items if template is not None else max_items_per_meal
+        prob += pulp.lpSum(y[meal, f.id] for f in meal_candidates[meal]) <= cap
+        prob += pulp.lpSum(y[meal, f.id] for f in meal_candidates[meal]) >= 1
 
-    def _total(attr: str) -> pulp.LpAffineExpression:
+        if template is not None:
+            for group, group_cap in template.caps.items():
+                members = [f for f in meal_candidates[meal] if f.group == group]
+                if members:
+                    prob += pulp.lpSum(y[meal, f.id] for f in members) <= group_cap
+            for union, union_cap in template.union_caps:
+                members = [f for f in meal_candidates[meal] if f.group in union]
+                if members:
+                    prob += pulp.lpSum(y[meal, f.id] for f in members) <= union_cap
+            for required in template.required:
+                members = [f for f in meal_candidates[meal] if f.group in required]
+                if members:  # sin candidatos de ese grupo no se puede exigir
+                    prob += pulp.lpSum(y[meal, f.id] for f in members) >= 1
+
+    def _expr(attr: str, meals: list[str]) -> pulp.LpAffineExpression:
         return pulp.lpSum(
-            x[meal, f.id] * getattr(f, attr) / 100 for meal in meal_types for f in candidates
+            x[meal, f.id] * getattr(f, attr) / 100 for meal in meals for f in meal_candidates[meal]
         )
 
-    kcal_total = _total("kcal_100g")
-    protein_total = _total("protein_100g")
-    fat_total = _total("fat_100g")
-    carbs_total = _total("carbs_100g")
-
     deviation_terms = []
-    for name, total_expr, target_value in (
-        ("kcal", kcal_total, targets.kcal),
-        ("protein", protein_total, targets.protein_g),
-        ("fat", fat_total, targets.fat_g),
-        ("carbs", carbs_total, targets.carbs_g),
+    for name, attr, target_value in (
+        ("kcal", "kcal_100g", targets.kcal),
+        ("protein", "protein_100g", targets.protein_g),
+        ("fat", "fat_100g", targets.fat_g),
+        ("carbs", "carbs_100g", targets.carbs_g),
     ):
         pos = pulp.LpVariable(f"dev_{name}_pos", lowBound=0)
         neg = pulp.LpVariable(f"dev_{name}_neg", lowBound=0)
-        prob += total_expr - target_value == pos - neg
+        band = DEVIATION_DEADBAND[name] * target_value
+        expr = _expr(attr, active_meals)
+        prob += expr - target_value <= band + pos
+        prob += target_value - expr <= band + neg
         # Escalado por el propio objetivo: sin esto, la desviación de kcal
         # (cientos/miles) dominaría sobre la de proteína (decenas/cientos) y
         # el solver ignoraría de facto los macros para pulir solo kcal.
         scale = max(target_value, 1.0)
-        deviation_terms.append((pos + neg) / scale)
+        deviation_terms.append(DEVIATION_WEIGHTS[name] * (pos + neg) / scale)
 
-    variety_terms = [
-        variety_penalty_weight * y[meal, food_id]
-        for meal in meal_types
-        for food_id in recently_used_food_ids
-        if (meal, food_id) in y
+    share_terms = []
+    if meal_kcal_shares:
+        share_total = sum(meal_kcal_shares.get(m, 0.0) for m in active_meals) or 1.0
+        for meal in active_meals:
+            meal_target = targets.kcal * meal_kcal_shares.get(meal, 0.0) / share_total
+            if meal_target <= 0:
+                continue
+            pos = pulp.LpVariable(f"meal_{meal}_pos", lowBound=0)
+            neg = pulp.LpVariable(f"meal_{meal}_neg", lowBound=0)
+            prob += _expr("kcal_100g", [meal]) - meal_target == pos - neg
+            share_terms.append(MEAL_SHARE_WEIGHT * (pos + neg) / meal_target)
+
+    variety_terms = []
+    for meal in active_meals:
+        for food in meal_candidates[meal]:
+            count = _used_count(recently_used_food_ids, food.id)
+            if count:
+                variety_terms.append(variety_penalty_weight * count * y[meal, food.id])
+
+    item_terms = [ITEM_COUNT_TIEBREAK * y[key] for key in y]
+    staple_terms = [
+        -STAPLE_BONUS * y[meal, f.id]
+        for meal in active_meals
+        for f in meal_candidates[meal]
+        if f.staple
     ]
 
-    prob += pulp.lpSum(deviation_terms) + pulp.lpSum(variety_terms)
-    prob.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=SOLVER_TIME_LIMIT_SECONDS))
+    prob += (
+        pulp.lpSum(deviation_terms)
+        + pulp.lpSum(share_terms)
+        + pulp.lpSum(variety_terms)
+        + pulp.lpSum(item_terms)
+        + pulp.lpSum(staple_terms)
+    )
+    prob.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit_seconds, gapRel=SOLVER_GAP_REL))
+    is_optimal = prob.sol_status == pulp.LpSolutionOptimal
 
     meals_out = []
     for meal in meal_types:
-        items = [
-            PlannedItem(food_id=food.id, grams=round(grams, 1))
-            for food in candidates
-            if (grams := x[meal, food.id].value()) and grams > 0.5
-        ]
+        items = []
+        for food in meal_candidates[meal]:
+            variable = x.get((meal, food.id))
+            raw = variable.value() if variable is not None else None
+            if not raw or raw <= 0.5:
+                continue
+            low, high = _bounds(food)
+            grams = min(max(_round_to_step(raw, grams_step), low), high)
+            items.append(PlannedItem(food_id=food.id, grams=round(grams, 1)))
         meals_out.append(PlannedMeal(meal_type=meal, items=items))
 
     feasible = any(m.items for m in meals_out)
     totals = _actual_totals(meals_out, food_by_id) if feasible else DayTargets(0, 0, 0, 0)
-    return DayPlan(feasible=feasible, meals=meals_out, totals=totals)
+    warning = None
+    off_target = abs(totals.kcal - targets.kcal) > targets.kcal * KCAL_TOLERANCE
+    if feasible and targets.kcal > 0 and off_target:
+        warning = TARGETS_NOT_MET
+    return DayPlan(
+        feasible=feasible, meals=meals_out, totals=totals, is_optimal=is_optimal, warning=warning
+    )
 
 
 def solve_day_with_fixed_items(

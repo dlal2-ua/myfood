@@ -14,6 +14,10 @@ iafood (Fase 5) — mismo comportamiento, solo relocalizado.
 
 from __future__ import annotations
 
+import functools
+import random
+import re
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import text
@@ -21,43 +25,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import PlanItemAlternative
 from myfood.domain.diet_engine import CandidateFood
-
-CANDIDATE_BUCKET_SIZE = 40
-
-# Alimentos con más proteína/carbohidrato/grasa respectivamente, más los de
-# mejor `quality_rank` en general — un candidato puede aparecer en varios
-# cubos, se deduplica por id. Heurística simple (documentada como tal en
-# `domain/diet_engine.py`): el catálogo no tiene una taxonomía de grupos de
-# alimentos limpia entre fuentes (USDA/CIQUAL/BEDCA/OFF), así que no se
-# puede pedir "N por grupo" de forma fiable — esto garantiza que el solver
-# tenga materia prima de cada macronutriente en vez de un muestreo que por
-# azar salga, p. ej., todo verduras bajas en proteína.
-#
-# Deliberadamente SIN cubo de fibra: el solver no optimiza fibra (no es uno
-# de sus objetivos, ver `domain/diet_engine.py`), así que ese cubo solo
-# aportaba candidatos elegidos por un criterio que nadie iba a usar —
-# encontrado así probando un plan real: arrastraba salvado de maíz, algas
-# deshidratadas y similares (altísima fibra, pero nadie se come 300 g de
-# alga seca), inflando kcal/macros sin ningún beneficio a cambio.
-CANDIDATE_BUCKETS = (
-    "fn.protein_100g DESC",
-    "fn.carbs_100g DESC",
-    "fn.fat_100g DESC",
-    "f.quality_rank ASC",
+from myfood.domain.food_groups import (
+    OIL_FAT,
+    PLANNABLE_GROUPS,
+    classify_food,
+    gram_bounds,
+    is_staple,
 )
 
-# Un alimento "de verdad" (no un ingrediente concentrado como aceite puro,
-# manteca, o un producto casi sin calorías como un caldo o una infusión) cae
-# casi siempre en este rango de kcal/100g — filtro simple pero efectivo
-# para dejar fuera aceites/grasas puras (aceite de oliva ronda 884 kcal,
-# manteca vegetal ~900) y productos casi vacíos de kcal (salvados, algas
-# deshidratadas, edulcorantes) que de otro modo dominan los cubos de arriba
-# por su densidad de macro sin ser algo que se coma en cantidad real.
-# Limitación conocida de esta v1: los aceites/grasas de cocina quedan fuera
-# de la selección automática (se añaden en la preparación, no como "un
-# alimento" discreto del plan) — no se modela todavía.
-MIN_REALISTIC_KCAL_100G = 20
-MAX_REALISTIC_KCAL_100G = 600
+# Solo se arman planes con alimentos de fuentes con nombre en español: el catálogo de USDA y
+# CIQUAL trae los nombres en inglés y francés y un plan con «Beef, chuck, arm pot roast…» no lo
+# puede leer nadie. Siguen siendo buscables y registrables; solo quedan fuera del motor y de las
+# alternativas de un plan hasta que tengan nombre en español.
+PLAN_SOURCES = ("bedca", "off")
+
+# Rango de kcal/100 g que tiene sentido para un alimento de cada grupo. Los aceites (~880) y los
+# frutos secos (~650) quedan fuera del rango general porque son grasa concentrada por naturaleza;
+# los alimentos casi sin energía (algas secas, edulcorantes) ni entran en ningún plan.
+_KCAL_RANGE: dict[str, tuple[float, float]] = {
+    OIL_FAT: (500.0, 900.0),
+    "nuts": (300.0, 750.0),
+}
+_DEFAULT_KCAL_RANGE = (20.0, 600.0)
+
+_SIMPLE_NAME = re.compile(r"^[^\d]{3,42}$")
 
 # Alergias E intolerancias (sección 9: "restricciones duras: alergias,
 # intolerancias y alimentos vetados"): una intolerancia a la lactosa es un
@@ -97,102 +88,271 @@ EXCLUDE_NON_STAPLE_CATEGORY_SQL = f"""
     (f.category IS NULL OR f.category !~* '{NON_STAPLE_CATEGORY_PATTERN}')
 """
 
-# Dos comprobaciones más, encontradas verificando a mano la salida de un
-# plan generado de verdad contra el catálogo completo (no hipotéticas):
-#
-# 1. Ningún macronutriente por sí solo debe aportar más del 90% de las
-#    kcal declaradas — deja fuera azúcar/almidón/grasa/proteína puros
-#    (p. ej. "Azúcar blanco": 100% de las kcal vienen de carbohidratos).
-#    Sin esto el solver combina varios "ingredientes puros" de un solo
-#    macronutriente cada uno en vez de alimentos reales con varios
-#    macros a la vez, y la kcal total se dispara como efecto secundario
-#    de sumar varias masas grandes independientes.
-# 2. `kcal_100g` declarado debe ser razonablemente coherente con el que
-#    implican sus propias macros (proteína/carbohidratos 4 kcal/g, grasa
-#    9 kcal/g) — encontrado un caso real de dato erróneo en el catálogo
-#    ("Queso de alcampo": declara 6 kcal/100g con 55 g de proteína y 36 g
-#    de grasa, que a solas ya implican >540 kcal) que las reglas de
-#    descarte del ETL (sección 11.2) no detectan porque solo comprueban
-#    "sin kcal" / "kcal>900" / "macros>100g", nunca la coherencia
-#    kcal-vs-macros. Margen amplio (0,5×-2×) para no descartar variación
-#    real de redondeo/medición, no para "arreglar" el dato.
-MACRO_CONSISTENCY_SQL = """
-    AND GREATEST(fn.protein_100g * 4, fn.fat_100g * 9, fn.carbs_100g * 4) <= fn.kcal_100g * 0.9
-    AND fn.kcal_100g >= (fn.protein_100g * 4 + fn.fat_100g * 9 + fn.carbs_100g * 4) * 0.5
-    AND fn.kcal_100g
-        <= GREATEST((fn.protein_100g * 4 + fn.fat_100g * 9 + fn.carbs_100g * 4) * 2.0, 50)
-"""
+_CANDIDATES_SQL = text(f"""
+    SELECT f.id, f.name_es, f.category, f.source, f.nutriscore_grade,
+           fn.kcal_100g, fn.protein_100g, fn.fat_100g, fn.carbs_100g
+    FROM foods f
+    JOIN food_nutrients fn ON fn.food_id = f.id
+    WHERE f.kind IN ('generic', 'branded')
+      AND f.source = ANY(:sources)
+      AND fn.kcal_100g BETWEEN 20 AND 900
+      AND {EXCLUDE_RESTRICTED_SQL}
+      AND {EXCLUDE_NON_STAPLE_CATEGORY_SQL}
+""")
+
+
+@functools.lru_cache(maxsize=32768)
+def _group_of(name: str, category: str | None) -> str:
+    return classify_food(name, category)
+
+
+def _plausible(group: str, kcal: float, protein: float, fat: float, carbs: float) -> bool:
+    """Descarta datos incoherentes: kcal fuera del rango del grupo o que no cuadran con sus
+    propios macros (proteína/carbohidratos 4 kcal/g, grasa 9 kcal/g). Margen amplio (0,5×–2×)
+    para no descartar variación real de redondeo o medición; no «arregla» ningún dato."""
+    low, high = _KCAL_RANGE.get(group, _DEFAULT_KCAL_RANGE)
+    if not low <= kcal <= high:
+        return False
+    implied = protein * 4 + fat * 9 + carbs * 4
+    if kcal < implied * 0.5 or kcal > max(implied * 2.0, 50):
+        return False
+    # Ningún macro por sí solo debe dar más del 90 % de las kcal (azúcar, almidón o proteína
+    # puros), salvo en las grasas de cocina, que sí lo son.
+    return group == OIL_FAT or max(protein * 4, fat * 9, carbs * 4) <= kcal * 0.9
 
 
 async def select_candidates(session: AsyncSession, user_id: UUID) -> list[CandidateFood]:
-    seen: dict[str, CandidateFood] = {}
-    for order_by in CANDIDATE_BUCKETS:
-        stmt = text(f"""
-            SELECT f.id, f.name_es, f.category, fn.kcal_100g, fn.protein_100g,
-                   fn.fat_100g, fn.carbs_100g
-            FROM foods f
-            JOIN food_nutrients fn ON fn.food_id = f.id
-            WHERE f.kind IN ('generic', 'branded')
-              AND fn.kcal_100g BETWEEN {MIN_REALISTIC_KCAL_100G} AND {MAX_REALISTIC_KCAL_100G}
-              AND {EXCLUDE_RESTRICTED_SQL}
-              AND {EXCLUDE_NON_STAPLE_CATEGORY_SQL}
-              {MACRO_CONSISTENCY_SQL}
-            ORDER BY {order_by}
-            LIMIT :bucket_size
-        """)
-        rows = (
-            await session.execute(
-                stmt, {"user_id": str(user_id), "bucket_size": CANDIDATE_BUCKET_SIZE}
-            )
-        ).all()
-        for row in rows:
-            seen[str(row.id)] = CandidateFood(
+    """Todos los alimentos con los que se puede armar un plan para este usuario: de fuentes en
+    español, sin lo que le prohíben sus restricciones (alérgenos, intolerancias, vetados), con
+    su grupo alimentario y unas cantidades razonables. Elegir cuáles entran cada día es cosa
+    del llamador (`sample_day_pool`)."""
+    rows = (
+        await session.execute(
+            _CANDIDATES_SQL, {"user_id": str(user_id), "sources": list(PLAN_SOURCES)}
+        )
+    ).all()
+    candidates: list[CandidateFood] = []
+    for row in rows:
+        group = _group_of(row.name_es, row.category)
+        if group not in PLANNABLE_GROUPS:
+            continue
+        kcal = float(row.kcal_100g)
+        protein, fat, carbs = (
+            float(row.protein_100g),
+            float(row.fat_100g),
+            float(row.carbs_100g),
+        )
+        if not _plausible(group, kcal, protein, fat, carbs):
+            continue
+        bounds = gram_bounds(group, kcal)
+        candidates.append(
+            CandidateFood(
                 id=str(row.id),
                 name_es=row.name_es,
-                kcal_100g=float(row.kcal_100g),
-                protein_100g=float(row.protein_100g),
-                fat_100g=float(row.fat_100g),
-                carbs_100g=float(row.carbs_100g),
+                kcal_100g=kcal,
+                protein_100g=protein,
+                fat_100g=fat,
+                carbs_100g=carbs,
                 category=row.category,
+                group=group,
+                min_grams=bounds.min_g,
+                max_grams=bounds.max_g,
+                source=row.source,
+                complete_data=row.nutriscore_grade is not None,
+                staple=is_staple(group, row.name_es),
             )
-    return list(seen.values())
+        )
+    return candidates
+
+
+# Alimentos de cada grupo que entran en el modelo de un día: pocos y distintos cada día para que
+# el solver sea rápido y la semana tenga variedad.
+_POOL_PER_GROUP = 6
+_POOL_MAX_MARKET = 2
+# Con más alimentos por grupo el pool es más variado, a costa de un modelo mayor (o de más tokens
+# si se le pasa a la IA): iafood usa el doble.
+IAFOOD_POOL_PER_GROUP = 12
+# Lo que no es de diario solo completa el grupo cuando hay muy pocos alimentos de diario.
+_MIN_STAPLES = 3
+
+
+def sample_day_pool(
+    candidates: list[CandidateFood], rng: random.Random, per_group: int = _POOL_PER_GROUP
+) -> list[CandidateFood]:
+    """Subconjunto de los candidatos para resolver un día. En cada grupo se prefiere, por este
+    orden: lo de diario con dato oficial (BEDCA), lo de diario de supermercado con nombre
+    sencillo y datos completos, lo oficial que no es de diario y, por último, lo de
+    supermercado que tampoco lo es. Los productos de Open Food Facts los introduce la
+    comunidad y son de peor calidad, así que como mucho `_POOL_MAX_MARKET` por grupo.
+    Los candidatos sin grupo (los pasa el llamador ya elegidos) entran todos."""
+    pool = [c for c in candidates if c.group is None]
+    by_group: dict[str, list[CandidateFood]] = {}
+    for candidate in candidates:
+        if candidate.group is not None:
+            by_group.setdefault(candidate.group, []).append(candidate)
+    for _group, members in sorted(by_group.items()):
+        official = [c for c in members if c.source != "off"]
+        market = [
+            c
+            for c in members
+            if c.source == "off" and c.complete_data and _SIMPLE_NAME.match(c.name_es)
+        ]
+        staples_available = sum(1 for c in members if c.staple)
+        tiers = [
+            [c for c in official if c.staple],
+            [c for c in market if c.staple],
+            [c for c in official if not c.staple] if staples_available < _MIN_STAPLES else [],
+            [c for c in market if not c.staple] if staples_available < _MIN_STAPLES else [],
+        ]
+        chosen: list[CandidateFood] = []
+        market_taken = 0
+        market_cap = max(_POOL_MAX_MARKET, per_group // 3)
+        for index, tier in enumerate(tiers):
+            rng.shuffle(tier)
+            is_market = index in (1, 3)
+            for candidate in tier:
+                if len(chosen) >= per_group:
+                    break
+                if is_market and market_taken >= market_cap and official:
+                    break
+                chosen.append(candidate)
+                market_taken += is_market
+        pool += chosen
+    return pool
+
+
+@dataclass
+class Alternative:
+    food_id: UUID
+    name_es: str
+    brand: str | None
+    kcal_100g: float
+    distance: float
+    grams: float
+
+
+def _alternatives_sql(restrict_sources: str):
+    return text(f"""
+        SELECT fv2.food_id AS food_id, f.name_es, f.brand, f.category, fn.kcal_100g,
+               fn.protein_100g, (fv1.vec <-> fv2.vec) AS distance
+        FROM food_vectors fv1
+        JOIN food_vectors fv2 ON fv2.food_id != fv1.food_id
+        JOIN foods f ON f.id = fv2.food_id
+        JOIN food_nutrients fn ON fn.food_id = fv2.food_id
+        WHERE fv1.food_id = :food_id
+          AND fn.kcal_100g > 0
+          AND {restrict_sources}
+          AND {EXCLUDE_RESTRICTED_SQL}
+          AND {EXCLUDE_NON_STAPLE_CATEGORY_SQL}
+        ORDER BY fv1.vec <-> fv2.vec
+        LIMIT :pool
+    """)
+
+
+_ALTERNATIVES_POOL = 120
+# Cuánto puede salirse de las cantidades razonables del grupo el gramaje ajustado.
+_ADJUST_SLACK = (0.7, 1.3)
+
+
+def _adjust_grams(grams: float, original: float, alternative: float) -> float | None:
+    if alternative <= 0 or original <= 0:
+        return None
+    adjusted = grams * original / alternative
+    return max(5.0, round(adjusted / 5) * 5)
+
+
+async def find_alternatives(
+    session: AsyncSession,
+    food_id: UUID,
+    grams: float,
+    user_id: UUID,
+    *,
+    keep: str = "kcal",
+    limit: int = 3,
+) -> list[Alternative]:
+    """Alimentos más parecidos (distancia L2 sobre `food_vectors`) que el usuario puede comer,
+    del MISMO grupo alimentario — pollo por pavo, no por queso curado aunque los macros cuadren —
+    y con los gramos recalculados para conservar las kcal (o la proteína) del hueco original.
+    Nunca se devuelve una alternativa sin ajustar ni una que exigiría una cantidad absurda.
+    Si el alimento no tiene grupo conocido, no se filtra por grupo (no se inventa uno)."""
+    original = (
+        await session.execute(
+            text("""
+                SELECT f.name_es, f.category, f.source, fn.kcal_100g, fn.protein_100g
+                FROM foods f JOIN food_nutrients fn ON fn.food_id = f.id
+                WHERE f.id = :food_id
+            """),
+            {"food_id": str(food_id)},
+        )
+    ).first()
+    if original is None:
+        return []
+    group = _group_of(original.name_es, original.category)
+    keep_group = group in PLANNABLE_GROUPS
+    restrict = "f.source = ANY(:sources)" if original.source in PLAN_SOURCES else "TRUE"
+    params: dict = {"food_id": str(food_id), "user_id": str(user_id), "pool": _ALTERNATIVES_POOL}
+    if original.source in PLAN_SOURCES:
+        params["sources"] = list(PLAN_SOURCES)
+    rows = (await session.execute(_alternatives_sql(restrict), params)).all()
+
+    original_kcal = float(original.kcal_100g)
+    original_protein = float(original.protein_100g or 0)
+    seen_names = {original.name_es.strip().lower()}
+    alternatives: list[Alternative] = []
+    for row in rows:
+        name_key = row.name_es.strip().lower()
+        if name_key in seen_names:
+            continue
+        if keep_group and _group_of(row.name_es, row.category) != group:
+            continue
+        alt_kcal = float(row.kcal_100g)
+        if keep == "protein":
+            adjusted = _adjust_grams(grams, original_protein, float(row.protein_100g or 0))
+        else:
+            adjusted = _adjust_grams(grams, original_kcal, alt_kcal)
+        if adjusted is None:
+            continue
+        if keep_group:
+            bounds = gram_bounds(group, alt_kcal)
+            if not bounds.min_g * _ADJUST_SLACK[0] <= adjusted <= bounds.max_g * _ADJUST_SLACK[1]:
+                continue
+        seen_names.add(name_key)
+        alternatives.append(
+            Alternative(
+                food_id=row.food_id,
+                name_es=row.name_es,
+                brand=row.brand,
+                kcal_100g=alt_kcal,
+                distance=round(float(row.distance), 4),
+                grams=adjusted,
+            )
+        )
+        if len(alternatives) >= limit:
+            break
+    return alternatives
 
 
 async def compute_alternatives_for_item(
-    session: AsyncSession, plan_item_id: UUID, food_id: UUID, grams: float, user_id: UUID
+    session: AsyncSession,
+    plan_item_id: UUID,
+    food_id: UUID,
+    grams: float,
+    user_id: UUID,
+    keep: str = "kcal",
 ) -> None:
-    """Top-3 alimentos nutricionalmente más cercanos (pgvector, distancia
-    L2) entre los que el usuario puede comer — se salta en silencio (0
-    alternativas) si `food_vectors` todavía no tiene el alimento, nunca
-    inventa una alternativa (R9). Compartida entre el motor determinista
-    (`routers/diet_plans.py`) y las propuestas aprobadas de iafood
-    (`ai/flows/diet_plan.py`) — ambas materializan `plan_items` iguales."""
-    rows = (
-        await session.execute(
-            text(f"""
-                SELECT fv2.food_id AS food_id, (fv1.vec <-> fv2.vec) AS distance
-                FROM food_vectors fv1
-                JOIN food_vectors fv2 ON fv2.food_id != fv1.food_id
-                JOIN foods f ON f.id = fv2.food_id
-                JOIN food_nutrients fn ON fn.food_id = fv2.food_id
-                WHERE fv1.food_id = :food_id
-                  AND fn.kcal_100g BETWEEN {MIN_REALISTIC_KCAL_100G} AND {MAX_REALISTIC_KCAL_100G}
-                  AND {EXCLUDE_RESTRICTED_SQL}
-                  AND {EXCLUDE_NON_STAPLE_CATEGORY_SQL}
-                  {MACRO_CONSISTENCY_SQL}
-                ORDER BY fv1.vec <-> fv2.vec
-                LIMIT 3
-            """),
-            {"food_id": str(food_id), "user_id": str(user_id)},
-        )
-    ).all()
-    for rank, row in enumerate(rows, start=1):
+    """Guarda las 3 mejores alternativas de un alimento del plan (con los gramos ya ajustados);
+    si `food_vectors` todavía no tiene el alimento o no hay ninguna del mismo grupo, no guarda
+    ninguna — nunca se inventa una alternativa (R9). Compartida entre el motor determinista
+    (`routers/diet_plans.py`) y las propuestas aprobadas de iafood (`ai/flows/diet_plan.py`)."""
+    for rank, alternative in enumerate(
+        await find_alternatives(session, food_id, grams, user_id, keep=keep), start=1
+    ):
         session.add(
             PlanItemAlternative(
                 plan_item_id=plan_item_id,
-                food_id=row.food_id,
-                grams=grams,
+                food_id=alternative.food_id,
+                grams=alternative.grams,
                 rank=rank,
-                distance=round(float(row.distance), 4),
+                distance=alternative.distance,
             )
         )

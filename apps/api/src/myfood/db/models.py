@@ -437,6 +437,8 @@ class PlanDay(Base):
         UUID(as_uuid=True), ForeignKey("diet_plans.id", ondelete="CASCADE"), nullable=False
     )
     day_index: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    warning: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_optimal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     plan: Mapped["DietPlan"] = relationship(back_populates="days")
     meals: Mapped[list["PlanMeal"]] = relationship(
