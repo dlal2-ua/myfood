@@ -25,7 +25,7 @@ const log = (...a) => console.log(...a);
     log("ficha has Fuente:", /Fuente:/.test(txt), "| Licencia:", /Licencia:/.test(txt), "| porción btn:", /1 porción/.test(txt));
     await page.screenshot({ path: "ficha.png", fullPage: true });
     // registrar hoy y copiar al día anterior desde la UI
-    await api("POST", "/api/log/food", { log_date: new Date().toISOString().slice(0,10), meal_type: "lunch", food_id: food.id, grams: 50 });
+    await api("POST", "/api/log/food", { log_date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })(), meal_type: "lunch", food_id: food.id, grams: 50 });
     await page.goto(BASE + "/log", { waitUntil: "networkidle" });
     // ver día de ayer -> copiar hoy a ayer (origen = hoy)
     const y = new Date(); y.setDate(y.getDate() - 1);
