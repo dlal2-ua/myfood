@@ -23,7 +23,14 @@ from pathlib import Path
 import duckdb
 import httpx
 
-from etl.db import LoadStats, ParsedFood, get_connection, replace_allergens, upsert_foods
+from etl.db import (
+    LoadStats,
+    ParsedFood,
+    get_connection,
+    replace_allergens,
+    upsert_foods,
+    upsert_images,
+)
 from etl.rejected import Rejection, log_rejections
 from etl.transform.allergens import off_tags_to_codes
 from etl.transform.nutrient_map import OFF_MACRO_KEYS, OFF_MICRO_KEYS
@@ -577,4 +584,80 @@ def load_allergens_by_brand(
 
     if failed:
         print(f"[off_allergens] marcas fallidas (reintentar aparte): {failed}")
+    return stats
+
+
+_IMAGE_FIELDS = (
+    "code,image_front_url,image_ingredients_url,image_nutrition_url,image_packaging_url"
+)
+_IMAGE_TYPES = {
+    "front": "image_front_url",
+    "ingredients": "image_ingredients_url",
+    "nutrition": "image_nutrition_url",
+    "packaging": "image_packaging_url",
+}
+# Las imágenes de OFF son CC BY-SA: exigen atribución (sección 12).
+IMAGE_LICENSE = "CC BY-SA"
+IMAGE_ATTRIBUTION = "Open Food Facts"
+_IMAGE_HOSTS = ("https://images.openfoodfacts.org/", "https://static.openfoodfacts.org/")
+
+
+def image_rows_for_product(raw: dict) -> list[tuple[str, str]]:
+    """(tipo, url) de las imágenes de un producto de la API que estén en el dominio de
+    imágenes de OFF y por HTTPS — nunca se guarda una URL de otro origen."""
+    out = []
+    for image_type, field in _IMAGE_TYPES.items():
+        url = raw.get(field)
+        if isinstance(url, str) and url.startswith(_IMAGE_HOSTS):
+            out.append((image_type, url))
+    return out
+
+
+def load_images_by_brand(
+    brands: Sequence[str] = DEFAULT_TARGET_BRANDS, country: str = "spain"
+) -> LoadStats:
+    """Registra las URLs de imagen (`food_images.remote_url`) de los productos de marca ya
+    cargados, enlazando por código de barras. No descarga ninguna imagen."""
+    stats = LoadStats()
+    failed: list[str] = []
+    seen: set[str] = set()
+    with httpx.Client(headers={"User-Agent": USER_AGENT}) as client:
+        for brand in brands:
+            by_code: dict[str, list[tuple[str, str]]] = {}
+            try:
+                for raw in fetch_brand_products(client, brand, country, fields=_IMAGE_FIELDS):
+                    code = str(raw.get("code") or "")
+                    if not code or code in seen:
+                        continue
+                    seen.add(code)
+                    stats.read += 1
+                    if images := image_rows_for_product(raw):
+                        by_code[code] = images
+            except RuntimeError as exc:
+                print(f"[off_images] {brand}: FALLÓ tras agotar reintentos ({exc})")
+                failed.append(brand)
+
+            conn = get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, barcode_ean FROM foods "
+                        "WHERE source = 'off' AND barcode_ean = ANY(%s)",
+                        (list(by_code),),
+                    )
+                    id_by_code = {row[1]: row[0] for row in cur.fetchall()}
+                rows = [
+                    (id_by_code[code], image_type, url, "off", IMAGE_LICENSE, IMAGE_ATTRIBUTION)
+                    for code, images in by_code.items()
+                    if code in id_by_code
+                    for image_type, url in images
+                ]
+                stats.upserted += upsert_images(conn, rows)
+            finally:
+                conn.close()
+            print(f"[off_images] {brand}: productos={len(by_code)} filas={stats.upserted}")
+            time.sleep(2.0)
+
+    if failed:
+        print(f"[off_images] marcas fallidas (reintentar aparte): {failed}")
     return stats

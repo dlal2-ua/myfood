@@ -3,6 +3,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,7 @@ from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
 from myfood.off_client import fetch_product
 from myfood.search import search_foods
+from myfood.services.images import ALLOWED_SIZES, IMAGE_TYPES, resolve_image
 
 router = APIRouter(prefix="/foods", tags=["foods"])
 
@@ -32,6 +34,10 @@ class FoodSearchItem(BaseModel):
     protein_100g: float | None
     image_url: str | None
     source: str
+    # Puntuaciones de Open Food Facts (solo productos de marca): el badge solo se pinta si hay dato.
+    nutriscore_grade: str | None = None
+    nova_group: int | None = None
+    ecoscore_grade: str | None = None
 
 
 class FoodSearchResponse(BaseModel):
@@ -57,6 +63,9 @@ async def search(
             protein_100g=hit.get("protein_100g"),
             image_url=_image_url(hit),
             source=hit["source"],
+            nutriscore_grade=hit.get("nutriscore_grade"),
+            nova_group=hit.get("nova_group"),
+            ecoscore_grade=hit.get("ecoscore_grade"),
         )
         for hit in hits
     ]
@@ -64,9 +73,9 @@ async def search(
 
 
 def _image_url(hit: dict) -> str | None:
-    if not hit.get("has_image"):
-        return None
-    return f"/api/foods/{hit['id']}/image?type=front&size=200"
+    # Siempre hay URL: `/foods/{id}/image` sirve el placeholder de la categoría cuando el
+    # producto no tiene imagen (sección 12: nunca un hueco roto).
+    return f"/api/foods/{hit['id']}/image?type=front&size=100"
 
 
 class FoodAllergenOut(BaseModel):
@@ -104,10 +113,27 @@ class FoodDetail(BaseModel):
     salt_100g: float | None
     micros: dict
     allergens: list[FoodAllergenOut] = []
+    # Atribución obligatoria de las imágenes de OFF (CC BY-SA), si el alimento tiene una.
+    image_credit: str | None = None
 
 
 def _f(value) -> float | None:
     return float(value) if value is not None else None
+
+
+async def _load_image_credit(session: AsyncSession, food_id: UUID) -> str | None:
+    row = (
+        await session.execute(
+            text(
+                "SELECT attribution, license FROM food_images "
+                "WHERE food_id = :id AND attribution IS NOT NULL ORDER BY type LIMIT 1"
+            ),
+            {"id": str(food_id)},
+        )
+    ).first()
+    if row is None:
+        return None
+    return f"{row.attribution} ({row.license})" if row.license else row.attribution
 
 
 async def _load_allergens(session: AsyncSession, food_id: UUID) -> list[FoodAllergenOut]:
@@ -125,7 +151,10 @@ async def _load_allergens(session: AsyncSession, food_id: UUID) -> list[FoodAlle
 
 
 def _to_detail(
-    food: Food, nutrients: FoodNutrient, allergens: list[FoodAllergenOut] | None = None
+    food: Food,
+    nutrients: FoodNutrient,
+    allergens: list[FoodAllergenOut] | None = None,
+    image_credit: str | None = None,
 ) -> FoodDetail:
     return FoodDetail(
         id=str(food.id),
@@ -154,7 +183,34 @@ def _to_detail(
         salt_100g=_f(nutrients.salt_100g),
         micros=nutrients.micros,
         allergens=allergens or [],
+        image_credit=image_credit,
     )
+
+
+@router.get("/{food_id}/image")
+async def get_food_image(
+    food_id: UUID,
+    type: str = Query(default="front"),
+    size: str = Query(default="200"),
+    _user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    """Imagen de un producto desde la caché local; la descarga de OFF la primera vez
+    (sección 12). Sin imagen o si falla la descarga: placeholder de su categoría con
+    200 OK, nunca un 404 que rompa la interfaz."""
+    if type not in IMAGE_TYPES:
+        raise AppError("INVALID_IMAGE_TYPE", "Tipo de imagen no válido.", status_code=422)
+    if size not in {str(s) for s in ALLOWED_SIZES}:
+        raise AppError("INVALID_IMAGE_SIZE", "Tamaño de imagen no válido.", status_code=422)
+    food = await session.get(Food, food_id)
+    if food is None:
+        raise AppError("FOOD_NOT_FOUND", "No existe ese alimento.", status_code=404)
+
+    outcome = await resolve_image(session, food, type, size)
+    headers = {"Cache-Control": outcome.cache_control}
+    if outcome.path is not None:
+        return FileResponse(outcome.path, media_type=outcome.media_type, headers=headers)
+    return Response(outcome.placeholder, media_type=outcome.media_type, headers=headers)
 
 
 @router.get("/{food_id}")
@@ -169,7 +225,12 @@ async def get_food(
     nutrients = await session.get(FoodNutrient, food_id)
     if nutrients is None:
         raise AppError("FOOD_NOT_FOUND", "No existe ese alimento.", status_code=404)
-    return _to_detail(food, nutrients, await _load_allergens(session, food_id))
+    return _to_detail(
+        food,
+        nutrients,
+        await _load_allergens(session, food_id),
+        await _load_image_credit(session, food_id),
+    )
 
 
 async def _get_food_by_barcode(session: AsyncSession, ean: str) -> FoodDetail | None:
@@ -179,7 +240,12 @@ async def _get_food_by_barcode(session: AsyncSession, ean: str) -> FoodDetail | 
     nutrients = await session.get(FoodNutrient, food.id)
     if nutrients is None:
         return None
-    return _to_detail(food, nutrients, await _load_allergens(session, food.id))
+    return _to_detail(
+        food,
+        nutrients,
+        await _load_allergens(session, food.id),
+        await _load_image_credit(session, food.id),
+    )
 
 
 @router.get("/barcode/{ean}")

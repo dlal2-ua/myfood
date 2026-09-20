@@ -24,7 +24,7 @@ async def search_foods(
     async with httpx.AsyncClient(
         base_url=settings.meili_url, headers=_headers(), timeout=5
     ) as client:
-        resp = await client.post("/indexes/foods/search", json=body)
+        resp = await client.post(f"/indexes/{settings.meili_index}/search", json=body)
         resp.raise_for_status()
         data = resp.json()
     return data["hits"], data["estimatedTotalHits"]

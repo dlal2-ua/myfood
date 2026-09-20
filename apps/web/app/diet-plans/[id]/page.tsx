@@ -1,5 +1,6 @@
 "use client";
 
+import { FoodImage } from "@/components/FoodImage";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -163,7 +164,8 @@ export default function DietPlanDetailPage() {
                 <ul className="flex flex-col gap-1">
                   {meal.items.map((item) => (
                     <li key={item.id} className="flex flex-wrap items-center gap-2 text-sm">
-                      <span>
+                      <span className="flex items-center gap-2">
+                        {item.food_id && <FoodImage foodId={item.food_id} px={32} />}
                         {item.name_es ?? "(alimento eliminado)"} — {item.grams} g
                       </span>
                       {item.alternatives.length > 0 && (

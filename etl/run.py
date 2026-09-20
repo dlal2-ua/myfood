@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
             "off_brands",
             "off_allergens",
             "generic_allergens",
+            "off_images",
         ],
     )
     parser.add_argument("--country", default=None, help="Solo aplica a --source off")
@@ -71,6 +72,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         if result.rejected_path:
             print(f"  descartes registrados en {result.rejected_path}")
+        return 0
+
+    if args.source == "off_images":
+        stats = off.load_images_by_brand()
+        print(f"[off_images] leídos={stats.read} filas de imagen={stats.upserted}")
         return 0
 
     if args.source in ("off_allergens", "generic_allergens"):

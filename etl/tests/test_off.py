@@ -296,3 +296,31 @@ def test_fetch_brand_products_retries_on_503(monkeypatch):
 
     assert [r["code"] for r in results] == ["ok"]
     assert attempts["n"] == 3
+
+
+# --- URLs de imagen (food_images.remote_url) ---------------------------------------
+
+
+def test_image_rows_keep_only_https_urls_on_the_off_image_domain():
+    from etl.sources.off import image_rows_for_product
+
+    rows = image_rows_for_product(
+        {
+            "code": "8480000000000",
+            "image_front_url": "https://images.openfoodfacts.org/images/products/848/front_es.4.400.jpg",
+            "image_nutrition_url": "https://static.openfoodfacts.org/images/x/nutrition.jpg",
+            "image_ingredients_url": "http://images.openfoodfacts.org/insecure.jpg",  # sin HTTPS
+            "image_packaging_url": "https://evil.example/p.jpg",  # otro origen
+        }
+    )
+    assert dict(rows) == {
+        "front": "https://images.openfoodfacts.org/images/products/848/front_es.4.400.jpg",
+        "nutrition": "https://static.openfoodfacts.org/images/x/nutrition.jpg",
+    }
+
+
+def test_image_rows_ignore_missing_and_non_string_values():
+    from etl.sources.off import image_rows_for_product
+
+    assert image_rows_for_product({"code": "1"}) == []
+    assert image_rows_for_product({"image_front_url": None, "image_nutrition_url": 5}) == []

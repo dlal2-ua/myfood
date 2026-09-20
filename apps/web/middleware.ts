@@ -20,6 +20,7 @@ const PROTECTED_PREFIXES = [
   "/household",
   "/progress",
   "/admin",
+  "/consent",
 ];
 
 export function middleware(request: NextRequest) {

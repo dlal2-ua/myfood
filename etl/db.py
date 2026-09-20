@@ -208,3 +208,29 @@ def replace_allergens(
             inserted += len(chunk)
     conn.commit()
     return inserted
+
+
+_UPSERT_IMAGES_SQL = """
+INSERT INTO food_images (food_id, type, remote_url, source, license, attribution)
+VALUES %s
+ON CONFLICT (food_id, type) DO UPDATE SET
+    remote_url = EXCLUDED.remote_url,
+    license = EXCLUDED.license,
+    attribution = EXCLUDED.attribution
+"""
+
+
+def upsert_images(
+    conn, rows: Iterable[tuple[UUID, str, str, str, str, str]], batch_size: int = 2000
+) -> int:
+    """(food_id, type, remote_url, source, license, attribution). Solo registra la URL
+    remota: la descarga y la caché en disco las hace la API la primera vez que se pide
+    la imagen (sección 12). No toca `local_path`/`bytes` de una imagen ya cacheada."""
+    all_rows = list(rows)
+    with conn.cursor() as cur:
+        for start in range(0, len(all_rows), batch_size):
+            psycopg2.extras.execute_values(
+                cur, _UPSERT_IMAGES_SQL, all_rows[start : start + batch_size]
+            )
+    conn.commit()
+    return len(all_rows)

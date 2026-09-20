@@ -70,7 +70,9 @@ async def indexed_food(superuser_conn):
             "protein_100g": 31.0,
             "has_image": False,
         }
-        resp = await client.post("/indexes/foods/documents?primaryKey=id", json=[doc])
+        resp = await client.post(
+            f"/indexes/{settings.meili_index}/documents?primaryKey=id", json=[doc]
+        )
         await _wait_task(client, resp.json()["taskUid"])
 
     yield food_id, name
@@ -78,7 +80,7 @@ async def indexed_food(superuser_conn):
     async with httpx.AsyncClient(
         base_url=settings.meili_url, headers=_meili_headers(), timeout=10
     ) as client:
-        await client.delete(f"/indexes/foods/documents/{food_id}")
+        await client.delete(f"/indexes/{settings.meili_index}/documents/{food_id}")
     await superuser_conn.execute(text("DELETE FROM foods WHERE id = :id"), {"id": str(food_id)})
     await superuser_conn.commit()
 
@@ -95,7 +97,8 @@ async def test_search_finds_indexed_food(registered_client, indexed_food):
     hit = next(item for item in body["items"] if item["id"] == str(food_id))
     assert hit["name_es"] == name
     assert hit["kcal_100g"] == 165.0
-    assert hit["image_url"] is None  # has_image=False
+    # Siempre hay URL: sin imagen la ruta sirve el placeholder de la categoría (sección 12).
+    assert hit["image_url"] == f"/api/foods/{food_id}/image?type=front&size=100"
 
 
 async def test_search_requires_authentication():

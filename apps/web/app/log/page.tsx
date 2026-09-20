@@ -1,5 +1,6 @@
 "use client";
 
+import { FoodImage } from "@/components/FoodImage";
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
@@ -319,7 +320,9 @@ export default function LogPage() {
                 onClick={() => onQuickAddFromFavorite(fav)}
                 className="rounded-full border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
               >
-                ★ {fav.name_es}
+                <span className="flex items-center gap-2">
+                  <FoodImage foodId={fav.food_id} px={24} className="rounded-full" />★ {fav.name_es}
+                </span>
               </button>
             ))}
           </div>
