@@ -130,3 +130,44 @@ def build_resolve_food_items_tool(sink: list[dict]) -> SdkMcpTool[Any]:
         return {"content": [{"type": "text", "text": "Alimentos resueltos."}]}
 
     return _resolve_food_items
+
+
+SUGGEST_SUPPLEMENTS_TOOL_NAME = "suggest_supplements"
+
+
+def suggest_supplements_schema(keys: tuple[str, ...]) -> dict[str, Any]:
+    """`key` es un enum cerrado con la lista blanca: el modelo no puede nombrar otro suplemento."""
+    return {
+        "type": "object",
+        "required": ["suggestions"],
+        "properties": {
+            "suggestions": {
+                "type": "array",
+                "maxItems": 3,
+                "items": {
+                    "type": "object",
+                    "required": ["key", "reason"],
+                    "properties": {
+                        "key": {"type": "string", "enum": list(keys)},
+                        "reason": {"type": "string", "maxLength": 240},
+                    },
+                },
+            }
+        },
+    }
+
+
+def build_suggest_supplements_tool(sink: list[dict], keys: tuple[str, ...]) -> SdkMcpTool[Any]:
+    """Sugerencia de suplementos (sección 10.7): el modelo elige claves de la lista blanca y
+    razona con los datos; nunca propone una dosis."""
+
+    @tool(
+        SUGGEST_SUPPLEMENTS_TOOL_NAME,
+        "Sugiere suplementos de la lista blanca cuando los datos de ingesta lo apoyan.",
+        suggest_supplements_schema(keys),
+    )
+    async def _suggest_supplements(args: dict[str, Any]) -> dict[str, Any]:
+        sink.append(args)
+        return {"content": [{"type": "text", "text": "Sugerencias recibidas."}]}
+
+    return _suggest_supplements

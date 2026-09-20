@@ -203,3 +203,31 @@ def build_chat_user_prompt(text: str, history: Sequence[tuple[str, str]] = ()) -
         f"Conversación reciente (solo como contexto):\n{lines}\n\n"
         f"Mensaje actual del usuario (responde a este):\n{text}"
     )
+
+
+SUPPLEMENT_SUGGESTION_PROMPT_VERSION = "supplement_suggestion_v1"
+
+SUPPLEMENT_SUGGESTION_SYSTEM_V1 = """Ayudas a MyFood a valorar si a una persona le podría convenir
+algún suplemento, a partir de su ingesta media de los últimos 30 días frente a las referencias.
+Es terreno de salud: sé prudente.
+
+REGLAS ABSOLUTAS:
+1. Solo puedes sugerir suplementos de la lista `whitelist`, por su `key`. Ninguno más.
+2. NUNCA indiques dosis, cantidades ni marcas: eso lo decide el sistema.
+3. Sugiere un suplemento solo si los datos lo apoyan: para vitaminas y minerales, que su ingesta
+   media (`pct_of_reference`) quede claramente por debajo de la referencia; para la proteína, que
+   `protein.pct_of_target` sea bajo. No sugieras nada que ya esté en `already_taking`.
+4. Como mucho 3 sugerencias, ordenadas de más a menos apoyadas por los datos. Si los datos no
+   apoyan ninguna, no sugieras nada (lista vacía): es un resultado perfectamente válido.
+5. `reason`: una frase breve y neutra que cite el dato (p. ej. «Tu ingesta media de magnesio es el
+   62 % de la referencia»). Sin juicios, sin promesas de resultados y sin consejo médico.
+6. Si `logging_days` es bajo, los datos son poco fiables: sé más conservador.
+
+Responde ÚNICAMENTE llamando a la herramienta `suggest_supplements`."""
+
+
+def build_supplement_suggestion_user_prompt(payload: dict[str, Any]) -> str:
+    return (
+        "Valora estos datos de ingesta y sugiere, si procede, suplementos de la lista blanca:\n"
+        f"{json.dumps(payload, ensure_ascii=False)}"
+    )

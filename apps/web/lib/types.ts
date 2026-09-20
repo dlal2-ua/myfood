@@ -15,6 +15,9 @@ export interface Profile {
   budget_eur_week: number | null;
   max_cook_minutes: number | null;
   diet_style: string | null;
+  /** Declaraciones que desactivan la sugerencia de suplementos con IA. */
+  is_pregnant_or_nursing: boolean;
+  has_medical_condition: boolean;
 }
 
 export type ProfileUpdate = Partial<Profile>;
@@ -311,6 +314,7 @@ export interface Supplement {
   low_stock: boolean;
   /** Coste estimado de 30 días; null si falta el precio, las dosis del envase o un horario. */
   monthly_cost: number | null;
+  image_url?: string | null;
 }
 
 export interface SupplementList {
@@ -516,6 +520,7 @@ export interface Recipe {
   id: string;
   name: string;
   internal_ean?: string | null;
+  image_url?: string | null;
   servings: number;
   prep_minutes: number | null;
   instructions: string | null;

@@ -62,6 +62,10 @@ class Consent(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+HEALTH_FLAG_PREGNANT = "pregnant_or_nursing"
+HEALTH_FLAG_CONDITION = "medical_condition"
+
+
 class Profile(Base):
     __tablename__ = "profiles"
 
@@ -72,6 +76,9 @@ class Profile(Base):
     sex: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     birth_date: Mapped[object | None] = mapped_column(EncryptedDate, nullable=True)
     height_cm: Mapped[object | None] = mapped_column(EncryptedNumeric, nullable=True)
+    # Declaraciones de salud (lista separada por comas, cifrada): 'pregnant_or_nursing',
+    # 'medical_condition'. Bloquean la sugerencia de suplementos (sección 10.7).
+    health_flags: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
 
     activity_level: Mapped[str] = mapped_column(String, nullable=False, default="moderate")
     goal: Mapped[str] = mapped_column(String, nullable=False, default="maintain")
@@ -84,6 +91,14 @@ class Profile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="profile")
+
+    def has_health_flag(self, flag: str) -> bool:
+        return flag in (self.health_flags or "").split(",")
+
+    def set_health_flag(self, flag: str, value: bool) -> None:
+        flags = {f for f in (self.health_flags or "").split(",") if f}
+        flags.add(flag) if value else flags.discard(flag)
+        self.health_flags = ",".join(sorted(flags)) or None
 
 
 class BodyMeasurement(Base):

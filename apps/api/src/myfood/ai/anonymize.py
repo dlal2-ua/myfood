@@ -142,3 +142,25 @@ async def build_diet_plan_payload(
         "candidates": candidates_out,
     }
     return AnonymizedPayload(payload=payload, alias_to_food_id=alias_to_food_id)
+
+
+def build_supplement_payload(
+    *,
+    nutrients: list[dict],
+    logging_days: int,
+    protein: dict | None,
+    already_taking: list[str],
+    whitelist: list[dict],
+) -> dict:
+    """Payload de la sugerencia de suplementos (sección 10.7). Solo agregados de 30 días
+    (medias y % de la referencia), claves de la lista blanca y las claves de lo que ya toma:
+    ningún nombre, fecha, peso ni identificador — y ni siquiera los nombres de sus suplementos,
+    que son texto libre del usuario."""
+    return {
+        "period_days": 30,
+        "logging_days": logging_days,
+        "nutrients": nutrients,
+        "protein": protein,
+        "already_taking": already_taking,
+        "whitelist": whitelist,
+    }

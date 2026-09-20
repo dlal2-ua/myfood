@@ -8,7 +8,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from myfood.db.models import BodyMeasurement, Profile
+from myfood.db.models import (
+    HEALTH_FLAG_CONDITION,
+    HEALTH_FLAG_PREGNANT,
+    BodyMeasurement,
+    Profile,
+)
 from myfood.deps import get_current_user_id, get_db
 from myfood.routers.consents import require_health_data_consent
 
@@ -27,6 +32,9 @@ class ProfileOut(BaseModel):
     budget_eur_week: float | None
     max_cook_minutes: int | None
     diet_style: str | None
+    # Declaraciones que desactivan la sugerencia de suplementos con IA.
+    is_pregnant_or_nursing: bool = False
+    has_medical_condition: bool = False
 
 
 class ProfileUpdate(BaseModel):
@@ -43,6 +51,8 @@ class ProfileUpdate(BaseModel):
     budget_eur_week: float | None = Field(default=None, ge=0)
     max_cook_minutes: int | None = Field(default=None, ge=0)
     diet_style: str | None = None
+    is_pregnant_or_nursing: bool | None = None
+    has_medical_condition: bool | None = None
 
 
 async def _get_or_create_profile(session: AsyncSession, user_id: UUID) -> Profile:
@@ -71,6 +81,8 @@ def _to_out(profile: Profile) -> ProfileOut:
         ),
         max_cook_minutes=profile.max_cook_minutes,
         diet_style=profile.diet_style,
+        is_pregnant_or_nursing=profile.has_health_flag(HEALTH_FLAG_PREGNANT),
+        has_medical_condition=profile.has_health_flag(HEALTH_FLAG_CONDITION),
     )
 
 
@@ -90,8 +102,15 @@ async def update_profile(
     session: AsyncSession = Depends(get_db),
 ) -> ProfileOut:
     profile = await _get_or_create_profile(session, user_id)
+    flag_fields = {
+        "is_pregnant_or_nursing": HEALTH_FLAG_PREGNANT,
+        "has_medical_condition": HEALTH_FLAG_CONDITION,
+    }
     for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(profile, field, value)
+        if field in flag_fields:
+            profile.set_health_flag(flag_fields[field], bool(value))
+        else:
+            setattr(profile, field, value)
     await session.commit()
     await session.refresh(profile)
     return _to_out(profile)

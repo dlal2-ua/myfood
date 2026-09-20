@@ -4,6 +4,8 @@ import { localDateIso } from "@/lib/dates";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import Link from "next/link";
+import { SupplementSuggestions } from "@/components/SupplementSuggestions";
+import { UserImageUpload } from "@/components/UserImageUpload";
 import type { Supplement, SupplementList, SupplementsToday, TodayDose } from "@/lib/types";
 
 const inputClass =
@@ -353,6 +355,8 @@ export default function SupplementsPage() {
 
       <TodayPanel reload={() => void load()} />
 
+      <SupplementSuggestions onAdded={() => void load()} />
+
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Añadir suplemento</h2>
         <form onSubmit={onAdd} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -554,6 +558,12 @@ export default function SupplementsPage() {
                       </div>
                     ) : (
                       <div className="flex flex-wrap items-start justify-between gap-3">
+                        <UserImageUpload
+                          imageUrl={s.image_url}
+                          endpoint={`/api/supplements/${s.id}`}
+                          alt={`Foto de ${s.name}`}
+                          onChanged={() => void load()}
+                        />
                         <div>
                           <p className={`text-sm font-medium ${s.is_active ? "" : "text-neutral-400"}`}>
                             {s.name}

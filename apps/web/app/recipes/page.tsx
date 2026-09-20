@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { LogRecipeForm } from "@/components/LogRecipeForm";
+import { UserImageUpload } from "@/components/UserImageUpload";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
 import type {
   AiSession,
@@ -587,7 +588,15 @@ export default function RecipesPage() {
             {detailError && <p className="text-sm text-red-600">{detailError}</p>}
             {selected && (
               <>
-                <h3 className="text-lg font-semibold">{selected.name}</h3>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="text-lg font-semibold">{selected.name}</h3>
+                  <UserImageUpload
+                    imageUrl={selected.image_url}
+                    endpoint={`/api/recipes/${selected.id}`}
+                    alt={`Foto de ${selected.name}`}
+                    onChanged={() => void loadDetail(selected.id)}
+                  />
+                </div>
                 {selected.instructions && (
                   <p className="mt-1 whitespace-pre-line text-sm text-neutral-600 dark:text-neutral-400">
                     {selected.instructions}

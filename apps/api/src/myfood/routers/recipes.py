@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, File, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,8 @@ from myfood.db.models import Food, FoodNutrient, Recipe, RecipeIngredient
 from myfood.deps import get_current_user_id, get_db
 from myfood.domain.ean import ean13_svg, generate_internal_ean
 from myfood.errors import AppError
+from myfood.routers._user_images import serve_image, store_uploaded_image
+from myfood.services import user_images
 
 router = APIRouter(prefix="/recipes", tags=["recipes"])
 
@@ -73,6 +75,7 @@ class RecipeOut(BaseModel):
     name: str
     # EAN-13 interno (prefijo 20) para imprimir una etiqueta y escanearla al registrar la receta.
     internal_ean: str | None = None
+    image_url: str | None = None
     servings: int
     prep_minutes: int | None
     instructions: str | None
@@ -86,6 +89,7 @@ class RecipeSummaryOut(BaseModel):
     name: str
     servings: int
     prep_minutes: int | None
+    image_url: str | None = None
 
 
 def _scale(nutrient_100g, grams: float) -> float:
@@ -160,6 +164,7 @@ async def _to_out(session: AsyncSession, recipe: Recipe) -> RecipeOut:
         id=recipe.id,
         name=recipe.name,
         internal_ean=recipe.internal_ean,
+        image_url=user_images.image_url(f"/api/recipes/{recipe.id}", "recipe", recipe.id),
         servings=recipe.servings,
         prep_minutes=recipe.prep_minutes,
         instructions=recipe.instructions,
@@ -206,7 +211,11 @@ async def list_recipes(
     )
     return [
         RecipeSummaryOut(
-            id=r.id, name=r.name, servings=r.servings, prep_minutes=r.prep_minutes
+            id=r.id,
+            name=r.name,
+            servings=r.servings,
+            prep_minutes=r.prep_minutes,
+            image_url=user_images.image_url(f"/api/recipes/{r.id}", "recipe", r.id),
         )
         for r in recipes
     ]
@@ -225,6 +234,38 @@ async def get_recipe_by_ean(
     if recipe is None:
         raise AppError("RECIPE_NOT_FOUND", "No existe esa receta.", status_code=404)
     return await _to_out(session, recipe)
+
+
+@router.put("/{recipe_id}/image", status_code=204)
+async def upload_recipe_image(
+    recipe_id: UUID,
+    file: UploadFile = File(...),
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """Foto de la receta (máx. 10 MB; se reescala a 1024 px y se quita el EXIF)."""
+    await _get_recipe(session, user_id, recipe_id)
+    await store_uploaded_image("recipe", recipe_id, file)
+
+
+@router.get("/{recipe_id}/image")
+async def get_recipe_image(
+    recipe_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+):
+    await _get_recipe(session, user_id, recipe_id)
+    return serve_image("recipe", recipe_id)
+
+
+@router.delete("/{recipe_id}/image", status_code=204)
+async def delete_recipe_image(
+    recipe_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    await _get_recipe(session, user_id, recipe_id)
+    user_images.delete_image("recipe", recipe_id)
 
 
 @router.get("/{recipe_id}/label.svg")
@@ -281,6 +322,7 @@ async def delete_recipe(
     recipe = await _get_recipe(session, user_id, recipe_id)
     await session.delete(recipe)
     await session.commit()
+    user_images.delete_image("recipe", recipe_id)
 
 
 @router.post("/{recipe_id}/ingredients", status_code=201)

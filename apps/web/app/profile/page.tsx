@@ -289,6 +289,30 @@ export default function ProfilePage() {
             />
           </label>
 
+          <fieldset className="flex flex-col gap-2 text-sm sm:col-span-2">
+            <legend className="mb-1 font-medium">Situación de salud (opcional)</legend>
+            <p className="text-xs text-neutral-500">
+              Si marcas alguna casilla, MyFood no te sugerirá suplementos con IA y te recomendará
+              consultar a un profesional. Se guarda cifrado.
+            </p>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={profile.is_pregnant_or_nursing}
+                onChange={(e) => updateProfileField("is_pregnant_or_nursing", e.target.checked)}
+              />
+              Estoy embarazada o en periodo de lactancia
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={profile.has_medical_condition}
+                onChange={(e) => updateProfileField("has_medical_condition", e.target.checked)}
+              />
+              Tengo una patología o tomo medicación que afecta a mi alimentación
+            </label>
+          </fieldset>
+
           {profileError && <p className="text-sm text-red-600 sm:col-span-2">{profileError}</p>}
           {profileSaved && (
             <p className="text-sm text-[var(--color-primary)] sm:col-span-2">Perfil guardado.</p>
