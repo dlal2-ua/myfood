@@ -6,6 +6,7 @@ import { apiFetch, errorMessage } from "@/lib/api";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
 import { ReceiptScanPanel } from "@/components/ReceiptScanPanel";
 import type { FoodSearchItem, PantryItem } from "@/lib/types";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -134,12 +135,12 @@ export default function PantryPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Tu despensa</h2>
-        {loading && <p className="text-sm text-neutral-500">Cargando…</p>}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {loading && <Skeleton lines={3} />}
+        {error && <ErrorState message={error} onRetry={() => void load()} />}
         {items && (
           <>
             {items.length === 0 ? (
-              <p className="text-sm text-neutral-500">Tu despensa está vacía.</p>
+              <EmptyState message="Tu despensa está vacía. Añade lo que tienes en casa para que la lista de la compra lo descuente." />
             ) : (
               <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
                 {items.map((item) => (

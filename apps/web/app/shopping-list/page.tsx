@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
 import type { DietPlan, FoodSearchItem, ShoppingList, ShoppingListItem } from "@/lib/types";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -296,12 +297,12 @@ export default function ShoppingListPage() {
             </button>
           )}
         </div>
-        {loading && <p className="text-sm text-neutral-500">Cargando…</p>}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {loading && <Skeleton lines={3} />}
+        {error && <ErrorState message={error} onRetry={() => void load()} />}
         {list && (
           <>
             {list.items.length === 0 ? (
-              <p className="text-sm text-neutral-500">Tu lista de la compra está vacía.</p>
+              <EmptyState message="Tu lista de la compra está vacía. Genérala desde un plan o añade productos a mano." />
             ) : (
               <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
                 {list.items.map((item) => (

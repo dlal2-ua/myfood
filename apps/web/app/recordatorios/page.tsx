@@ -5,6 +5,7 @@ import { PushSubscribeButton } from "@/components/PushSubscribeButton";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { MEAL_TYPES, MEAL_TYPE_LABELS } from "@/lib/types";
 import type { MealType, NotificationRule, Supplement, SupplementList } from "@/lib/types";
+import { Skeleton } from "@/components/ui/states";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -108,7 +109,7 @@ export default function RemindersPage() {
     void run(() => createRule("water", { times }), "Recordatorio de agua creado.");
   }
 
-  if (loading) return <p className="text-sm text-neutral-500">Cargando…</p>;
+  if (loading) return <Skeleton lines={3} />;
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-8">

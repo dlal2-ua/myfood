@@ -434,3 +434,21 @@ async def test_a_failing_agent_marks_the_session_failed(ready, monkeypatch):
         ai_session = await session.get(AiSession, uuid.UUID(session_id))
     assert ai_session.status == "failed"
     assert ai_session.validation_errors[0]["code"] == "AI_TIMEOUT"
+
+
+def test_the_evidence_keeps_the_capitals_of_vitamin_names():
+    payload = {
+        "nutrients": [
+            {
+                "key": "vitamin_d",
+                "label": "Vitamina D",
+                "avg_per_day": 1,
+                "reference": 15,
+                "pct_of_reference": 6.7,
+            }
+        ]
+    }
+    assert (
+        flow._evidence("vitamin_d", payload)
+        == "Tu ingesta media de vitamina D es el 6.7 % de la referencia."
+    )

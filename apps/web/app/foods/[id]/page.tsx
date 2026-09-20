@@ -10,6 +10,7 @@ import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { AddToLogForm } from "@/components/AddToLogForm";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { Favorite, FoodDetail } from "@/lib/types";
+import { Skeleton } from "@/components/ui/states";
 
 export default function FoodDetailPage() {
   const params = useParams<{ id: string }>();
@@ -59,7 +60,7 @@ export default function FoodDetailPage() {
     }
   }
 
-  if (loading) return <p className="text-sm text-neutral-500">Cargando…</p>;
+  if (loading) return <Skeleton lines={3} />;
   if (error || !food) {
     return <p className="text-sm text-red-600">{error ?? "No se encontró el alimento."}</p>;
   }

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { AiProposal, AiSession, DietPlan, FoodDetail } from "@/lib/types";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -324,10 +325,10 @@ export default function DietPlansPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Tus planes</h2>
-        {loading && <p className="text-sm text-neutral-500">Cargando…</p>}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {loading && <Skeleton lines={3} />}
+        {error && <ErrorState message={error} onRetry={() => void load()} />}
         {!loading && plans.length === 0 && (
-          <p className="text-sm text-neutral-500">Todavía no has generado ningún plan.</p>
+          <EmptyState message="Todavía no has generado ningún plan. Puedes crear uno con el motor o con iafood más arriba." />
         )}
         <ul className="flex flex-col gap-2">
           {plans.map((plan) => (

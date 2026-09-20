@@ -3,5 +3,10 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./", import.meta.url)) } },
-  test: { environment: "node", include: ["lib/**/*.test.ts"] },
+  esbuild: { jsx: "automatic" },
+  test: {
+    environment: "node",
+    include: ["lib/**/*.test.ts", "components/**/*.test.tsx"],
+    setupFiles: ["./vitest.setup.ts"],
+  },
 });

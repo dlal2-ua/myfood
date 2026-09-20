@@ -20,6 +20,7 @@ import {
   type MealType,
   type SmartLogItem,
 } from "@/lib/types";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -621,12 +622,12 @@ export default function LogPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Entradas del {logDate}</h2>
-        {loading && <p className="text-sm text-neutral-500">Cargando…</p>}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {loading && <Skeleton lines={3} />}
+        {error && <ErrorState message={error} onRetry={() => void loadDay(logDate)} />}
         {day && (
           <>
             {day.food.length === 0 ? (
-              <p className="text-sm text-neutral-500">Todavía no hay entradas para este día.</p>
+              <EmptyState message="Todavía no hay entradas para este día." actionLabel="Escanear un producto" actionHref="/scan" />
             ) : (
               <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
                 {day.food.map((entry) => (

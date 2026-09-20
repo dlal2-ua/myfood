@@ -5,6 +5,7 @@ import { apiFetch, errorMessage } from "@/lib/api";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import type { Allergen, FoodSearchItem, Restriction, RestrictionKind } from "@/lib/types";
+import { Skeleton } from "@/components/ui/states";
 
 const KIND_LABELS: Record<RestrictionKind, string> = {
   allergen: "Alergia",
@@ -93,7 +94,7 @@ export function RestrictionsPanel() {
         </p>
       </div>
 
-      {loading && <p className="text-sm text-neutral-500">Cargando…</p>}
+      {loading && <Skeleton lines={3} />}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {!loading && restrictions.length === 0 && (
         <p className="text-sm text-neutral-500">

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { SupplementSuggestions } from "@/components/SupplementSuggestions";
 import { UserImageUpload } from "@/components/UserImageUpload";
 import type { Supplement, SupplementList, SupplementsToday, TodayDose } from "@/lib/types";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
   "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
@@ -357,7 +358,7 @@ export default function SupplementsPage() {
 
       <SupplementSuggestions onAdded={() => void load()} />
 
-      <section className="flex flex-col gap-4">
+      <section id="anadir-suplemento" className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Añadir suplemento</h2>
         <form onSubmit={onAdd} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
@@ -495,8 +496,8 @@ export default function SupplementsPage() {
           </label>
         </div>
 
-        {loading && <p className="text-sm text-neutral-500">Cargando…</p>}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {loading && <Skeleton lines={3} />}
+        {error && <ErrorState message={error} onRetry={() => void load()} />}
         {rowError && <p className="mb-2 text-sm text-red-600">{rowError}</p>}
 
         {list && (
@@ -507,7 +508,7 @@ export default function SupplementsPage() {
               </p>
             )}
             {list.items.length === 0 ? (
-              <p className="text-sm text-neutral-500">Todavía no has añadido ningún suplemento.</p>
+              <EmptyState message="Todavía no has añadido ningún suplemento." actionLabel="Añadir el primero" actionHref="#anadir-suplemento" />
             ) : (
               <ul className="flex flex-col divide-y divide-neutral-200 dark:divide-neutral-800">
                 {list.items.map((s) => (

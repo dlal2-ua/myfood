@@ -7,6 +7,32 @@ import { apiFetch } from "@/lib/api";
 import { clearQueue, clearUserCaches, listQueue } from "@/lib/offlineQueue";
 import type { CurrentUser } from "@/lib/session";
 
+const PRIMARY_LINKS = [
+  { href: "/", label: "Hoy" },
+  { href: "/log", label: "Registro" },
+  { href: "/scan", label: "Escanear" },
+  { href: "/diet-plans", label: "Planes" },
+  { href: "/chat", label: "Chat" },
+];
+
+const MORE_LINKS = [
+  { href: "/foods", label: "Alimentos" },
+  { href: "/water", label: "Agua" },
+  { href: "/supplements", label: "Suplementos" },
+  { href: "/recordatorios", label: "Recordatorios" },
+  { href: "/shopping-list", label: "Lista de la compra" },
+  { href: "/pantry", label: "Despensa" },
+  { href: "/recipes", label: "Recetas" },
+  { href: "/progress", label: "Progreso" },
+  { href: "/ayuno", label: "Ayuno" },
+  { href: "/calculadoras", label: "Calculadoras" },
+  { href: "/profile", label: "Perfil" },
+  { href: "/household", label: "Hogar" },
+  { href: "/wearables", label: "Wearables" },
+  { href: "/privacy", label: "Privacidad" },
+  { href: "/security", label: "Seguridad" },
+];
+
 export function NavBar({ user }: { user: CurrentUser | null }) {
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -36,38 +62,39 @@ export function NavBar({ user }: { user: CurrentUser | null }) {
   }
 
   return (
-    <nav className="border-b border-neutral-200 dark:border-neutral-800">
+    <nav aria-label="Principal" className="border-b border-neutral-200 dark:border-neutral-800">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-2 px-4 py-3">
         <Link href="/" className="font-semibold">
           MyFood
         </Link>
         {user ? (
-          <div className="flex flex-wrap items-center gap-4 text-sm">
-            <Link href="/profile">Perfil</Link>
-            <Link href="/foods">Alimentos</Link>
-            <Link href="/scan">Escanear</Link>
-            <Link href="/log">Registro</Link>
-            <Link href="/chat">Chat</Link>
-            <Link href="/water">Agua</Link>
-            <Link href="/shopping-list">Lista de la compra</Link>
-            <Link href="/pantry">Despensa</Link>
-            <Link href="/household">Hogar</Link>
-            <Link href="/progress">Progreso</Link>
-            <Link href="/ayuno">Ayuno</Link>
-            <Link href="/calculadoras">Calculadoras</Link>
-            <Link href="/supplements">Suplementos</Link>
-            <Link href="/recordatorios">Recordatorios</Link>
-            <Link href="/diet-plans">Planes</Link>
-            <Link href="/recipes">Recetas</Link>
-            <Link href="/wearables">Wearables</Link>
-            <Link href="/privacy">Privacidad</Link>
-            <Link href="/security">Seguridad</Link>
-            {user.role === "admin" && <Link href="/admin">Admin</Link>}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            {PRIMARY_LINKS.map((l) => (
+              <Link key={l.href} href={l.href} className="inline-flex min-h-11 items-center">
+                {l.label}
+              </Link>
+            ))}
+            <details className="relative">
+              <summary className="inline-flex min-h-11 cursor-pointer list-none items-center">
+                Más ▾
+              </summary>
+              <ul className="absolute right-0 z-40 mt-1 grid min-w-48 gap-0 rounded-[var(--radius-card)] border border-neutral-200 bg-[var(--color-surface)] p-2 shadow-lg dark:border-neutral-800">
+                {[...MORE_LINKS, ...(user.role === "admin" ? [{ href: "/admin", label: "Admin" }] : [])].map(
+                  (l) => (
+                    <li key={l.href}>
+                      <Link href={l.href} className="flex min-h-11 items-center rounded px-2">
+                        {l.label}
+                      </Link>
+                    </li>
+                  ),
+                )}
+              </ul>
+            </details>
             <button
               type="button"
               onClick={onLogout}
               disabled={loggingOut}
-              className="text-neutral-500 underline disabled:opacity-60"
+              className="min-h-11 text-neutral-500 underline disabled:opacity-60"
             >
               Salir
             </button>

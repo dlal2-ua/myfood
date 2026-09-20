@@ -224,7 +224,7 @@ def _evidence(key: str, payload: dict) -> str | None:
     for nutrient in payload.get("nutrients", []):
         if nutrient["key"] == key:
             return (
-                f"Tu ingesta media de {nutrient['label'].lower()} es el "
+                f"Tu ingesta media de {nutrient['label'][0].lower()}{nutrient['label'][1:]} es el "
                 f"{nutrient['pct_of_reference']:g} % de la referencia."
             )
     return None

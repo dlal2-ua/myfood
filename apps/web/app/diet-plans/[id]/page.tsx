@@ -15,6 +15,7 @@ import type {
   PlanItem,
   RecipeSummary,
 } from "@/lib/types";
+import { Skeleton } from "@/components/ui/states";
 
 export default function DietPlanDetailPage() {
   const params = useParams<{ id: string }>();
@@ -145,7 +146,7 @@ export default function DietPlanDetailPage() {
     setOpenItemId(openItemId === item.id ? null : item.id);
   }
 
-  if (loading) return <p className="text-sm text-neutral-500">Cargando…</p>;
+  if (loading) return <Skeleton lines={3} />;
   if (error || !plan) {
     return <p className="text-sm text-red-600">{error ?? "No se encontró el plan."}</p>;
   }

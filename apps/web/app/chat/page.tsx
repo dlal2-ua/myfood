@@ -9,6 +9,7 @@ import type {
   ChatProposal,
   FoodDetail,
 } from "@/lib/types";
+import { Skeleton } from "@/components/ui/states";
 
 const bubbleBase = "max-w-[85%] rounded-2xl px-4 py-2 text-sm";
 const userBubble = `${bubbleBase} self-end bg-[var(--color-primary)] text-white`;
@@ -203,7 +204,7 @@ export default function ChatPage() {
       </div>
 
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
-        {loadingHistory && <p className="text-sm text-neutral-500">Cargando…</p>}
+        {loadingHistory && <Skeleton lines={3} />}
         {!loadingHistory && history.length === 0 && (
           <p className="text-sm text-neutral-500">
             Escríbeme algo como «cámbiame la cena de hoy, tengo salmón» o «¿qué llevo hoy de
