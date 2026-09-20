@@ -175,7 +175,9 @@ def upsert_foods(conn, foods: Iterable[ParsedFood], batch_size: int = _BATCH_SIZ
     return count
 
 
-_DELETE_ALLERGENS_SQL = "DELETE FROM food_allergens WHERE food_id = ANY(%s::uuid[]) AND origin = ANY(%s)"
+_DELETE_ALLERGENS_SQL = (
+    "DELETE FROM food_allergens WHERE food_id = ANY(%s::uuid[]) AND origin = ANY(%s)"
+)
 _INSERT_ALLERGENS_SQL = """
 INSERT INTO food_allergens (food_id, allergen_code, origin) VALUES %s
 ON CONFLICT (food_id, allergen_code) DO NOTHING
