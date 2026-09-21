@@ -6,9 +6,20 @@ import { useEffect, useRef, useState } from "react";
 import { AddToLogForm } from "@/components/AddToLogForm";
 import { LogRecipeForm } from "@/components/LogRecipeForm";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
+import { cameraErrorMessage } from "@/lib/camera";
 import type { FoodDetail, Recipe } from "@/lib/types";
 
 const SCANNER_ELEMENT_ID = "barcode-scanner";
+
+/** html5-qrcode lanza (no rechaza) si se llama a `stop()` sin que la cámara haya arrancado, que es
+ * justo lo que pasa cuando el usuario no ha dado permiso y busca por código escrito. */
+async function stopScanner(scanner: Html5Qrcode | null): Promise<void> {
+  try {
+    await scanner?.stop();
+  } catch {
+    // no estaba en marcha
+  }
+}
 
 const inputClass =
   "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
@@ -45,6 +56,7 @@ export default function ScanPage() {
   const [manual, setManual] = useState<ManualForm>(EMPTY_MANUAL);
   const [manualError, setManualError] = useState<string | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
+  const [typedCode, setTypedCode] = useState("");
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const handledRef = useRef(false);
 
@@ -76,19 +88,22 @@ export default function ScanPage() {
           // constantemente mientras se apunta la cámara, es esperado, se ignora.
         },
       )
-      .catch((err) => setScannerError(errorMessage(err)));
+      .catch((err) => setScannerError(cameraErrorMessage(err)));
 
     return () => {
-      scanner
-        .stop()
-        .catch(() => {})
-        .finally(() => scanner.clear());
+      void stopScanner(scanner).finally(() => {
+        try {
+          scanner.clear();
+        } catch {
+          // ya estaba limpio
+        }
+      });
     };
   }, [scanning]);
 
   async function onScanned(decodedText: string) {
     setScanning(false);
-    await scannerRef.current?.stop().catch(() => {});
+    await stopScanner(scannerRef.current);
     setBarcode(decodedText);
     setLookupLoading(true);
     setNotFound(false);
@@ -115,6 +130,18 @@ export default function ScanPage() {
     } finally {
       setLookupLoading(false);
     }
+  }
+
+  async function onTypedCodeSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const code = typedCode.replace(/\s/g, "");
+    if (!/^\d{8,14}$/.test(code)) {
+      setScannerError("El código de barras tiene entre 8 y 14 cifras.");
+      return;
+    }
+    setScannerError(null);
+    handledRef.current = true;
+    await onScanned(code);
   }
 
   function onRescan() {
@@ -167,7 +194,32 @@ export default function ScanPage() {
         </div>
       )}
 
-      {scannerError && <p className="text-sm text-red-600 dark:text-red-400">{scannerError}</p>}
+      {scannerError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{scannerError}</p>}
+
+      {!food && !recipe && !notFound && !lookupLoading && (
+        <form onSubmit={onTypedCodeSubmit} className="flex max-w-sm flex-col gap-2">
+          <label className="flex flex-col gap-1.5 text-sm font-semibold">
+            ¿Sin cámara? Escribe el código de barras
+            <span className="flex gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="8410000000000"
+                value={typedCode}
+                onChange={(e) => setTypedCode(e.target.value)}
+                className="h-12 min-w-0 flex-1 rounded-2xl px-4 text-[15px] font-normal"
+              />
+              <button
+                type="submit"
+                className="min-h-12 rounded-full bg-[var(--color-primary)] px-5 text-sm font-bold text-[var(--color-on-primary)] hover:bg-[var(--color-primary-hover)]"
+              >
+                Buscar
+              </button>
+            </span>
+          </label>
+        </form>
+      )}
       {!scanning && lookupLoading && <p className="text-sm text-neutral-500">Buscando…</p>}
 
       {recipe && (

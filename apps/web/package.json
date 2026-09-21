@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "e2e": "node e2e/offline.cjs && node e2e/ui.cjs && node e2e/f7.cjs && node e2e/foods.cjs"
+    "e2e": "node e2e/offline.cjs && node e2e/ui.cjs && node e2e/f7.cjs && node e2e/foods.cjs && node e2e/scan.cjs"
   },
   "dependencies": {
     "@capacitor/core": "8.5.2",

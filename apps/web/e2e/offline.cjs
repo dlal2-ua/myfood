@@ -63,6 +63,14 @@ const local = () => { const d = new Date(); return `${d.getFullYear()}-${String(
     // --- vuelve la red ---
     await page.goto(BASE + "/water").catch(() => {});
     await context.setOffline(false);
+    // La barra de estado tarda en pintarse tras recargar, así que no vale «no hay texto pendiente»:
+    // se espera a que el servidor tenga de verdad lo registrado sin conexión.
+    for (let i = 0; i < 30; i++) {
+      const d = await api("GET", `/api/log?date=${local()}`);
+      const w = await api("GET", `/api/water/log?date=${local()}`);
+      if (d.body.food.length > 0 && w.body.total_ml > 0) break;
+      await page.waitForTimeout(2000);
+    }
     await page.waitForFunction(() => !document.body.innerText.includes("pendiente"), null, { timeout: 30000 });
     log("queue drained after reconnect");
 
@@ -79,6 +87,7 @@ const local = () => { const d = new Date(); return `${d.getFullYear()}-${String(
 
     // logout limpia cachés con datos de usuario
     await page.goto(BASE + "/log", { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: /Cuenta de/ }).first().click(); // «Salir» está en el menú de la cuenta
     await page.click('button:has-text("Salir")');
     await page.waitForURL("**/login", { timeout: 15000 });
     const after = await page.evaluate(() => caches.keys());

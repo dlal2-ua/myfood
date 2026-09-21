@@ -1,6 +1,8 @@
 "use client";
 
+import { DayPager } from "@/components/DayPager";
 import { localDateIso } from "@/lib/dates";
+import { groupByMeal } from "@/lib/today";
 import { mealTypeForTime } from "@/lib/meals";
 import { FoodImage } from "@/components/FoodImage";
 import { useEffect, useRef, useState } from "react";
@@ -403,36 +405,140 @@ export default function LogPage() {
   }
 
   return (
-    <main className="flex flex-col gap-8">
-      <div className="flex items-center gap-3">
-        <h1 className="text-3xl font-extrabold tracking-tight">Registro diario</h1>
-        <input
-          type="date"
-          className={inputClass}
-          value={logDate}
-          onChange={(e) => setLogDate(e.target.value)}
-        />
+    <main className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-3xl font-extrabold tracking-tight">Diario</h1>
+        <DayPager date={logDate} onChange={setLogDate} />
       </div>
 
-      <section className="flex flex-wrap items-end gap-3 text-sm">
-        <label className="flex flex-col gap-1">
-          Copiar los registros del día
-          <input
-            type="date"
-            className={inputClass}
-            value={copyFrom}
-            onChange={(e) => setCopyFrom(e.target.value)}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => void onCopyDay()}
-          disabled={copying}
-          className="rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-2 disabled:opacity-60"
-        >
-          {copying ? "Copiando…" : `Copiar al ${logDate}`}
-        </button>
-        {copyMsg && <span className="text-neutral-600 dark:text-neutral-400">{copyMsg}</span>}
+      <section aria-label="Comidas del día" className="flex flex-col gap-4">
+        {loading && <Skeleton lines={3} />}
+        {error && <ErrorState message={error} onRetry={() => void loadDay(logDate)} />}
+        {day && (
+          <>
+            <div className="grid grid-cols-4 gap-2 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-center shadow-[var(--shadow-card)]">
+              {[
+                { label: "Kcal", value: day.totals.kcal, unit: "", color: "var(--color-primary)" },
+                { label: "Proteína", value: day.totals.protein_g, unit: " g", color: "var(--color-protein)" },
+                { label: "Carbos", value: day.totals.carbs_g, unit: " g", color: "var(--color-carbs)" },
+                { label: "Grasa", value: day.totals.fat_g, unit: " g", color: "var(--color-fat)" },
+              ].map((cell) => (
+                <div key={cell.label}>
+                  <p className="flex items-center justify-center gap-1 text-xs text-[var(--color-muted)]">
+                    <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full" style={{ background: cell.color }} />
+                    {cell.label}
+                  </p>
+                  <p className="text-lg font-extrabold tracking-tight">
+                    {Math.round(Number(cell.value) * 10) / 10}
+                    {cell.unit}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {day.food.length === 0 ? (
+              <EmptyState message="Todavía no hay entradas para este día." actionLabel="Escanear un producto" actionHref="/scan" />
+            ) : (
+              <div className="flex flex-col gap-3">
+                {groupByMeal(day.food).map((group) => (
+                  <div
+                    key={group.mealType}
+                    className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)]"
+                  >
+                    <div className="flex items-center justify-between gap-3 px-4 py-3">
+                      <h2 className="text-[15px] font-bold">{MEAL_TYPE_LABELS[group.mealType]}</h2>
+                      <span className="text-xs font-semibold text-[var(--color-muted)]">
+                        {Math.round(group.entries.reduce((sum, e) => sum + Number(e.kcal), 0))} kcal
+                      </span>
+                    </div>
+                    <ul className="divide-y divide-[var(--color-border)] border-t border-[var(--color-border)] px-4">
+                      {group.entries.map((entry) => (
+                        <li key={entry.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
+                    {editingId === entry.id ? (
+                      <div className="flex flex-wrap items-end gap-3">
+                        <span className="text-sm font-medium">
+                          {entry.recipe_name ??
+                            ((entry.food_id && foodNames[entry.food_id]) || "Alimento")}
+                        </span>
+                        <select
+                          className={inputClass}
+                          value={editMealType}
+                          onChange={(e) => setEditMealType(e.target.value as MealType)}
+                        >
+                          {MEAL_TYPES.map((mt) => (
+                            <option key={mt} value={mt}>
+                              {MEAL_TYPE_LABELS[mt]}
+                            </option>
+                          ))}
+                        </select>
+                        {entry.food_id && (
+                          <input
+                            type="number"
+                            min={1}
+                            max={5000}
+                            className={inputClass}
+                            value={editGrams}
+                            onChange={(e) => setEditGrams(e.target.value)}
+                            aria-label={
+                              entry.weighed_as === "cooked" ? "Gramos (peso cocinado)" : "Gramos"
+                            }
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onSaveEdit(entry.id)}
+                          disabled={rowBusy === entry.id}
+                          className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
+                        >
+                          Guardar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingId(null)}
+                          className="text-sm text-neutral-500 underline"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <p className="text-sm font-medium">
+                            {entry.recipe_name ??
+                              ((entry.food_id && foodNames[entry.food_id]) || "Alimento")}
+                          </p>
+                          <p className="text-xs text-neutral-500">
+                                                        {entry.weighed_as === "cooked" && entry.entered_grams
+                              ? `${entry.entered_grams} g cocinado (≈${entry.grams} g crudo)`
+                              : `${entry.grams} g`}{" "}
+                            · {entry.kcal} kcal
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm">
+                          <button type="button" onClick={() => startEdit(entry)} className="underline">
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDelete(entry.id)}
+                            disabled={rowBusy === entry.id}
+                            className="text-red-600 dark:text-red-400 underline disabled:opacity-60"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+            {rowError && <p className="text-sm text-red-600 dark:text-red-400">{rowError}</p>}
+            <MicronutrientsPanel date={logDate} />
+          </>
+        )}
       </section>
 
       {favorites.length > 0 && (
@@ -454,6 +560,78 @@ export default function LogPage() {
           </div>
         </section>
       )}
+
+      <section id="registrar" className="scroll-mt-20">
+        <h2 className="mb-3 text-lg font-semibold">Registrar alimento</h2>
+        <FoodSearchBox onSelect={onSelectFromSearch} />
+        {selectedFood && (
+          <form onSubmit={onAdd} className="mt-3 flex flex-wrap items-end gap-3">
+            <p className="text-sm">
+              Elegido: <span className="font-medium">{selectedFood.name_es}</span>
+            </p>
+            <label className="flex flex-col gap-1 text-sm">
+              Comida
+              <select
+                className={inputClass}
+                value={mealType}
+                onChange={(e) => setMealType(e.target.value as MealType)}
+              >
+                {MEAL_TYPES.map((mt) => (
+                  <option key={mt} value={mt}>
+                    {MEAL_TYPE_LABELS[mt]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Cantidad (g)
+              <input
+                type="number"
+                required
+                min={1}
+                max={5000}
+                className={inputClass}
+                value={grams}
+                onChange={(e) => setGrams(e.target.value)}
+              />
+            </label>
+            {cookingFactor ? (
+              <fieldset className="flex flex-col gap-1 text-sm">
+                <legend className="mb-1">¿Lo pesaste crudo o ya cocinado?</legend>
+                <div className="flex gap-3">
+                  {(["raw", "cooked"] as const).map((v) => (
+                    <label key={v} className="flex items-center gap-1">
+                      <input
+                        type="radio"
+                        name="log-weighed-as"
+                        checked={weighedAs === v}
+                        onChange={() => setWeighedAs(v)}
+                      />
+                      {v === "raw" ? "Crudo" : "Cocinado"}
+                    </label>
+                  ))}
+                </div>
+                {weighedAs === "cooked" && Number(grams) > 0 && (
+                  <span className="text-xs text-neutral-500">
+                    ≈ {Math.round(Number(grams) / cookingFactor)} g en crudo.
+                  </span>
+                )}
+              </fieldset>
+            ) : null}
+            <button
+              type="submit"
+              disabled={adding}
+              className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
+            >
+              {adding ? "Guardando…" : "Añadir"}
+            </button>
+          </form>
+        )}
+        {addError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{addError}</p>}
+        {queuedNote && (
+          <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">{queuedNote}</p>
+        )}
+      </section>
 
       <section id="natural" className="scroll-mt-20 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="mb-3 text-lg font-semibold">Registrar con lenguaje natural</h2>
@@ -556,193 +734,25 @@ export default function LogPage() {
         )}
       </section>
 
-      <section id="registrar" className="scroll-mt-20">
-        <h2 className="mb-3 text-lg font-semibold">Registrar alimento</h2>
-        <FoodSearchBox onSelect={onSelectFromSearch} />
-        {selectedFood && (
-          <form onSubmit={onAdd} className="mt-3 flex flex-wrap items-end gap-3">
-            <p className="text-sm">
-              Elegido: <span className="font-medium">{selectedFood.name_es}</span>
-            </p>
-            <label className="flex flex-col gap-1 text-sm">
-              Comida
-              <select
-                className={inputClass}
-                value={mealType}
-                onChange={(e) => setMealType(e.target.value as MealType)}
-              >
-                {MEAL_TYPES.map((mt) => (
-                  <option key={mt} value={mt}>
-                    {MEAL_TYPE_LABELS[mt]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              Cantidad (g)
-              <input
-                type="number"
-                required
-                min={1}
-                max={5000}
-                className={inputClass}
-                value={grams}
-                onChange={(e) => setGrams(e.target.value)}
-              />
-            </label>
-            {cookingFactor ? (
-              <fieldset className="flex flex-col gap-1 text-sm">
-                <legend className="mb-1">¿Lo pesaste crudo o ya cocinado?</legend>
-                <div className="flex gap-3">
-                  {(["raw", "cooked"] as const).map((v) => (
-                    <label key={v} className="flex items-center gap-1">
-                      <input
-                        type="radio"
-                        name="log-weighed-as"
-                        checked={weighedAs === v}
-                        onChange={() => setWeighedAs(v)}
-                      />
-                      {v === "raw" ? "Crudo" : "Cocinado"}
-                    </label>
-                  ))}
-                </div>
-                {weighedAs === "cooked" && Number(grams) > 0 && (
-                  <span className="text-xs text-neutral-500">
-                    ≈ {Math.round(Number(grams) / cookingFactor)} g en crudo.
-                  </span>
-                )}
-              </fieldset>
-            ) : null}
-            <button
-              type="submit"
-              disabled={adding}
-              className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
-            >
-              {adding ? "Guardando…" : "Añadir"}
-            </button>
-          </form>
-        )}
-        {addError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{addError}</p>}
-        {queuedNote && (
-          <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">{queuedNote}</p>
-        )}
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">Entradas del {logDate}</h2>
-        {loading && <Skeleton lines={3} />}
-        {error && <ErrorState message={error} onRetry={() => void loadDay(logDate)} />}
-        {day && (
-          <>
-            {day.food.length === 0 ? (
-              <EmptyState message="Todavía no hay entradas para este día." actionLabel="Escanear un producto" actionHref="/scan" />
-            ) : (
-              <ul className="divide-y divide-[var(--color-border)]">
-                {day.food.map((entry) => (
-                  <li key={entry.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
-                    {editingId === entry.id ? (
-                      <div className="flex flex-wrap items-end gap-3">
-                        <span className="text-sm font-medium">
-                          {entry.recipe_name ??
-                            ((entry.food_id && foodNames[entry.food_id]) || "Alimento")}
-                        </span>
-                        <select
-                          className={inputClass}
-                          value={editMealType}
-                          onChange={(e) => setEditMealType(e.target.value as MealType)}
-                        >
-                          {MEAL_TYPES.map((mt) => (
-                            <option key={mt} value={mt}>
-                              {MEAL_TYPE_LABELS[mt]}
-                            </option>
-                          ))}
-                        </select>
-                        {entry.food_id && (
-                          <input
-                            type="number"
-                            min={1}
-                            max={5000}
-                            className={inputClass}
-                            value={editGrams}
-                            onChange={(e) => setEditGrams(e.target.value)}
-                            aria-label={
-                              entry.weighed_as === "cooked" ? "Gramos (peso cocinado)" : "Gramos"
-                            }
-                          />
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => onSaveEdit(entry.id)}
-                          disabled={rowBusy === entry.id}
-                          className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
-                        >
-                          Guardar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingId(null)}
-                          className="text-sm text-neutral-500 underline"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <div>
-                          <p className="text-sm font-medium">
-                            {entry.recipe_name ??
-                              ((entry.food_id && foodNames[entry.food_id]) || "Alimento")}
-                          </p>
-                          <p className="text-xs text-neutral-500">
-                            {MEAL_TYPE_LABELS[entry.meal_type]} ·{" "}
-                            {entry.weighed_as === "cooked" && entry.entered_grams
-                              ? `${entry.entered_grams} g cocinado (≈${entry.grams} g crudo)`
-                              : `${entry.grams} g`}{" "}
-                            · {entry.kcal} kcal
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-3 text-sm">
-                          <button type="button" onClick={() => startEdit(entry)} className="underline">
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onDelete(entry.id)}
-                            disabled={rowBusy === entry.id}
-                            className="text-red-600 dark:text-red-400 underline disabled:opacity-60"
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {rowError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{rowError}</p>}
-
-            <div className="mt-4 flex gap-6 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4 text-sm">
-              <div>
-                <p className="text-neutral-500">Kcal</p>
-                <p className="font-semibold">{day.totals.kcal}</p>
-              </div>
-              <div>
-                <p className="text-neutral-500">Proteína</p>
-                <p className="font-semibold">{day.totals.protein_g} g</p>
-              </div>
-              <div>
-                <p className="text-neutral-500">Grasa</p>
-                <p className="font-semibold">{day.totals.fat_g} g</p>
-              </div>
-              <div>
-                <p className="text-neutral-500">Carbos</p>
-                <p className="font-semibold">{day.totals.carbs_g} g</p>
-              </div>
-            </div>
-            <MicronutrientsPanel date={logDate} />
-          </>
-        )}
+      <section className="flex flex-wrap items-end gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-sm shadow-[var(--shadow-card)]">
+        <label className="flex flex-col gap-1">
+          Copiar los registros del día
+          <input
+            type="date"
+            className={inputClass}
+            value={copyFrom}
+            onChange={(e) => setCopyFrom(e.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => void onCopyDay()}
+          disabled={copying}
+          className="rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-2 disabled:opacity-60"
+        >
+          {copying ? "Copiando…" : `Copiar al ${logDate}`}
+        </button>
+        {copyMsg && <span className="text-neutral-600 dark:text-neutral-400">{copyMsg}</span>}
       </section>
     </main>
   );

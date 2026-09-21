@@ -96,6 +96,13 @@ body {
     color: var(--color-text);
     border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-control);
+    max-width: 100%;
+  }
+
+  /* Una etiqueta con un <select> de opciones largas crecía hasta el ancho de la más larga y
+     desbordaba la pantalla en móvil. */
+  label {
+    max-width: 100%;
   }
 
   ::placeholder {
