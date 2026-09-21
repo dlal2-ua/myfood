@@ -44,7 +44,7 @@ const local = () => { const d = new Date(); return `${d.getFullYear()}-${String(
     await context.setOffline(true);
     await page.waitForTimeout(500);
     // La cantidad va por medida casera: se elige «gramos» para que 150 sean 150 g.
-    await page.selectOption('select:near(#portion-quantity)', "g").catch(() => {});
+    await page.selectOption("#portion-measure", "g");
     await page.fill("#portion-quantity", "150");
     await page.click('button:has-text("Registrar")');
     await page.waitForSelector("text=guardado en este dispositivo", { timeout: 8000 });
