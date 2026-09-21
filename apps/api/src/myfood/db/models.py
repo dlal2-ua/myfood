@@ -734,3 +734,20 @@ class ChatMessage(Base):
         UUID(as_uuid=True), ForeignKey("ai_sessions.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserAchievement(Base):
+    """Logro ya conseguido por un usuario (migración 0018). El cálculo sigue siendo
+    determinista en `domain/gamification.py`; esta tabla solo recuerda CUÁNDO se consiguió,
+    que es lo único que no se puede deducir de los datos, y si ya se avisó."""
+
+    __tablename__ = "user_achievements"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    key: Mapped[str] = mapped_column(String, nullable=False)
+    earned_on: Mapped[date] = mapped_column(Date, nullable=False)
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

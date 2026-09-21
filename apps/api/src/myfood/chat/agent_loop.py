@@ -23,7 +23,13 @@ from myfood.chat.tools import build_chat_tools
 from myfood.domain.diet_engine import CandidateFood
 
 MAX_TOOL_CALLS_PER_TURN = 5
-CHAT_TURN_TIMEOUT_SECONDS = 20.0
+# La sección 24.5 fija 20s de turno. Medido en producción, ese tope corta turnos que iban
+# bien: el subproceso del CLI del Agent SDK tarda unos segundos solo en arrancar, y a eso se
+# le suman hasta 5 llamadas a herramientas antes de la respuesta. Con 20s, dos mensajes
+# reales seguidos fallaron con AI_TIMEOUT aunque el modelo estaba respondiendo; un turno
+# normal (sin herramientas) se resuelve en unos 5s. Se sube a 55s, que sigue por debajo del
+# tope de 100s del proxy y deja margen para el turno con más herramientas.
+CHAT_TURN_TIMEOUT_SECONDS = 55.0
 
 
 @dataclass

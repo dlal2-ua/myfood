@@ -10,6 +10,13 @@ import type {
   FoodDetail,
 } from "@/lib/types";
 import { Skeleton } from "@/components/ui/states";
+import {
+  AiWaiting,
+  QuotaBadge,
+  ThinkingDots,
+  useAiQuota,
+  useElapsedSeconds,
+} from "@/components/ui/AiWaiting";
 
 const bubbleBase = "max-w-[85%] rounded-2xl px-4 py-2 text-sm";
 const userBubble = `${bubbleBase} self-end bg-[var(--color-primary)] text-[var(--color-on-primary)]`;
@@ -27,6 +34,9 @@ export default function ChatPage() {
   const [deciding, setDeciding] = useState(false);
   const [recording, setRecording] = useState(false);
   const [micUnsupported, setMicUnsupported] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const elapsed = useElapsedSeconds(sending);
+  const { quota, reload: reloadQuota } = useAiQuota("chat");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -75,10 +85,15 @@ export default function ChatPage() {
     setFoodNames((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
   }
 
-  async function send(body: FormData) {
+  async function send(body: FormData, pending?: string) {
+    if (sending) return;
     setSending(true);
     setError(null);
     setNeedsConsent(false);
+    // El mensaje se ve en cuanto se envía, sin esperar a que vuelva el historial: antes
+    // desaparecía del cuadro de texto y no aparecía en la conversación hasta que el modelo
+    // contestaba, así que durante la espera no había ni rastro de lo escrito.
+    setPendingMessage(pending ?? null);
     try {
       const res = await apiFetch<ChatMessageResponse>("/api/chat/message", {
         method: "POST",
@@ -109,17 +124,21 @@ export default function ChatPage() {
       }
     } finally {
       setSending(false);
+      setPendingMessage(null);
+      reloadQuota();
     }
   }
 
   async function onSendText(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = text.trim();
+    // El `disabled` del botón no basta: el Enter del teclado puede llegar igual, y cada
+    // envío gasta uno de los mensajes del día aunque el texto sea idéntico al anterior.
     if (!trimmed || sending) return;
     const body = new FormData();
     body.set("text", trimmed);
     setText("");
-    await send(body);
+    await send(body, trimmed);
   }
 
   async function acceptConsent() {
@@ -192,9 +211,12 @@ export default function ChatPage() {
     <main className="flex h-[calc(100dvh-11.6rem)] max-w-2xl flex-col gap-4 md:h-[calc(100dvh-5rem)]">
       <div>
         <h1 className="text-3xl font-extrabold tracking-tight">Chat</h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Pídeme cambios sobre la marcha — nunca aplico nada sin que lo confirmes.
-        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <p className="text-sm text-neutral-500">
+            Pídeme cambios sobre la marcha — nunca aplico nada sin que lo confirmes.
+          </p>
+          <QuotaBadge quota={quota} />
+        </div>
         <div className="mt-2">
           <MedicalDisclaimer>
             El chat no da consejo médico. Los cambios que propone son estimaciones que tú
@@ -222,6 +244,15 @@ export default function ChatPage() {
               {m.content}
             </div>
           ))}
+          {pendingMessage && (
+            <div className={`${userBubble} opacity-70`}>{pendingMessage}</div>
+          )}
+          {sending && (
+            <div className={`${assistantBubble} flex items-center gap-2 text-neutral-500`}>
+              <ThinkingDots />
+              <span>Pensando…</span>
+            </div>
+          )}
         </div>
 
         {proposal && (
@@ -270,6 +301,7 @@ export default function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
+      {sending && <AiWaiting task="chat" elapsedSeconds={elapsed} label="Preparando la respuesta" />}
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {needsConsent && (
         <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3 text-sm">
@@ -322,10 +354,11 @@ export default function ChatPage() {
         </button>
         <button
           type="submit"
-          disabled={sending || recording || !text.trim()}
-          className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
+          disabled={sending || recording || !text.trim() || quota?.remaining === 0}
+          className="inline-flex items-center gap-2 rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
         >
-          {sending ? "…" : "Enviar"}
+          {sending ? <ThinkingDots /> : null}
+          {sending ? "Enviando" : "Enviar"}
         </button>
       </form>
     </main>

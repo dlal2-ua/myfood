@@ -36,7 +36,9 @@ _ALLOWED_AUDIO_CONTENT_TYPES = {
 _MAX_AUDIO_BYTES = 15 * 1024 * 1024
 # Turno del chat (sección 24.5) + un margen breve para el propio Redis
 # BRPOP — evita que el 504 llegue justo antes de que el worker termine.
-_WAIT_TIMEOUT_SECONDS = 22
+# Siempre un poco más que `CHAT_TURN_TIMEOUT_SECONDS`: así quien corta el turno es el worker
+# (con su error concreto) y no esta espera, que solo sabría decir "tardó demasiado".
+_WAIT_TIMEOUT_SECONDS = 60
 
 _WORKER_ERROR_MESSAGES = {
     "AI_NOT_CONFIGURED": "El administrador todavía no ha configurado la credencial de iafood.",

@@ -7,7 +7,14 @@ import { mealTypeForTime } from "@/lib/meals";
 import { FoodImage } from "@/components/FoodImage";
 import { useEffect, useRef, useState } from "react";
 import { useCurrentUserId } from "@/components/CurrentUser";
-import { apiFetch, errorMessage } from "@/lib/api";
+import { ApiError, apiFetch, errorMessage } from "@/lib/api";
+import {
+  AiWaiting,
+  QuotaBadge,
+  ThinkingDots,
+  useAiQuota,
+  useElapsedSeconds,
+} from "@/components/ui/AiWaiting";
 import { QUEUE_FLUSHED_EVENT, submitOrQueue } from "@/lib/offlineQueue";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
 import { MicronutrientsPanel } from "@/components/MicronutrientsPanel";
@@ -89,6 +96,8 @@ export default function LogPage() {
   const [smartReviewItems, setSmartReviewItems] = useState<SmartLogReviewItem[]>([]);
   const [smartConfirmingIndex, setSmartConfirmingIndex] = useState<number | null>(null);
   const smartPollCountRef = useRef(0);
+  const smartElapsed = useElapsedSeconds(smartRequesting);
+  const { quota: smartQuota, reload: reloadSmartQuota } = useAiQuota("smart_log");
 
   useEffect(() => {
     void loadDay(logDate);
@@ -303,49 +312,65 @@ export default function LogPage() {
     }
   }
 
-  async function pollSmartLogSession(sessionId: string) {
+  /** Espera a que el worker termine de interpretar el texto. Devuelve una promesa que solo
+   * se resuelve cuando la sesión deja de estar `running` — antes esta función se resolvía
+   * tras el PRIMER sondeo (los siguientes iban por `setTimeout`), así que el botón volvía a
+   * habilitarse al instante mientras seguía trabajando: justo lo que invita a reenviar. */
+  function pollSmartLogSession(sessionId: string): Promise<void> {
     smartPollCountRef.current = 0;
-    const tick = async () => {
-      smartPollCountRef.current += 1;
-      let session: AiSession;
-      try {
-        session = await apiFetch<AiSession>(`/api/ai/sessions/${sessionId}`);
-      } catch (err) {
-        setSmartError(errorMessage(err));
-        return;
-      }
-      if (session.status === "running") {
-        if (smartPollCountRef.current >= SMART_LOG_MAX_POLL_ATTEMPTS) {
-          setSmartError("La interpretación está tardando más de lo esperado. Inténtalo de nuevo.");
+    return new Promise<void>((resolve) => {
+      const tick = async () => {
+        smartPollCountRef.current += 1;
+        let session: AiSession;
+        try {
+          session = await apiFetch<AiSession>(`/api/ai/sessions/${sessionId}`);
+        } catch (err) {
+          setSmartError(errorMessage(err));
+          resolve();
           return;
         }
-        setTimeout(() => void tick(), SMART_LOG_POLL_INTERVAL_MS);
-        return;
-      }
-      if (session.status !== "succeeded") {
-        const detail = session.validation_errors?.[0]?.message;
-        setSmartError(detail ?? "No se ha podido interpretar el texto.");
-        return;
-      }
-      const payload = session.response_payload as {
-        items: SmartLogItem[];
-        warning: string | null;
-      } | null;
-      const items = payload?.items ?? [];
-      setSmartReviewItems(
-        items.map((item) => ({
-          ...item,
-          gramsInput: String(item.grams),
-          mealType: mealType,
-        })),
-      );
-      setSmartWarning(items.length === 0 ? (payload?.warning ?? "NO_MATCH") : null);
-    };
-    await tick();
+        if (session.status === "running") {
+          if (smartPollCountRef.current >= SMART_LOG_MAX_POLL_ATTEMPTS) {
+            setSmartError(
+              "La interpretación está tardando más de lo esperado. Vuelve a entrar en un " +
+                "momento: si termina, la verás aquí sin gastar otra petición.",
+            );
+            resolve();
+            return;
+          }
+          setTimeout(() => void tick(), SMART_LOG_POLL_INTERVAL_MS);
+          return;
+        }
+        if (session.status !== "succeeded") {
+          const detail = session.validation_errors?.[0]?.message;
+          setSmartError(detail ?? "No se ha podido interpretar el texto.");
+          resolve();
+          return;
+        }
+        const payload = session.response_payload as {
+          items: SmartLogItem[];
+          warning: string | null;
+        } | null;
+        const items = payload?.items ?? [];
+        setSmartReviewItems(
+          items.map((item) => ({
+            ...item,
+            gramsInput: String(item.grams),
+            mealType: mealType,
+          })),
+        );
+        setSmartWarning(items.length === 0 ? (payload?.warning ?? "NO_MATCH") : null);
+        resolve();
+      };
+      void tick();
+    });
   }
 
   async function onSmartLogSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Segunda barrera además de `disabled`: el Enter del teclado móvil puede llegar
+    // mientras el botón ya está deshabilitado, y cada envío gasta una petición del día.
+    if (smartRequesting || !smartText.trim()) return;
     setSmartRequesting(true);
     setSmartError(null);
     setSmartWarning(null);
@@ -359,13 +384,18 @@ export default function LogPage() {
       }
       const session = await apiFetch<AiSession>("/api/log/smart", {
         method: "POST",
-        body: JSON.stringify({ text: smartText }),
+        body: JSON.stringify({ text: smartText.trim() }),
       });
       await pollSmartLogSession(session.id);
     } catch (err) {
-      setSmartError(errorMessage(err));
+      setSmartError(
+        err instanceof ApiError && err.status === 429
+          ? `${err.message} Se reinician a las 00:00.`
+          : errorMessage(err),
+      );
     } finally {
       setSmartRequesting(false);
+      reloadSmartQuota();
     }
   }
 
@@ -634,7 +664,10 @@ export default function LogPage() {
       </section>
 
       <section id="natural" className="scroll-mt-20 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
-        <h2 className="mb-3 text-lg font-semibold">Registrar con lenguaje natural</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">Registrar con lenguaje natural</h2>
+          <QuotaBadge quota={smartQuota} />
+        </div>
         <p className="mb-3 text-sm text-neutral-500">
           Escribe lo que has comido, p. ej. &quot;dos huevos fritos y una tostada con
           aceite&quot;. Claude propone qué alimentos son (nunca gramos ni calorías) — tú
@@ -648,12 +681,14 @@ export default function LogPage() {
             className={`${inputClass} min-w-[16rem] flex-1`}
             value={smartText}
             onChange={(e) => setSmartText(e.target.value)}
+            disabled={smartRequesting}
           />
           <button
             type="submit"
-            disabled={smartRequesting}
-            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
+            disabled={smartRequesting || smartQuota?.remaining === 0}
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
+            {smartRequesting && <ThinkingDots />}
             {smartRequesting ? "Interpretando…" : "Interpretar"}
           </button>
         </form>
@@ -663,11 +698,23 @@ export default function LogPage() {
             checked={smartConsent}
             onChange={(e) => setSmartConsent(e.target.checked)}
             className="mt-0.5"
+            disabled={smartRequesting}
           />
           Acepto que este texto (sin nombre ni datos identificativos) se envíe a Claude
           para interpretarlo.
         </label>
 
+        {smartRequesting && (
+          <div className="mt-3">
+            <AiWaiting task="smart_log" elapsedSeconds={smartElapsed} />
+          </div>
+        )}
+        {!smartRequesting && smartQuota?.remaining === 0 && (
+          <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+            Has gastado tus {smartQuota.limit} interpretaciones de hoy. Vuelven a las 00:00 —
+            mientras tanto puedes registrar buscando el alimento aquí arriba.
+          </p>
+        )}
         {smartError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{smartError}</p>}
         {smartWarning && (
           <p className="mt-2 text-sm text-neutral-500">

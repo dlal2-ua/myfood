@@ -84,3 +84,48 @@ def test_no_achievement_ever_mentions_weight_or_calories():
         text = f"{a.title} {a.description}".lower()
         for word in banned_words:
             assert word not in text
+
+
+def test_every_achievement_has_a_badge():
+    """Cada logro lleva su insignia: sin `icon`/`tier`/`family` la pared de insignias
+    no sabría qué dibujar ni dónde agruparlo."""
+    from myfood.domain.gamification import TIERS
+
+    for a in build_achievements():
+        assert a.icon
+        assert a.tier in TIERS
+        assert a.family
+
+
+def test_build_achievements_tolerates_missing_counters():
+    """Un contador que no se pase cuenta como 0 — añadir un logro nuevo no puede romper
+    a quien llame con los contadores de antes."""
+    achievements = build_achievements(longest_streak=7)
+    by_key = {a.key: a for a in achievements}
+    assert by_key["streak_7"].earned is True
+    assert by_key["water_7_days"].earned is False
+    assert by_key["water_7_days"].progress == 0
+
+
+def test_new_families_thresholds():
+    achievements = build_achievements(
+        logging_days=30, distinct_foods=50, complete_days=10, water_logging_days=7
+    )
+    by_key = {a.key: a for a in achievements}
+    assert by_key["first_log"].earned is True
+    assert by_key["logging_30_days"].earned is True
+    assert by_key["logging_180_days"].earned is False
+    assert by_key["variety_50_foods"].earned is True
+    assert by_key["variety_200_foods"].earned is False
+    assert by_key["complete_days_10"].earned is True
+    assert by_key["water_7_days"].earned is True
+
+
+def test_no_achievement_mentions_weight_or_calories_even_with_the_new_ones():
+    """Misma comprobación de R10 que arriba, pero sobre la lista COMPLETA: ninguna
+    insignia nueva puede colarse premiando resultado corporal."""
+    banned_words = ["peso", "kcal", "calor", "déficit", "deficit", "grasa", "báscula", "adelgaz"]
+    for a in build_achievements():
+        text = f"{a.title} {a.description}".lower()
+        for word in banned_words:
+            assert word not in text, f"{a.key} menciona «{word}»"

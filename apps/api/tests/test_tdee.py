@@ -131,3 +131,56 @@ async def test_targets_switch_to_adaptive_tdee_with_enough_history(
     assert row.is_reliable is True
     assert row.logging_days == 12
     assert float(row.estimated_tdee) == pytest.approx(estimated_tdee, abs=0.01)
+
+
+async def test_opening_progress_twice_at_once_does_not_collide(
+    registered_client, superuser_conn, test_food
+):
+    """«Progreso» pide `/progress/summary` y `/progress/tdee` a la vez, y ambas calculan la
+    estimación de la misma semana. Antes del upsert, la segunda reventaba contra el índice
+    único y la pantalla mostraba «Ha ocurrido un error inesperado» en Tendencias."""
+    import asyncio
+
+    client, user_id = registered_client
+    await _setup_profile(client, weight_today=64.0)
+    await _log_weights(client, [64.6, 64.4, 64.3, 64.1, 64.0])
+    await _log_intake(client, test_food, list(range(5)), 300)
+
+    calls = [client.get("/api/progress/tdee") for _ in range(4)] + [
+        client.get("/api/progress/summary", params={"period": "30d"}) for _ in range(4)
+    ]
+    responses = await asyncio.gather(*calls)
+    assert [r.status_code for r in responses] == [200] * 8
+
+    rows = await superuser_conn.scalar(
+        text("SELECT count(*) FROM tdee_estimates WHERE user_id = :u"), {"u": str(user_id)}
+    )
+    assert rows == 1
+
+
+async def test_recomputing_the_same_week_updates_the_row_instead_of_adding_one(
+    registered_client, superuser_conn, test_food
+):
+    """Recalcular la misma semana debe ACTUALIZAR su fila. `/progress/tdee` reutiliza la que
+    ya existe, así que se llama al cálculo directamente para ejercitar ese camino."""
+    from myfood.db.session import AdminSessionLocal
+    from myfood.domain import tdee as tdee_calc
+
+    client, user_id = registered_client
+    await _setup_profile(client, weight_today=70.0)
+    await _log_weights(client, [70.8, 70.6, 70.4, 70.2, 70.0])
+    await _log_intake(client, test_food, list(range(5)), 250)
+
+    async with AdminSessionLocal() as session:
+        first = await tdee_calc.compute_and_store(session, user_id)
+        first_intake = float(first.avg_intake_kcal)
+    await _log_intake(client, test_food, [0], 400)
+    async with AdminSessionLocal() as session:
+        second = await tdee_calc.compute_and_store(session, user_id)
+        assert second.week_start == first.week_start
+        assert float(second.avg_intake_kcal) > first_intake
+
+    rows = await superuser_conn.scalar(
+        text("SELECT count(*) FROM tdee_estimates WHERE user_id = :u"), {"u": str(user_id)}
+    )
+    assert rows == 1

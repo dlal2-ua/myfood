@@ -86,6 +86,38 @@ async def check_and_consume_quota(
     )
 
 
+async def quota_status(user_id: UUID, *, scope: str, per_profile_limit: int | None = None,
+                       enforce_instance: bool = True) -> dict:
+    """Cuánta cuota le queda al usuario HOY en `scope`, sin gastar ninguna.
+
+    Lee los mismos contadores que `check_and_consume_quota` incrementa, así que el número
+    que ve el usuario antes de pulsar es exactamente el que se va a comprobar. Existe
+    porque la cuota se gasta al ENCOLAR: cada pulsación cuenta aunque el resultado no
+    llegue, y sin enseñarlo por pantalla la única forma de enterarse era quedarse sin
+    peticiones (encontrado en producción: cuatro pulsaciones seguidas del mismo texto)."""
+    limits = load_limits()
+    today, _ttl = _today_and_ttl()
+    profile_limit = (
+        per_profile_limit if per_profile_limit is not None else limits.per_profile_daily
+    )
+    used = int(await _redis.get(f"iafood:quota:{scope}:{user_id}:{today}") or 0)
+    status = {
+        "scope": scope,
+        "used": min(used, profile_limit),
+        "limit": profile_limit,
+        "remaining": max(0, profile_limit - used),
+        "reset_at": reset_at_iso(),
+        "instance_limit": None,
+        "instance_remaining": None,
+    }
+    if enforce_instance:
+        instance_used = int(await _redis.get(f"iafood:quota:{scope}:instance:{today}") or 0)
+        status["instance_limit"] = limits.instance_daily
+        status["instance_remaining"] = max(0, limits.instance_daily - instance_used)
+        status["remaining"] = min(status["remaining"], status["instance_remaining"])
+    return status
+
+
 def reset_at_iso() -> str:
     now = datetime.now(ZoneInfo(get_settings().tz))
     midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)

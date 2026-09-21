@@ -15,6 +15,7 @@ from statistics import mean
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import BodyMeasurement, FoodLog, TdeeEstimate
@@ -108,24 +109,35 @@ async def compute_and_store(
     _, is_reliable = formulas.adaptive_tdee(weight_trend, intake_series)
     logging_days = sum(1 for kcal in intake_series if kcal is not None)
 
-    week_start = _week_start(as_of)
-    estimate = await session.scalar(
-        select(TdeeEstimate).where(
-            TdeeEstimate.user_id == user_id, TdeeEstimate.week_start == week_start
+    values = {
+        "user_id": user_id,
+        "week_start": _week_start(as_of),
+        "weight_trend_kg": round(weight_trend[-1], 3),
+        "weight_change_kg": round(delta_kg, 3),
+        "avg_intake_kcal": round(avg_intake, 2),
+        "estimated_tdee": round(estimated_tdee, 2),
+        "logging_days": logging_days,
+        "is_reliable": is_reliable,
+    }
+    # Upsert en una sola sentencia, no SELECT y luego INSERT: al abrir «Progreso» salen dos
+    # peticiones a la vez (`/progress/summary` y `/progress/tdee`) y ambas calculan la
+    # estimación de la misma semana. Con el SELECT previo las dos veían "no existe" y la
+    # segunda reventaba contra `tdee_estimates_user_id_week_start_key`, devolviendo un 500
+    # (visto en la propia pantalla: «Ha ocurrido un error inesperado» en Tendencias).
+    row = (
+        await session.execute(
+            pg_insert(TdeeEstimate)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=["user_id", "week_start"],
+                set_={k: v for k, v in values.items() if k not in ("user_id", "week_start")},
+            )
+            .returning(TdeeEstimate)
         )
-    )
-    if estimate is None:
-        estimate = TdeeEstimate(user_id=user_id, week_start=week_start)
-        session.add(estimate)
-
-    estimate.weight_trend_kg = round(weight_trend[-1], 3)
-    estimate.weight_change_kg = round(delta_kg, 3)
-    estimate.avg_intake_kcal = round(avg_intake, 2)
-    estimate.estimated_tdee = round(estimated_tdee, 2)
-    estimate.logging_days = logging_days
-    estimate.is_reliable = is_reliable
+    ).scalar_one()
     await session.commit()
-    return estimate
+    await session.refresh(row)
+    return row
 
 
 async def get_current_estimate(

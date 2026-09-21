@@ -5,6 +5,7 @@ la sesión y las propuestas resultantes para aprobar/rechazar una a una
 (R1: nada se aplica solo)."""
 
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -15,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from myfood.ai.consent import require_ai_processing_consent
 from myfood.ai.flows.diet_plan import request_diet_plan
 from myfood.ai.flows.supplement_suggestion import request_supplement_suggestion
-from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
+from myfood.ai.limits import load_limits
+from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, quota_status, reset_at_iso
 from myfood.ai.schemas import AiSessionOut, ai_session_to_out
 from myfood.db.models import (
     AiProposal,
@@ -32,6 +34,39 @@ from myfood.domain.food_candidates import compute_alternatives_for_item
 from myfood.errors import AppError
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+class QuotaOut(BaseModel):
+    scope: str
+    used: int
+    limit: int
+    remaining: int
+    reset_at: str
+    # Tope compartido por toda la instancia; `None` en los ámbitos que no lo aplican.
+    instance_limit: int | None = None
+    instance_remaining: int | None = None
+
+
+@router.get("/quota")
+async def get_quota(
+    scope: Literal["smart_log", "chat", "diet_plan", "supplement_suggestion"] = "smart_log",
+    user_id: UUID = Depends(get_current_user_id),
+) -> QuotaOut:
+    """Cuánta cuota de iafood le queda hoy al usuario en ese ámbito, sin gastarla.
+
+    La pantalla lo enseña ANTES de pulsar: la cuota se descuenta al encolar la petición,
+    así que insistir con el mismo texto la agota sin traer ninguna respuesta nueva."""
+    limits = load_limits()
+    if scope == "chat":
+        status = await quota_status(
+            user_id,
+            scope="chat",
+            per_profile_limit=limits.chat_messages_per_profile_daily,
+            enforce_instance=False,
+        )
+    else:
+        status = await quota_status(user_id, scope=scope)
+    return QuotaOut(**status)
 
 
 class RequestDietPlanIn(BaseModel):

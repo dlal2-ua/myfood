@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
-import { DailyBarsChart, WeightTrendChart } from "@/components/charts";
-import type { GamificationSummary, HeatmapDay, ProgressSummary, TdeeHistory } from "@/lib/types";
+import { Achievements } from "@/components/Achievements";
+import { ActivityHeatmap } from "@/components/ActivityHeatmap";
+import { DailyBarsChart } from "@/components/charts";
+import { WeightTrend } from "@/components/WeightTrend";
+import type { GamificationSummary, ProgressSummary, TdeeHistory } from "@/lib/types";
 
 const PERIODS = [
   { value: "7d", label: "7 días" },
@@ -18,62 +21,6 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
       <p className="text-xl font-semibold">{value}</p>
       <p className="text-xs text-neutral-500">{label}</p>
       {hint && <p className="mt-1 text-xs text-neutral-400">{hint}</p>}
-    </div>
-  );
-}
-
-function signed(value: number, digits = 1): string {
-  return `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
-}
-
-/** Verde neutro por intensidad de registro — nunca rojo, nunca ligado a si
- * se cumplió el objetivo calórico (R10, documento 2 sección 23). Colorea
- * "hubo actividad", no "resultado". */
-function heatmapColor(count: number): string {
-  if (count === 0) return "var(--heatmap-0, #e5e7eb)";
-  if (count === 1) return "#bbf7d0";
-  if (count === 2) return "#4ade80";
-  return "#16a34a";
-}
-
-function Heatmap({ days }: { days: HeatmapDay[] }) {
-  // Semanas como columnas, lunes-domingo como filas — mismo criterio
-  // visual que un heatmap de contribuciones estilo GitHub.
-  const weeks: HeatmapDay[][] = [];
-  let current: HeatmapDay[] = [];
-  for (const day of days) {
-    const weekday = new Date(day.date).getUTCDay(); // 0 = domingo
-    if (current.length === 0 && weekday !== 1) {
-      current.push(...Array(weekday === 0 ? 6 : weekday - 1).fill(null));
-    }
-    current.push(day);
-    if (current.length === 7) {
-      weeks.push(current);
-      current = [];
-    }
-  }
-  if (current.length > 0) weeks.push(current);
-
-  return (
-    <div className="overflow-x-auto">
-      <div className="flex gap-[3px]" style={{ width: "fit-content" }}>
-        {weeks.map((week, wi) => (
-          <div key={wi} className="flex flex-col gap-[3px]">
-            {week.map((day, di) =>
-              day ? (
-                <div
-                  key={di}
-                  title={`${day.date}: ${day.count} registro(s)`}
-                  className="h-[11px] w-[11px] rounded-sm"
-                  style={{ backgroundColor: heatmapColor(day.count) }}
-                />
-              ) : (
-                <div key={di} className="h-[11px] w-[11px]" />
-              ),
-            )}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -127,21 +74,9 @@ function Trends() {
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {summary && weight && intake && (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat
-              label="Cambio de peso"
-              value={weight.change_kg != null ? `${signed(weight.change_kg)} kg` : "—"}
-              hint={weight.end_kg != null ? `Ahora ${weight.end_kg} kg` : undefined}
-            />
-            <Stat
-              label="Tendencia"
-              value={
-                weight.trend_kg_per_week != null
-                  ? `${signed(weight.trend_kg_per_week, 2)} kg/sem`
-                  : "—"
-              }
-              hint={weight.trend_kg_per_week == null ? "Hace falta una semana de pesadas" : undefined}
-            />
+          {/* El cambio de peso y el ritmo los da el panel de tendencia, justo debajo: tenerlos
+              también aquí enseñaba dos cifras distintas de lo mismo (periodos distintos). */}
+          <div className="grid grid-cols-2 gap-3">
             <Stat
               label="Días con registro"
               value={`${intake.logging_days}/${summary.period_days}`}
@@ -156,13 +91,9 @@ function Trends() {
             />
           </div>
           <div>
-            <h3 className="mb-1 text-xs font-semibold text-neutral-500">Peso</h3>
-            <WeightTrendChart
-              data={weight.points.map((p) => ({
-                date: p.date,
-                weight: p.weight_kg,
-                average: p.ma7_kg,
-              }))}
+            <h3 className="mb-2 text-lg font-bold tracking-tight">Tendencia de peso</h3>
+            <WeightTrend
+              points={weight.points.map((p) => ({ date: p.date, weightKg: p.weight_kg }))}
             />
           </div>
           <div>
@@ -269,37 +200,14 @@ export default function ProgressPage() {
           </section>
 
           <section>
-            <h2 className="mb-3 text-sm font-semibold text-neutral-500">
+            <h2 className="mb-3 text-lg font-extrabold tracking-tight">
               Último año de registro
             </h2>
-            <Heatmap days={data.heatmap} />
+            <ActivityHeatmap days={data.heatmap} />
           </section>
 
           <section>
-            <h2 className="mb-3 text-sm font-semibold text-neutral-500">Logros</h2>
-            <ul className="flex flex-col gap-3">
-              {data.achievements.map((a) => (
-                <li
-                  key={a.key}
-                  className={`rounded-lg border p-3 text-sm ${
-                    a.earned
-                      ? "border-green-300 bg-green-50 dark:border-green-900 dark:bg-green-950/30"
-                      : "border-[var(--color-border)]"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">
-                      {a.earned ? "✓ " : ""}
-                      {a.title}
-                    </span>
-                    <span className="text-xs text-neutral-500">
-                      {a.progress}/{a.target}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-neutral-500">{a.description}</p>
-                </li>
-              ))}
-            </ul>
+            <Achievements achievements={data.achievements} newlyEarned={data.newly_earned} />
           </section>
         </>
       )}

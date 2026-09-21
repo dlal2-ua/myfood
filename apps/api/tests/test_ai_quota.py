@@ -70,3 +70,50 @@ async def test_chat_style_call_skips_instance_limit_but_keeps_profile_limit(scop
             user_id, scope=scope, per_profile_limit=1, enforce_instance=False
         )
     assert exc_info.value.code == "AI_QUOTA_PROFILE"
+
+
+async def test_quota_status_does_not_consume(scope, monkeypatch):
+    """Consultar cuánto queda no puede gastar cuota: si lo hiciera, la propia pantalla
+    que avisa de que quedan pocas se las comería al abrirse."""
+    from myfood.ai import quota
+    from myfood.ai.limits import IafoodLimits
+
+    monkeypatch.setattr(quota, "load_limits", lambda: IafoodLimits(per_profile_daily=5))
+    user_id = uuid.uuid4()
+
+    before = await quota.quota_status(user_id, scope=scope, enforce_instance=False)
+    assert before == {
+        "scope": scope,
+        "used": 0,
+        "limit": 5,
+        "remaining": 5,
+        "reset_at": before["reset_at"],
+        "instance_limit": None,
+        "instance_remaining": None,
+    }
+
+    for _ in range(3):
+        await quota.quota_status(user_id, scope=scope, enforce_instance=False)
+    await check_and_consume_quota(user_id, scope=scope, per_profile_limit=5)
+
+    after = await quota.quota_status(user_id, scope=scope, enforce_instance=False)
+    assert after["used"] == 1
+    assert after["remaining"] == 4
+
+
+async def test_quota_status_takes_the_tighter_of_the_two_limits(scope, monkeypatch):
+    """Lo que puede hacer el usuario es el mínimo entre su cuota y la de la casa — si la
+    compartida está agotada, no le quedan peticiones por mucho que le sobren las suyas."""
+    from myfood.ai import quota
+    from myfood.ai.limits import IafoodLimits
+
+    monkeypatch.setattr(
+        quota, "load_limits", lambda: IafoodLimits(per_profile_daily=10, instance_daily=2)
+    )
+    await check_and_consume_quota(uuid.uuid4(), scope=scope)
+    await check_and_consume_quota(uuid.uuid4(), scope=scope)
+
+    status = await quota.quota_status(uuid.uuid4(), scope=scope)
+    assert status["limit"] == 10
+    assert status["instance_remaining"] == 0
+    assert status["remaining"] == 0

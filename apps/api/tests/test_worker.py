@@ -153,3 +153,79 @@ async def test_run_tick_one_failing_subscription_does_not_block_others(
     )
     await superuser_conn.commit()
     await _redis.delete(f"notif-sent:{rule_id}:2026-01-15:10:00:00")
+
+
+async def test_sweep_achievements_notifies_once_and_only_once(
+    monkeypatch, superuser_conn, two_users, test_food
+):
+    """El aviso de un logro tiene que llegar una vez. Sin `notified_at`, cada barrido
+    (cada 15 minutos) volvería a mandar el mismo «¡Logro conseguido!»."""
+    from myfood.worker import sweep_achievements
+
+    user_a, user_b = two_users
+    sent: list = []
+    monkeypatch.setattr(
+        "myfood.worker.send_push", lambda sub, payload: sent.append((sub.endpoint, payload))
+    )
+    await superuser_conn.execute(
+        text(
+            "INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth) "
+            "VALUES (gen_random_uuid(), :uid, :ep, 'k', 'a')"
+        ),
+        {"uid": str(user_a), "ep": f"https://push.test/{uuid.uuid4()}"},
+    )
+    await superuser_conn.execute(
+        text(
+            "INSERT INTO food_log (id, user_id, log_date, meal_type, food_id, grams, "
+            "kcal, protein_g, fat_g, carbs_g) VALUES (gen_random_uuid(), :uid, CURRENT_DATE, "
+            "'lunch', :fid, 100, 165, 31, 3.6, 0)"
+        ),
+        {"uid": str(user_a), "fid": str(test_food)},
+    )
+    await superuser_conn.commit()
+
+    assert await sweep_achievements() >= 1
+    titles = [payload["body"] for _endpoint, payload in sent]
+    assert any("Primer registro" in body for body in titles)
+    assert all(payload["data"]["kind"] == "achievement" for _e, payload in sent)
+
+    sent.clear()
+    assert await sweep_achievements() == 0
+    assert sent == []
+
+    # El otro usuario no ha registrado nada: ni logro ni aviso.
+    rows = await superuser_conn.execute(
+        text("SELECT count(*) FROM user_achievements WHERE user_id = :uid"),
+        {"uid": str(user_b)},
+    )
+    assert rows.scalar() == 0
+
+
+async def test_sweep_achievements_marks_as_notified_even_without_subscriptions(
+    monkeypatch, superuser_conn, two_users, test_food
+):
+    """Sin nadie suscrito, el logro igual queda marcado: el día que active las
+    notificaciones no debe recibir de golpe los logros de hace meses."""
+    from myfood.worker import sweep_achievements
+
+    user_a, _user_b = two_users
+    monkeypatch.setattr("myfood.worker.send_push", lambda sub, payload: None)
+    await superuser_conn.execute(
+        text(
+            "INSERT INTO food_log (id, user_id, log_date, meal_type, food_id, grams, "
+            "kcal, protein_g, fat_g, carbs_g) VALUES (gen_random_uuid(), :uid, CURRENT_DATE, "
+            "'lunch', :fid, 100, 165, 31, 3.6, 0)"
+        ),
+        {"uid": str(user_a), "fid": str(test_food)},
+    )
+    await superuser_conn.commit()
+
+    await sweep_achievements()
+    pending = await superuser_conn.execute(
+        text(
+            "SELECT count(*) FROM user_achievements "
+            "WHERE user_id = :uid AND notified_at IS NULL"
+        ),
+        {"uid": str(user_a)},
+    )
+    assert pending.scalar() == 0

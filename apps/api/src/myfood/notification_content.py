@@ -213,3 +213,14 @@ async def low_stock_notifications(session: AsyncSession) -> list[tuple[UUID, UUI
             )
         )
     return notifications
+
+
+def achievement_notification(title: str) -> dict:
+    """Aviso de logro conseguido. Celebra constancia de registro, nunca un resultado
+    corporal ni calórico (R10) — el texto no menciona peso, calorías ni objetivos."""
+    return {
+        "title": "¡Logro conseguido!",
+        "body": f"{title} — échale un vistazo a tu progreso.",
+        "data": {"kind": "achievement", "url": "/progress"},
+        "actions": [],
+    }
