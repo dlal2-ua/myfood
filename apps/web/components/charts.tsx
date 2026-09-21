@@ -1,5 +1,8 @@
 "use client";
 
+import { useContainerWidth } from "@/components/ui/useContainerWidth";
+import { shortDate } from "@/lib/weightTrend";
+
 /** Minimal hand-rolled SVG charts — no charting library needed for a
  * "frontend mínimo": a few bars / a polyline are plenty. */
 
@@ -54,106 +57,57 @@ export function BarChart({ data, unit = "" }: { data: BarDatum[]; unit?: string 
   );
 }
 
-export interface PointDatum {
-  label: string;
+export interface DailyBarDatum {
+  date: string;
   value: number;
 }
 
-export function LineChart({ data, unit = "" }: { data: PointDatum[]; unit?: string }) {
-  const width = 320;
-  const height = 140;
-  const padding = 28;
-
+/** Barras por día con una línea de referencia (p. ej. el objetivo calórico). La barra es
+ * siempre del mismo color: pasarse o quedarse corto no se marca como bueno o malo (R10).
+ *
+ * Se dibuja al ancho real del hueco, no con un `viewBox` fijo escalado: escalado, en un móvil
+ * las fechas de los ejes acababan en letra minúscula y en escritorio desproporcionadas. */
+export function DailyBarsChart({
+  data,
+  reference,
+  unit = "",
+  referenceLabel = "Tu objetivo",
+}: {
+  data: DailyBarDatum[];
+  reference?: number | null;
+  unit?: string;
+  referenceLabel?: string;
+}) {
+  const { ref, width: boxWidth } = useContainerWidth();
   if (data.length === 0) {
-    return <p className="text-sm text-neutral-500">Sin datos todavía.</p>;
+    return (
+      <p className="text-sm text-[var(--color-muted)]">Aún no hay registros en este periodo.</p>
+    );
   }
-
-  const values = data.map((d) => d.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-
-  const innerWidth = width - padding * 2;
-  const innerHeight = height - padding * 2;
-
-  const points = data.map((d, i) => {
-    const x = padding + (data.length === 1 ? innerWidth / 2 : (i / (data.length - 1)) * innerWidth);
-    const y = padding + innerHeight - ((d.value - min) / range) * innerHeight;
-    return { x, y, ...d };
-  });
-
-  const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+  const width = Math.max(280, boxWidth);
+  const height = width < 520 ? 170 : 220;
+  const pad = { left: 46, right: 14, top: 14, bottom: 28 };
+  const max = Math.max(...data.map((d) => d.value), reference ?? 0, 1) * 1.1;
+  const innerWidth = width - pad.left - pad.right;
+  const slot = innerWidth / data.length;
+  const barWidth = Math.max(2, Math.min(18, slot - 2));
+  const y = (v: number) => pad.top + (1 - v / max) * (height - pad.top - pad.bottom);
+  const x = (i: number) => pad.left + (i + 0.5) * slot;
+  const ticks = [0, max / 2, max].map((v) => Math.round(v / 50) * 50);
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} width="100%" role="img" aria-label="Tendencia de peso">
-      <path d={path} fill="none" stroke="var(--color-primary)" strokeWidth={2} />
-      {points.map((p) => (
-        <g key={p.label}>
-          <circle cx={p.x} cy={p.y} r={3} fill="var(--color-primary)" />
-        </g>
-      ))}
-      <text x={points[0].x} y={height - 4} fontSize="10" fill="currentColor" textAnchor="start">
-        {points[0].label}
-      </text>
-      <text
-        x={points[points.length - 1].x}
-        y={height - 4}
-        fontSize="10"
-        fill="currentColor"
-        textAnchor="end"
-      >
-        {points[points.length - 1].label}
-      </text>
-      <text x={padding} y={12} fontSize="10" fill="currentColor">
-        {max.toFixed(1)}
-        {unit}
-      </text>
-      <text x={padding} y={height - padding + 14} fontSize="10" fill="currentColor">
-        {min.toFixed(1)}
-        {unit}
-      </text>
-    </svg>
-  );
-}
-
-export interface WeightPointDatum {
-  date: string;
-  weight: number;
-  average: number;
-}
-
-/** Peso diario (puntos) y su media móvil de 7 días (línea). Sin escala de colores que juzgue
- * subidas o bajadas (R10): son los números del usuario, no un veredicto. */
-export function WeightTrendChart({ data }: { data: WeightPointDatum[] }) {
-  const width = 340;
-  const height = 170;
-  const pad = { left: 38, right: 10, top: 12, bottom: 24 };
-  if (data.length === 0) {
-    return <p className="text-sm text-neutral-500">Aún no hay pesadas en este periodo.</p>;
-  }
-  const values = data.flatMap((d) => [d.weight, d.average]);
-  const min = Math.floor(Math.min(...values) - 0.5);
-  const max = Math.ceil(Math.max(...values) + 0.5);
-  const range = max - min || 1;
-  const t0 = new Date(data[0].date).getTime();
-  const t1 = new Date(data[data.length - 1].date).getTime();
-  const span = t1 - t0 || 1;
-  const x = (date: string) =>
-    data.length === 1
-      ? (pad.left + width - pad.right) / 2
-      : pad.left + ((new Date(date).getTime() - t0) / span) * (width - pad.left - pad.right);
-  const y = (v: number) => pad.top + (1 - (v - min) / range) * (height - pad.top - pad.bottom);
-  const line = data.map((d, i) => `${i === 0 ? "M" : "L"}${x(d.date)},${y(d.average)}`).join(" ");
-
-  return (
-    <>
+    <div ref={ref} className="flex flex-col gap-1.5">
       <svg
         viewBox={`0 0 ${width} ${height}`}
         width="100%"
+        height={height}
+        className="w-full"
         role="img"
-        aria-label={`Peso de ${data[0].date} a ${data[data.length - 1].date}: de ${data[0].weight} kg a ${data[data.length - 1].weight} kg, con su media móvil de 7 días`}
+        aria-label={`Consumo diario de ${shortDate(data[0].date)} a ${shortDate(
+          data[data.length - 1].date,
+        )}${reference ? `, con tu objetivo de ${Math.round(reference)}${unit}` : ""}`}
       >
-        {[min, (min + max) / 2, max].map((tick) => (
+        {ticks.map((tick) => (
           <g key={tick}>
             <line
               x1={pad.left}
@@ -163,112 +117,72 @@ export function WeightTrendChart({ data }: { data: WeightPointDatum[] }) {
               stroke="currentColor"
               opacity={0.12}
             />
-            <text x={pad.left - 4} y={y(tick) + 3} fontSize="10" textAnchor="end" fill="currentColor">
-              {tick % 1 === 0 ? tick : tick.toFixed(1)}
+            <text
+              x={pad.left - 8}
+              y={y(tick) + 4}
+              fontSize="12"
+              textAnchor="end"
+              fill="currentColor"
+              opacity={0.55}
+            >
+              {tick}
             </text>
           </g>
         ))}
-        {data.map((d) => (
-          <circle key={d.date} cx={x(d.date)} cy={y(d.weight)} r={2.5} fill="currentColor" opacity={0.45}>
-            <title>{`${d.date}: ${d.weight} kg`}</title>
-          </circle>
+
+        {data.map((d, i) => (
+          <rect
+            key={d.date}
+            x={x(i) - barWidth / 2}
+            y={y(d.value)}
+            width={barWidth}
+            height={Math.max(1, y(0) - y(d.value))}
+            rx={3}
+            fill="var(--color-primary)"
+            opacity={0.8}
+          >
+            <title>{`${shortDate(d.date)}: ${Math.round(d.value)}${unit}`}</title>
+          </rect>
         ))}
-        {data.length > 1 && (
-          <path d={line} fill="none" stroke="var(--color-primary)" strokeWidth={2.5} />
-        )}
-        <text x={pad.left} y={height - 6} fontSize="10" fill="currentColor">
-          {data[0].date.slice(5)}
-        </text>
-        <text x={width - pad.right} y={height - 6} fontSize="10" textAnchor="end" fill="currentColor">
-          {data[data.length - 1].date.slice(5)}
-        </text>
-      </svg>
-      <p className="mt-1 flex items-center gap-3 text-xs text-neutral-500">
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-2 w-2 rounded-full bg-current opacity-45" /> Peso
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-0.5 w-4 bg-[var(--color-primary)]" /> Media de 7 días
-        </span>
-      </p>
-    </>
-  );
-}
 
-export interface DailyBarDatum {
-  date: string;
-  value: number;
-}
-
-/** Barras por día con una línea de referencia (p. ej. el objetivo calórico). La barra es
- * siempre del mismo color: pasarse o quedarse corto no se marca como bueno o malo (R10). */
-export function DailyBarsChart({
-  data,
-  reference,
-  unit = "",
-}: {
-  data: DailyBarDatum[];
-  reference?: number | null;
-  unit?: string;
-}) {
-  const width = 340;
-  const height = 150;
-  const pad = { left: 38, right: 10, top: 10, bottom: 22 };
-  if (data.length === 0) {
-    return <p className="text-sm text-neutral-500">Aún no hay registros en este periodo.</p>;
-  }
-  const max = Math.max(...data.map((d) => d.value), reference ?? 0, 1) * 1.1;
-  const innerWidth = width - pad.left - pad.right;
-  const barWidth = Math.max(2, Math.min(14, innerWidth / data.length - 2));
-  const y = (v: number) => pad.top + (1 - v / max) * (height - pad.top - pad.bottom);
-  const x = (i: number) => pad.left + ((i + 0.5) / data.length) * innerWidth;
-
-  return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      width="100%"
-      role="img"
-      aria-label={`Consumo diario de ${data[0].date} a ${data[data.length - 1].date}${
-        reference ? `, con tu objetivo de ${reference}${unit}` : ""
-      }`}
-    >
-      <line x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} stroke="currentColor" opacity={0.2} />
-      {data.map((d, i) => (
-        <rect
-          key={d.date}
-          x={x(i) - barWidth / 2}
-          y={y(d.value)}
-          width={barWidth}
-          height={Math.max(1, y(0) - y(d.value))}
-          rx={1.5}
-          fill="var(--color-primary)"
-          opacity={0.75}
-        >
-          <title>{`${d.date}: ${Math.round(d.value)}${unit}`}</title>
-        </rect>
-      ))}
-      {reference != null && (
-        <g>
+        {reference != null && (
           <line
             x1={pad.left}
             x2={width - pad.right}
             y1={y(reference)}
             y2={y(reference)}
-            stroke="currentColor"
-            strokeDasharray="4 3"
-            opacity={0.6}
+            stroke="var(--color-accent, var(--color-primary))"
+            strokeWidth={2}
+            strokeDasharray="6 4"
           />
-          <text x={pad.left - 4} y={y(reference) + 3} fontSize="10" textAnchor="end" fill="currentColor">
-            {Math.round(reference)}
-          </text>
-        </g>
+        )}
+
+        {[0, Math.floor((data.length - 1) / 2), data.length - 1]
+          .filter((i, idx, all) => all.indexOf(i) === idx)
+          .map((i) => (
+            <text
+              key={data[i].date}
+              x={x(i)}
+              y={height - 8}
+              fontSize="12"
+              textAnchor={i === 0 ? "start" : i === data.length - 1 ? "end" : "middle"}
+              fill="currentColor"
+              opacity={0.55}
+            >
+              {shortDate(data[i].date)}
+            </text>
+          ))}
+      </svg>
+      {reference != null && (
+        <p className="flex items-center gap-1.5 text-xs text-[var(--color-muted)]">
+          <span
+            aria-hidden="true"
+            className="inline-block h-0 w-5 border-t-2 border-dashed border-[var(--color-accent,var(--color-primary))]"
+          />
+          {referenceLabel}: {Math.round(reference)}
+          {unit}
+        </p>
       )}
-      <text x={pad.left} y={height - 6} fontSize="10" fill="currentColor">
-        {data[0].date.slice(5)}
-      </text>
-      <text x={width - pad.right} y={height - 6} fontSize="10" textAnchor="end" fill="currentColor">
-        {data[data.length - 1].date.slice(5)}
-      </text>
-    </svg>
+    </div>
   );
 }

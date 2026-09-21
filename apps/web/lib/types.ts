@@ -466,6 +466,19 @@ export interface IafoodLimits {
   max_tokens_per_call: number;
 }
 
+/** Cuánta cuota de iafood le queda hoy al usuario (`GET /ai/quota`). Se consulta sin
+ * gastar nada: la cuota se descuenta al ENVIAR, así que la pantalla la enseña antes. */
+export interface AiQuota {
+  scope: string;
+  used: number;
+  limit: number;
+  remaining: number;
+  reset_at: string;
+  /** Tope compartido por toda la casa; `null` en los ámbitos que no lo aplican (chat). */
+  instance_limit: number | null;
+  instance_remaining: number | null;
+}
+
 export type AiSessionStatus = "running" | "succeeded" | "failed" | "rejected_validation";
 
 export interface AiValidationError {
@@ -597,6 +610,13 @@ export interface Achievement {
   earned: boolean;
   progress: number;
   target: number;
+  /** Qué dibujo lleva la insignia (`components/AchievementBadge.tsx`). */
+  icon: string;
+  /** Lo que cuesta conseguirlo: `bronze` | `silver` | `gold`. */
+  tier: string;
+  /** Para agrupar la pared de insignias (racha, agua, variedad…). */
+  family: string;
+  earned_on: string | null;
 }
 
 export interface GamificationSummary {
@@ -604,6 +624,8 @@ export interface GamificationSummary {
   longest_streak: number;
   heatmap: HeatmapDay[];
   achievements: Achievement[];
+  /** Conseguidos justo en esta respuesta: se celebran una vez. */
+  newly_earned: string[];
 }
 
 export type ChatRole = "user" | "assistant";

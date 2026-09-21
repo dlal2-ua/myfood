@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from myfood.ai import client as ai_client
+from myfood.ai.limits import load_limits
 from myfood.ai.queue import DIET_PLAN_QUEUE_KEY
 from myfood.ai.queue import _redis as queue_redis
 from myfood.config import get_settings
@@ -289,3 +290,33 @@ async def test_proposal_not_visible_to_another_user(pending_proposal, superuser_
 
         approve_resp = await other_client.post(f"/api/ai/proposals/{proposal_id}/approve")
         assert approve_resp.status_code == 404
+
+
+async def test_quota_endpoint_reports_what_is_left_without_spending_it(registered_client):
+    """La pantalla lo consulta antes de cada envío: si consultarlo gastase, mirar
+    cuántas quedan las iría gastando."""
+    client, _ = registered_client
+
+    first = (await client.get("/api/ai/quota?scope=smart_log")).json()
+    assert first["scope"] == "smart_log"
+    assert first["remaining"] == first["limit"] - first["used"]
+    assert first["reset_at"]
+
+    second = (await client.get("/api/ai/quota?scope=smart_log")).json()
+    assert second["used"] == first["used"]
+    assert second["remaining"] == first["remaining"]
+
+
+async def test_quota_endpoint_uses_the_chat_limit_for_chat(registered_client):
+    """El chat tiene su propia cuota (sección 24.5) y no aplica el tope de la casa —
+    enseñar el de generación de dietas confundiría al usuario."""
+    client, _ = registered_client
+    body = (await client.get("/api/ai/quota?scope=chat")).json()
+    assert body["limit"] == load_limits().chat_messages_per_profile_daily
+    assert body["instance_limit"] is None
+
+
+async def test_quota_endpoint_rejects_an_unknown_scope(registered_client):
+    client, _ = registered_client
+    resp = await client.get("/api/ai/quota?scope=inventado")
+    assert resp.status_code == 422

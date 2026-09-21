@@ -5,8 +5,18 @@ import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { BmrResponse, Measurement, Profile, TargetsResponse } from "@/lib/types";
-import { BarChart, LineChart } from "@/components/charts";
+import { Check } from "lucide-react";
+import { BarChart } from "@/components/charts";
+import { WeightTrend } from "@/components/WeightTrend";
 import { RestrictionsPanel } from "@/components/RestrictionsPanel";
+import {
+  BMR_FORMULAS,
+  formulaInfo,
+  isUnavailable,
+  recommendationReason,
+  recommendedFormula,
+  type BmrFormulaKey,
+} from "@/lib/bmrFormulas";
 
 const ACTIVITY_LEVELS: { value: Profile["activity_level"]; label: string }[] = [
   { value: "sedentary", label: "Sedentario" },
@@ -22,15 +32,52 @@ const GOALS: { value: Profile["goal"]; label: string }[] = [
   { value: "gain", label: "Ganar peso" },
 ];
 
-const BMR_FORMULAS: { value: Profile["bmr_formula"]; label: string }[] = [
-  { value: "mifflin", label: "Mifflin-St Jeor" },
-  { value: "katch", label: "Katch-McArdle" },
-  { value: "cunningham", label: "Cunningham" },
-  { value: "harris", label: "Harris-Benedict" },
-];
-
 const inputClass =
   "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
+
+/** Qué hace la fórmula elegida, y cuál sería la más ajustada con los datos registrados.
+ * El selector ofrece cuatro nombres propios que no dicen nada por sí solos; sin esto, elegir
+ * una u otra era adivinar. */
+function BmrFormulaHelp({
+  selected,
+  hasBodyFatPct,
+}: {
+  selected: BmrFormulaKey;
+  hasBodyFatPct: boolean;
+}) {
+  const info = formulaInfo(selected);
+  const recommended = recommendedFormula(hasBodyFatPct);
+  const isRecommended = selected === recommended;
+  const unavailable = isUnavailable(selected, hasBodyFatPct);
+  return (
+    <div className="rounded-[var(--radius-card)] bg-[var(--color-surface-2)] p-3 text-xs leading-relaxed">
+      <p className="flex flex-wrap items-center gap-1.5 font-bold">
+        {info.label}
+        {isRecommended && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary-soft)] px-2 py-0.5 text-[11px] text-[var(--color-primary)]">
+            <Check size={11} aria-hidden="true" /> Recomendada para ti
+          </span>
+        )}
+      </p>
+      <p className="mt-1 text-[var(--color-muted)]">{info.description}</p>
+      <p className="mt-1 text-[var(--color-muted)]">Necesita: {info.needs}</p>
+      {unavailable ? (
+        <p className="mt-1.5 font-semibold text-amber-700 dark:text-amber-300">
+          Todavía no puedes usarla: registra tu %grasa corporal en Medidas, aquí abajo.
+        </p>
+      ) : !isRecommended ? (
+        <p className="mt-1.5 font-semibold text-[var(--color-primary)]">
+          Para ti sería más precisa {formulaInfo(recommended).label}:{" "}
+          <span className="font-normal text-[var(--color-muted)]">
+            {recommendationReason(hasBodyFatPct)}
+          </span>
+        </p>
+      ) : (
+        <p className="mt-1.5 text-[var(--color-muted)]">{recommendationReason(hasBodyFatPct)}</p>
+      )}
+    </div>
+  );
+}
 
 function todayIso(): string {
   return localDateIso();
@@ -148,10 +195,15 @@ export default function ProfilePage() {
     }
   }
 
-  const weightSeries = [...measurements]
+  // El %grasa decide qué fórmula de BMR es la más fiable: con él se puede calcular sobre la
+  // masa magra. Vale cualquier medida registrada, no solo la última: el API usa la más
+  // reciente que lo tenga.
+  const hasBodyFatPct = measurements.some((m) => m.body_fat_pct != null);
+  const recommended = recommendedFormula(hasBodyFatPct);
+
+  const weightSeries = measurements
     .filter((m) => m.weight_kg != null)
-    .sort((a, b) => a.measured_on.localeCompare(b.measured_on))
-    .map((m) => ({ label: m.measured_on.slice(5), value: m.weight_kg as number }));
+    .map((m) => ({ date: m.measured_on, weightKg: Number(m.weight_kg) }));
 
   const macroData = targets
     ? [
@@ -242,22 +294,30 @@ export default function ProfilePage() {
             </select>
           </label>
 
-          <label className="flex flex-col gap-1 text-sm">
-            Fórmula de BMR
-            <select
-              className={inputClass}
-              value={profile.bmr_formula}
-              onChange={(e) =>
-                updateProfileField("bmr_formula", e.target.value as Profile["bmr_formula"])
-              }
-            >
-              {BMR_FORMULAS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <label className="flex flex-col gap-1">
+              Fórmula de BMR
+              <select
+                className={inputClass}
+                value={profile.bmr_formula}
+                onChange={(e) =>
+                  updateProfileField("bmr_formula", e.target.value as Profile["bmr_formula"])
+                }
+              >
+                {BMR_FORMULAS.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.label}
+                    {o.key === recommended ? " — recomendada para ti" : ""}
+                    {isUnavailable(o.key, hasBodyFatPct) ? " (necesita tu %grasa)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <BmrFormulaHelp
+              selected={profile.bmr_formula as BmrFormulaKey}
+              hasBodyFatPct={hasBodyFatPct}
+            />
+          </div>
 
           <label className="flex flex-col gap-1 text-sm">
             Comidas al día
@@ -376,8 +436,8 @@ export default function ProfilePage() {
         {measurementError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{measurementError}</p>}
 
         <div className="mt-6">
-          <h3 className="mb-2 text-sm font-medium text-neutral-500">Tendencia de peso</h3>
-          <LineChart data={weightSeries} unit=" kg" />
+          <h3 className="mb-3 text-lg font-bold tracking-tight">Tendencia de peso</h3>
+          <WeightTrend points={weightSeries} />
         </div>
       </section>
 

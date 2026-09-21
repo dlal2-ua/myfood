@@ -155,6 +155,19 @@ body {
   }
 }
 
+/* Los tres puntos de «está pensando»: se nota que algo sigue en marcha sin dar saltos. */
+@keyframes myfood-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
 @keyframes myfood-sheet-in {
   from {
     transform: translateY(24px);

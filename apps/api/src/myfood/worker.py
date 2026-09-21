@@ -7,7 +7,7 @@ Agent SDK de todo el proyecto corre aquí, nunca en el proceso `api`.
 
 import asyncio
 import logging
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import redis.asyncio as redis
@@ -29,9 +29,21 @@ from myfood.ai.queue import (
 )
 from myfood.chat.flow import process_chat_job
 from myfood.config import get_settings
-from myfood.db.models import AiSession, NotificationRule, PushSubscription, User
+from myfood.db.models import (
+    AiSession,
+    NotificationRule,
+    PushSubscription,
+    User,
+    UserAchievement,
+)
 from myfood.db.session import AdminSessionLocal
-from myfood.notification_content import build_notification, low_stock_notifications
+from myfood.domain.achievements import collect_counters, sync_achievements
+from myfood.domain.gamification import achievement_title, build_achievements
+from myfood.notification_content import (
+    achievement_notification,
+    build_notification,
+    low_stock_notifications,
+)
 from myfood.notifications import is_rule_due
 from myfood.push import PushSubscriptionExpired, send_push
 from myfood.services.images import IMAGE_JOBS_QUEUE_KEY, process_image_job, purge_cache
@@ -276,6 +288,58 @@ async def _image_jobs_loop() -> None:
             logger.exception("fallo descargando una imagen — se sigue con la siguiente")
 
 
+_ACHIEVEMENTS_SWEEP_SECONDS = 15 * 60
+
+
+async def sweep_achievements(today: date | None = None) -> int:
+    """Detecta logros recién conseguidos y avisa una sola vez. Devuelve cuántos avisó.
+
+    Corre aquí y no al registrar una comida porque un logro puede cumplirse sin que el
+    usuario abra la app (p. ej. la racha la completa el último registro del día) y porque
+    enviar el push es una llamada de red, que nunca debe colgar de la petición del usuario
+    (regla 19). Entrar en «Progreso» también crea la fila del logro (para celebrarlo al
+    momento), pero es este barrido el que manda el aviso, mirando `notified_at`.
+
+    `notified_at` se marca aunque no haya a quién enviar (nadie suscrito a push): un logro
+    de hace meses no debe aparecer de golpe el día que alguien active las notificaciones."""
+    day = today or date.today()
+    notified = 0
+    async with AdminSessionLocal() as session:
+        user_ids = list(await session.scalars(select(User.id).where(User.is_active.is_(True))))
+        for user_id in user_ids:
+            counters, _current, _longest = await collect_counters(session, user_id, today=day)
+            await sync_achievements(session, user_id, build_achievements(**counters), today=day)
+
+            pending = list(
+                await session.scalars(
+                    select(UserAchievement).where(
+                        UserAchievement.user_id == user_id,
+                        UserAchievement.notified_at.is_(None),
+                    )
+                )
+            )
+            for row in pending:
+                title = achievement_title(row.key)
+                if title is not None:
+                    await _send_to_user(session, user_id, achievement_notification(title))
+                    notified += 1
+                row.notified_at = datetime.now(UTC)
+            if pending:
+                await session.commit()
+    return notified
+
+
+async def _achievements_loop() -> None:
+    while True:
+        try:
+            notified = await sweep_achievements()
+            if notified:
+                logger.info("avisados %s logros nuevos", notified)
+        except Exception:
+            logger.exception("fallo revisando los logros — se reintenta en el siguiente ciclo")
+        await asyncio.sleep(_ACHIEVEMENTS_SWEEP_SECONDS)
+
+
 _IMAGE_PURGE_SECONDS = 6 * 60 * 60
 
 
@@ -304,6 +368,7 @@ async def main() -> None:
         _receipt_scan_jobs_loop(),
         _chat_jobs_loop(),
         _stale_sessions_loop(),
+        _achievements_loop(),
         *(_image_jobs_loop() for _ in range(_IMAGE_DOWNLOAD_WORKERS)),
         _image_purge_loop(),
     )
