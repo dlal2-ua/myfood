@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  amountProblem,
   describeAmount,
   formatNumber,
   macrosFor,
@@ -121,5 +122,26 @@ describe("formatNumber", () => {
     expect(formatNumber(2)).toBe("2");
     expect(formatNumber(112.5)).toBe("112,5");
     expect(formatNumber(0.25)).toBe("0,25");
+  });
+});
+
+describe("amountProblem", () => {
+  it("una cantidad normal no tiene ningún problema", () => {
+    expect(amountProblem(150)).toBeNull();
+    expect(amountProblem(5000)).toBeNull();
+  });
+
+  it("avisa y sugiere la salida cuando se pasa del tope del servidor", () => {
+    // Caso real: escribir «150» pensando en gramos con la medida «filete» da 22,5 kg, y
+    // antes eso solo se veía al guardar, como «Error 422».
+    const problem = amountProblem(22500);
+    expect(problem).toContain("22500 g");
+    expect(problem).toContain("gramos");
+  });
+
+  it("no deja registrar una cantidad vacía o negativa", () => {
+    expect(amountProblem(0)).not.toBeNull();
+    expect(amountProblem(-5)).not.toBeNull();
+    expect(amountProblem(Number.NaN)).not.toBeNull();
   });
 });

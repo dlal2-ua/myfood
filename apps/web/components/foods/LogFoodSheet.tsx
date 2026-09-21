@@ -13,7 +13,7 @@ import { localDateIso } from "@/lib/dates";
 import { brandLabel } from "@/lib/foodDisplay";
 import { mealTypeForTime } from "@/lib/meals";
 import { submitOrQueue } from "@/lib/offlineQueue";
-import { GRAMS_KEY, toGrams, type Portion } from "@/lib/portions";
+import { GRAMS_KEY, amountProblem, toGrams, type Portion } from "@/lib/portions";
 import { MEAL_TYPES, MEAL_TYPE_LABELS, type FoodDetail, type MealType } from "@/lib/types";
 
 const FALLBACK_PORTION: Portion = { key: GRAMS_KEY, label: "gramos", grams: 1 };
@@ -78,9 +78,10 @@ export function LogFoodSheet({
   }, [initialMeal]);
 
   const grams = toGrams(quantity, portion);
+  const problem = amountProblem(grams);
 
   async function onAdd() {
-    if (!food || grams <= 0) return;
+    if (!food || problem) return;
     setSaving(true);
     setError(null);
     try {
@@ -235,7 +236,7 @@ export function LogFoodSheet({
             <button
               type="button"
               onClick={() => void onAdd()}
-              disabled={saving || grams <= 0}
+              disabled={saving || problem !== null}
               className="min-h-12 flex-[2] rounded-full bg-[var(--color-primary)] text-sm font-bold text-[var(--color-on-primary)] disabled:opacity-60"
             >
               {saving ? "Guardando…" : done ? "Añadir otra vez" : "Añadir al diario"}
