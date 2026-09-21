@@ -3,9 +3,11 @@
 import { Minus, Plus } from "lucide-react";
 import {
   GRAMS_KEY,
+  amountProblem,
   describeAmount,
   formatNumber,
   macrosFor,
+  toGrams,
   toQuantity,
   type Per100g,
   type Portion,
@@ -43,7 +45,10 @@ export function PortionPicker({
     onChange({ portion: next, quantity: toQuantity(grams, next) });
   }
 
+  const problem = amountProblem(toGrams(quantity, portion));
+
   return (
+    <div className="flex flex-col gap-2">
     <div className="flex flex-wrap items-end gap-2">
       <div className="flex flex-col gap-1">
         <label htmlFor="portion-quantity" className="text-xs font-semibold text-[var(--color-muted)]">
@@ -97,6 +102,12 @@ export function PortionPicker({
           ))}
         </select>
       </label>
+    </div>
+      {problem && (
+        <p role="alert" className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+          {problem}
+        </p>
+      )}
     </div>
   );
 }

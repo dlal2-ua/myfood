@@ -8,7 +8,7 @@ import { useCurrentUserId } from "@/components/CurrentUser";
 import { MacroPreview, PortionPicker } from "@/components/foods/PortionPicker";
 import { errorMessage } from "@/lib/api";
 import { submitOrQueue } from "@/lib/offlineQueue";
-import { GRAMS_KEY, toGrams, type Portion } from "@/lib/portions";
+import { GRAMS_KEY, amountProblem, toGrams, type Portion } from "@/lib/portions";
 import {
   MEAL_TYPES,
   MEAL_TYPE_LABELS,
@@ -51,10 +51,11 @@ export function AddToLogForm({
   const [weighedAs, setWeighedAs] = useState<"raw" | "cooked">("raw");
 
   const grams = toGrams(quantity, portion);
+  const problem = amountProblem(grams);
 
   async function onLog(e: React.FormEvent) {
     e.preventDefault();
-    if (logging || grams <= 0) return;
+    if (logging || problem) return;
     setLogging(true);
     setLogError(null);
     setLogged(null);
@@ -161,7 +162,7 @@ export function AddToLogForm({
 
         <button
           type="submit"
-          disabled={logging || grams <= 0}
+          disabled={logging || problem !== null}
           className="min-h-12 self-start rounded-full bg-[var(--color-primary)] px-6 font-bold text-[var(--color-on-primary)] disabled:opacity-60 hover:bg-[var(--color-primary-hover)]"
         >
           {logging ? "Guardando…" : "Registrar"}

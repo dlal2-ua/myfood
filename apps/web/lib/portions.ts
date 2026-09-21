@@ -50,6 +50,23 @@ export function formatNumber(value: number): string {
   return String(Math.round(value * 100) / 100).replace(".", ",");
 }
 
+/** Tope que acepta el API por entrada (`grams: le=5000`). */
+export const MAX_GRAMS = 5000;
+
+/** Qué le pasa a la cantidad elegida, o `null` si está bien.
+ *
+ * Existe porque con medidas caseras es fácil escribir en la casilla de cantidad un número
+ * pensado en gramos: «150» con la medida «filete» son 22,5 kg. Antes eso solo se descubría
+ * al guardar, con un «Error 422» del servidor que no explicaba nada. */
+export function amountProblem(grams: number): string | null {
+  if (!Number.isFinite(grams) || grams <= 0) return "Pon una cantidad mayor que cero.";
+  if (grams > MAX_GRAMS) {
+    return `Son ${formatNumber(grams)} g, más de los ${MAX_GRAMS} g que admite una entrada. ` +
+      "¿Querías esa cantidad en gramos? Cambia la medida a «gramos».";
+  }
+  return null;
+}
+
 export interface Per100g {
   kcal_100g: number | null;
   protein_100g: number | null;
