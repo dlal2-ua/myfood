@@ -96,3 +96,26 @@ def test_ninguna_racion_pesa_cero():
     for name in ["Huevo", "Leche", "Aceite", "Pan", "Almendras", "Lentejas", "Pollo"]:
         for portion in build_portions(name_es=name):
             assert portion.grams > 0
+
+
+def test_una_racion_de_cien_gramos_no_se_ofrece_dos_veces():
+    """Open Food Facts suele traer la ración como «100g», que es exactamente la opción de
+    gramos sueltos: ofrecerla aparte salía como «100g (100 g)»."""
+    portions = build_portions(name_es="Refresco de cola", serving_size_g=100, serving_label="100g")
+    assert "serving" not in keys(portions)
+
+
+def test_una_etiqueta_que_solo_repite_el_peso_se_sustituye_por_racion():
+    portions = build_portions(name_es="Galletas", serving_size_g=30, serving_label="30 g")
+    assert by_key(portions, "serving").label == "ración"
+    assert by_key(portions, "serving").grams == 30
+
+
+def test_una_etiqueta_que_dice_algo_se_respeta():
+    portions = build_portions(name_es="Yogur", serving_size_g=125, serving_label="1 envase")
+    assert by_key(portions, "serving").label == "1 envase"
+
+
+def test_una_racion_de_cien_gramos_con_etiqueta_util_si_se_ofrece():
+    portions = build_portions(name_es="Pizza", serving_size_g=100, serving_label="media pizza")
+    assert by_key(portions, "serving").label == "media pizza"
