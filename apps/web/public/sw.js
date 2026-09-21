@@ -6,7 +6,7 @@
 // Las cachés `myfood-pages-*` y `myfood-search-*` contienen datos del usuario (nombre en la
 // cabecera, resultados filtrados por sus restricciones): el cliente las borra al entrar y al
 // salir (`clearUserCaches`).
-const VERSION = "v2";
+const VERSION = "v3";
 const SHELL_CACHE = `myfood-shell-${VERSION}`;
 const STATIC_CACHE = `myfood-static-${VERSION}`;
 const IMAGES_CACHE = `myfood-images-${VERSION}`;
@@ -14,7 +14,7 @@ const PAGES_CACHE = `myfood-pages-${VERSION}`;
 const SEARCH_CACHE = `myfood-search-${VERSION}`;
 const CURRENT_CACHES = [SHELL_CACHE, STATIC_CACHE, IMAGES_CACHE, PAGES_CACHE, SEARCH_CACHE];
 
-const SHELL_ASSETS = ["/manifest.json", "/icon-192.png", "/icon-512.png"];
+const SHELL_ASSETS = ["/manifest.json", "/icon-192.png", "/icon-512.png", "/brand/logo-mark.png"];
 const IMAGE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const IMAGE_MAX_ENTRIES = 300;
 const PAGES_MAX_ENTRIES = 60;
@@ -168,7 +168,7 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(payload.title, {
       body: payload.body,
       icon: "/icon-192.png",
-      badge: "/icon-192.png",
+      badge: "/badge-96.png",
       actions: Array.isArray(payload.actions) ? payload.actions.slice(0, 2) : [],
       data: payload.data || {},
       // Un aviso nuevo del mismo tipo sustituye al anterior en vez de apilarse.

@@ -33,7 +33,7 @@ export function AppShell({ user, children }: { user: CurrentUser | null; childre
   if (!user) {
     return (
       <div className="hero-glow min-h-screen">
-        <header className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4">
+        <header className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-4 py-4">
           <Link href="/" aria-label="MyFood, inicio">
             <Logo />
           </Link>
@@ -41,13 +41,13 @@ export function AppShell({ user, children }: { user: CurrentUser | null; childre
             <ThemeIconButton />
             <Link
               href="/login"
-              className="inline-flex min-h-10 items-center rounded-full px-4 hover:bg-[var(--color-surface-2)]"
+              className="inline-flex min-h-10 items-center whitespace-nowrap rounded-full px-3 hover:bg-[var(--color-surface-2)] sm:px-4"
             >
               Entrar
             </Link>
             <Link
               href="/register"
-              className="inline-flex min-h-10 items-center rounded-full bg-[var(--color-primary)] px-4 text-[var(--color-on-primary)] hover:bg-[var(--color-primary-hover)]"
+              className="inline-flex min-h-10 items-center whitespace-nowrap rounded-full bg-[var(--color-primary)] px-3.5 text-[var(--color-on-primary)] hover:bg-[var(--color-primary-hover)] sm:px-4"
             >
               Crear cuenta
             </Link>
