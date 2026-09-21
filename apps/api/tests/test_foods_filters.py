@@ -55,8 +55,6 @@ def _doc(token: str, name: str, **over) -> dict:
 
 @pytest_asyncio.fixture
 async def catalog():
-    if settings.meili_index == "foods":
-        pytest.skip("Estos tests configuran el índice: solo contra el índice de pruebas.")
     token = f"zzq{uuid.uuid4().hex[:8]}"
     docs = {
         "chicken": _doc(token, "pollo", food_group="meat", protein_100g=23.0, kcal_100g=110.0,
@@ -74,6 +72,11 @@ async def catalog():
     }
     async with httpx.AsyncClient(base_url=settings.meili_url, headers=_headers(), timeout=15) as c:
         index = f"/indexes/{settings.meili_index}"
+        # Estos tests reconfiguran el índice: nunca sobre un catálogo real. En CI y con
+        # `scripts/test-api.sh` el índice está vacío o no existe.
+        stats = await c.get(f"{index}/stats")
+        if stats.status_code == 200 and stats.json()["numberOfDocuments"] >= 500:
+            pytest.skip("El índice tiene un catálogo real: solo corren en uno de pruebas.")
         await _wait(c, await c.patch(f"{index}/settings", json={
             "filterableAttributes": ["kind", "category", "quality_rank", "has_image", "source",
                                      "supermarket", "food_group", "nutrition_tags"],
@@ -188,7 +191,7 @@ async def test_unknown_filter_values_are_rejected(registered_client):
         assert resp.json()["error"]["code"] == "INVALID_FILTER"
 
 
-async def test_empty_text_is_allowed_now(registered_client):
+async def test_empty_text_is_allowed_now(registered_client, catalog):
     client, _ = registered_client
     resp = await client.get("/api/foods/search", params={"nutrition": "low_fat"})
     assert resp.status_code == 200
