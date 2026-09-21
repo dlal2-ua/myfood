@@ -402,3 +402,12 @@ async def test_body_fat_also_returns_bmi_and_waist_to_height(registered_client):
     assert body["bmi"] == pytest.approx(27.8, abs=0.05)
     assert body["whtr"] == pytest.approx(0.56)
     assert "WAIST_TO_HEIGHT_RISK" in body["warnings"]
+
+
+async def test_first_profile_requests_of_a_new_user_do_not_collide(registered_client):
+    """El perfil se crea al primer acceso: varias peticiones simultáneas no deben chocar."""
+    import asyncio
+
+    client, _ = registered_client
+    responses = await asyncio.gather(*[client.get("/api/profile") for _ in range(8)])
+    assert [r.status_code for r in responses] == [200] * 8

@@ -10,6 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,9 +42,16 @@ class WaterSettingsUpdate(BaseModel):
 async def _get_or_create_settings(session: AsyncSession, user_id: UUID) -> WaterSettings:
     settings = await session.get(WaterSettings, user_id)
     if settings is None:
-        settings = WaterSettings(user_id=user_id)
-        session.add(settings)
-        await session.flush()
+        # «Hoy» pide el agua y los ajustes a la vez: con un usuario nuevo dos peticiones intentaban
+        # crear la misma fila y una fallaba con 500. El upsert deja que gane la primera.
+        await session.execute(
+            pg_insert(WaterSettings)
+            .values(user_id=user_id)
+            .on_conflict_do_nothing(index_elements=["user_id"])
+        )
+        settings = await session.scalar(
+            select(WaterSettings).where(WaterSettings.user_id == user_id)
+        )
     return settings
 
 
