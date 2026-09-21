@@ -30,8 +30,8 @@ const only = process.argv.slice(2);
     await ctx.addInitScript((t) => { try { localStorage.setItem("myfood-theme", t); } catch {} }, theme);
     return ctx;
   };
-  const check = async (page, label) => {
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  const check = async (page, label, width) => {
+    const overflow = await page.evaluate((w) => document.documentElement.scrollWidth - w, width);
     if (overflow > 1) problems.push(`${label}: desborde horizontal de ${overflow}px`);
   };
 
@@ -46,7 +46,7 @@ const only = process.argv.slice(2);
           if (only.length && !only.includes(r)) continue;
           await page.goto(BASE + r, { waitUntil: "networkidle" });
           await page.screenshot({ path: `${OUT}/public_${slug(r)}_${theme}_${vp}.png`, fullPage: true });
-          await check(page, `pública ${r} ${theme}/${vp}`);
+          await check(page, `pública ${r} ${theme}/${vp}`, VIEWPORTS[vp].width);
         }
         await ctx.close();
       }
@@ -91,7 +91,7 @@ const only = process.argv.slice(2);
           await page.goto(BASE + r, { waitUntil: "networkidle" });
           await page.waitForTimeout(400);
           await page.screenshot({ path: `${OUT}/${slug(r)}_${theme}_${vp}.png`, fullPage: true });
-          await check(page, `${r} ${theme}/${vp}`);
+          await check(page, `${r} ${theme}/${vp}`, VIEWPORTS[vp].width);
         }
         // hoja de acciones rápidas y menú de cuenta
         if (!only.length) {

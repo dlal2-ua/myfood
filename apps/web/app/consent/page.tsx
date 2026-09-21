@@ -32,7 +32,7 @@ export default function ConsentPage() {
   }
 
   return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-5 px-4 py-8">
+    <main className="flex max-w-2xl flex-col gap-5">
       <h1 className="text-3xl font-extrabold tracking-tight">Tus datos de salud</h1>
       <p className="text-sm">
         MyFood guarda información sobre tu salud: tu peso, medidas corporales, sexo, edad, altura,

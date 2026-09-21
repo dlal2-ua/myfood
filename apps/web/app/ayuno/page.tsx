@@ -144,7 +144,7 @@ export default function FastingPage() {
   if (loading) return <Skeleton lines={3} />;
 
   return (
-    <main className="mx-auto flex max-w-xl flex-col gap-6">
+    <main className="flex max-w-xl flex-col gap-6">
       <div>
         <h1 className="text-3xl font-extrabold tracking-tight">Ayuno</h1>
         <p className="mt-1 text-sm text-neutral-500">

@@ -189,7 +189,7 @@ export default function ChatPage() {
   }
 
   return (
-    <main className="mx-auto flex h-[calc(100vh-4rem)] max-w-2xl flex-col gap-4 px-4 py-6">
+    <main className="flex h-[calc(100dvh-11.6rem)] max-w-2xl flex-col gap-4 md:h-[calc(100dvh-5rem)]">
       <div>
         <h1 className="text-3xl font-extrabold tracking-tight">Chat</h1>
         <p className="mt-1 text-sm text-neutral-500">

@@ -243,7 +243,7 @@ export default function ProgressPage() {
   }, []);
 
   return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-8">
+    <main className="flex max-w-2xl flex-col gap-8">
       <div>
         <h1 className="text-3xl font-extrabold tracking-tight">Progreso</h1>
         <p className="mt-1 text-sm text-neutral-500">
