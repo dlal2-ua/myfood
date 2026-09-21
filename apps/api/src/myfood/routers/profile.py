@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import (
@@ -58,9 +59,13 @@ class ProfileUpdate(BaseModel):
 async def _get_or_create_profile(session: AsyncSession, user_id: UUID) -> Profile:
     profile = await session.get(Profile, user_id)
     if profile is None:
-        profile = Profile(user_id=user_id)
-        session.add(profile)
-        await session.flush()
+        # Upsert: dos peticiones simultáneas de un usuario nuevo no deben chocar creando la fila.
+        await session.execute(
+            pg_insert(Profile)
+            .values(user_id=user_id)
+            .on_conflict_do_nothing(index_elements=["user_id"])
+        )
+        profile = await session.scalar(select(Profile).where(Profile.user_id == user_id))
     return profile
 
 

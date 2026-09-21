@@ -128,3 +128,26 @@ async def test_water_log_with_client_id_is_idempotent(registered_client):
     assert first.json()["id"] == client_id == second.json()["id"]
     day = await client.get("/api/water/log?date=2026-01-10")
     assert day.json()["total_ml"] == 250
+
+
+async def test_first_requests_of_a_new_user_do_not_collide_creating_the_settings(
+    registered_client, superuser_conn
+):
+    """«Hoy» pide `/water/log` y `/water/settings` a la vez: antes, con un usuario nuevo, dos
+    peticiones intentaban crear la misma fila de ajustes y una devolvía 500."""
+    import asyncio
+    from datetime import date
+
+    from sqlalchemy import text
+
+    client, user_id = registered_client
+    today = date.today().isoformat()
+    calls = [client.get("/api/water/log", params={"date": today}) for _ in range(6)] + [
+        client.get("/api/water/settings") for _ in range(6)
+    ]
+    responses = await asyncio.gather(*calls)
+    assert [r.status_code for r in responses] == [200] * 12
+    rows = await superuser_conn.scalar(
+        text("SELECT count(*) FROM water_settings WHERE user_id = :u"), {"u": str(user_id)}
+    )
+    assert rows == 1
