@@ -53,6 +53,24 @@ const check = (ok, what) => { log(ok ? "ok  " : "FAIL", what); if (!ok) failures
     check(/resultados?/.test(await page.innerText('[role="status"]')), "búsqueda por texto con contador");
     await shot("2_busqueda");
 
+    // --- añadir al diario sin salir de la lista (hoja de raciones)
+    await page.getByRole("button", { name: /Añadir .* al diario/ }).first().click();
+    await page.waitForSelector('[role="dialog"] select');
+    const medidas = await page.$$eval('[role="dialog"] select:first-of-type option', (els) => els.map((e) => e.textContent.trim()));
+    log("medidas:", medidas.join(" | "));
+    check(medidas.includes("gramos"), "la hoja ofrece al menos los gramos");
+    const kcalAntes = await page.locator('[role="dialog"] >> text=/\\d+ kcal/').first().textContent();
+    await page.locator('[role="dialog"] button[aria-label="Añadir"]').first().click();
+    await page.waitForTimeout(300);
+    const kcalDespues = await page.locator('[role="dialog"] >> text=/\\d+ kcal/').first().textContent();
+    check(kcalAntes !== kcalDespues, `las calorías se recalculan al cambiar la cantidad (${kcalAntes} -> ${kcalDespues})`);
+    await shot("2b_hoja_racion");
+    await page.getByRole("button", { name: "Añadir al diario" }).click();
+    await page.waitForSelector("text=/Añadido a /", { timeout: 15000 });
+    await page.getByRole("button", { name: "Cerrar" }).first().click();
+    const dia = await api("GET", `/api/log?date=${iso(new Date())}`);
+    check(dia.body?.food?.length > 0, "el alimento queda registrado en el día");
+
     // --- filtro de supermercado (hoja con recuentos)
     await page.getByRole("button", { name: /^Supermercado/ }).click();
     await page.waitForSelector('[role="dialog"]');

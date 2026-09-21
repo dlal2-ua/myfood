@@ -210,13 +210,7 @@ export default function FoodDetailPage() {
         {food.barcode_ean && ` · EAN ${food.barcode_ean}`}
       </p>
 
-      <AddToLogForm
-            foodId={food.id}
-            foodName={food.name_es}
-            servingSizeG={food.serving_size_g}
-            servingLabel={food.serving_label}
-            cookingYieldFactor={food.cooking_yield_factor}
-          />
+      <AddToLogForm food={food} />
     </main>
   );
 }

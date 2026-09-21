@@ -1,3 +1,5 @@
+import type { Portion } from "@/lib/portions";
+
 export type Sex = "male" | "female";
 export type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "very_active";
 export type Goal = "lose" | "maintain" | "gain";
@@ -156,6 +158,11 @@ export interface FoodDetail {
   allergens: FoodAllergen[];
   /** Atribución obligatoria de la imagen (Open Food Facts, CC BY-SA), si tiene. */
   image_credit: string | null;
+  /** Medidas caseras con las que registrarlo («1 huevo», «1 vaso», «100 g»). Los gramos de
+   * cada una los pone el servidor (R1); la pantalla solo multiplica por la cantidad. */
+  portions: Portion[];
+  /** Cantidad propuesta al abrir el formulario, en gramos. */
+  default_grams: number;
 }
 
 /** origin: 'declared' (etiqueta del fabricante), 'trace' ("puede contener") o
