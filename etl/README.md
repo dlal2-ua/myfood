@@ -124,3 +124,20 @@ uv run ruff check etl
 Los tests de transformación (`parse_food`) son puros — no tocan la base de
 datos, solo la lógica de mapeo/descarte, con fixtures extraídas de los
 dumps reales.
+
+## Índice de Meilisearch y filtros del catálogo
+
+`python -m etl.index` reindexa el catálogo entero (idempotente, ~10 s para 22.000 alimentos) y
+deja configurados los atributos filtrables. Además de los campos del buscador, cada documento
+lleva lo que necesita la pantalla «Alimentos» para filtrar:
+
+- `supermarket`: cadena a la que pertenece la marca de OFF (Mercadona, Lidl…), con
+  `myfood.domain.food_taxonomy.supermarket_for_brand`.
+- `food_group`: tipo de alimento (`myfood.domain.food_groups`, el mismo que usa el motor de dietas).
+- `nutrition_tags`: etiquetas por 100 g (alto en proteína, bajo en grasa…) con los umbrales de las
+  declaraciones nutricionales del Reglamento (CE) 1924/2006.
+
+La taxonomía vive en la API (`apps/api/src/myfood/domain/food_taxonomy.py`, Python puro) y el ETL
+la importa por ruta: una sola definición para el índice y para los filtros de la web. **Hay que
+reindexar tras desplegar cualquier cambio de esa taxonomía o del ETL**; si el índice es antiguo,
+los filtros nuevos no encuentran nada.

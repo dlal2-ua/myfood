@@ -82,16 +82,47 @@ export interface FoodSearchItem {
   brand: string | null;
   kcal_100g: number | null;
   protein_100g: number | null;
+  fat_100g?: number | null;
+  carbs_100g?: number | null;
   image_url: string | null;
   source: string;
   nutriscore_grade?: string | null;
   nova_group?: number | null;
   ecoscore_grade?: string | null;
+  /** Nombres para mostrar (no códigos). */
+  supermarket?: string | null;
+  food_type?: string | null;
+}
+
+export interface FacetOption {
+  code: string;
+  label: string;
+  /** Alimentos que quedarían con esta opción dados los demás filtros elegidos. */
+  count: number;
+  description?: string | null;
+}
+
+export interface FoodFacets {
+  supermarket: FacetOption[];
+  food_type: FacetOption[];
+  nutrition: FacetOption[];
 }
 
 export interface FoodSearchResponse {
   items: FoodSearchItem[];
   total: number;
+  facets?: FoodFacets | null;
+}
+
+export interface SuggestionSection {
+  key: string;
+  title: string;
+  subtitle: string | null;
+  items: FoodSearchItem[];
+}
+
+export interface SuggestionsResponse {
+  sections: SuggestionSection[];
 }
 
 export interface FoodDetail {
