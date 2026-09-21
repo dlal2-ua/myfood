@@ -83,7 +83,7 @@ export function UserImageUpload({
         />
         <label
           htmlFor={`${endpoint}-file`}
-          className={`w-fit cursor-pointer rounded-lg border border-neutral-300 px-3 py-1 dark:border-neutral-700 ${busy ? "opacity-60" : ""}`}
+          className={`w-fit cursor-pointer rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-1 ${busy ? "opacity-60" : ""}`}
         >
           {busy ? "Subiendo…" : imageUrl ? "Cambiar foto" : "Subir foto"}
         </label>
@@ -97,7 +97,7 @@ export function UserImageUpload({
             Quitar
           </button>
         )}
-        {error && <p className="text-xs text-red-600">{error}</p>}
+        {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
       </div>
     </div>
   );

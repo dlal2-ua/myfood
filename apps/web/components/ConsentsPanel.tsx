@@ -60,14 +60,14 @@ export function ConsentsPanel() {
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-lg font-semibold">Consentimientos</h2>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <ul className="flex flex-col gap-2">
         {items.map((item) => {
           const label = LABELS[item.kind] ?? { title: item.kind, detail: "" };
           return (
             <li
               key={item.kind}
-              className="flex items-start justify-between gap-3 rounded-lg border border-neutral-200 p-3 text-sm dark:border-neutral-800"
+              className="flex items-start justify-between gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3 text-sm"
             >
               <div>
                 <p className="font-medium">
@@ -89,7 +89,7 @@ export function ConsentsPanel() {
                 type="button"
                 disabled={busyKind === item.kind}
                 onClick={() => void toggle(item)}
-                className="shrink-0 rounded-lg border border-neutral-300 px-3 py-1.5 disabled:opacity-60 dark:border-neutral-700"
+                className="shrink-0 rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-1.5 disabled:opacity-60"
               >
                 {item.granted ? "Revocar" : "Conceder"}
               </button>

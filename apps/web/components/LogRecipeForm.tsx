@@ -8,7 +8,7 @@ import { MEAL_TYPES, MEAL_TYPE_LABELS } from "@/lib/types";
 import type { MealType, Recipe } from "@/lib/types";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 /** Registra raciones de una receta propia en el día (`POST /api/log/recipe`) y ofrece la etiqueta
  * imprimible con su código de barras interno. */
@@ -86,13 +86,13 @@ export function LogRecipeForm({ recipe }: { recipe: Recipe }) {
         <button
           type="submit"
           disabled={busy}
-          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+          className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
         >
           {busy ? "Registrando…" : "Registrar"}
         </button>
       </form>
       {message && <p className="text-sm text-[var(--color-primary)]">{message}</p>}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {recipe.internal_ean && (
         <p className="text-xs text-neutral-500">
           Código de la receta: {recipe.internal_ean}.{" "}

@@ -9,7 +9,7 @@ import type { FoodSearchItem, PantryItem } from "@/lib/types";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 export default function PantryPage() {
   const [items, setItems] = useState<PantryItem[] | null>(null);
@@ -85,7 +85,7 @@ export default function PantryPage() {
   return (
     <main className="flex flex-col gap-8">
       <div>
-        <h1 className="text-xl font-semibold">Despensa</h1>
+        <h1 className="text-3xl font-extrabold tracking-tight">Despensa</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Lo que ya tienes en casa. Al generar la lista de la compra desde un plan, se descuenta
           automáticamente lo que aparece aquí.
@@ -124,13 +124,13 @@ export default function PantryPage() {
             <button
               type="submit"
               disabled={adding || !quantity}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+              className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
             >
               {adding ? "Añadiendo…" : "Añadir"}
             </button>
           </form>
         )}
-        {addError && <p className="text-sm text-red-600">{addError}</p>}
+        {addError && <p className="text-sm text-red-600 dark:text-red-400">{addError}</p>}
       </section>
 
       <section>
@@ -142,7 +142,7 @@ export default function PantryPage() {
             {items.length === 0 ? (
               <EmptyState message="Tu despensa está vacía. Añade lo que tienes en casa para que la lista de la compra lo descuente." />
             ) : (
-              <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+              <ul className="divide-y divide-[var(--color-border)]">
                 {items.map((item) => (
                   <li
                     key={item.id}
@@ -161,7 +161,7 @@ export default function PantryPage() {
                       onClick={() => onDelete(item.id)}
                       disabled={rowBusy === item.id || !item.is_mine}
                       title={!item.is_mine ? "Solo puedes editar tu propia despensa" : undefined}
-                      className="text-sm text-red-600 underline disabled:opacity-30"
+                      className="text-sm text-red-600 dark:text-red-400 underline disabled:opacity-30"
                     >
                       Eliminar
                     </button>
@@ -169,7 +169,7 @@ export default function PantryPage() {
                 ))}
               </ul>
             )}
-            {rowError && <p className="mt-2 text-sm text-red-600">{rowError}</p>}
+            {rowError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{rowError}</p>}
           </>
         )}
       </section>

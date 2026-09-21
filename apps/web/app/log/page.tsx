@@ -23,7 +23,7 @@ import {
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 const SMART_LOG_MAX_POLL_ATTEMPTS = 30; // 30 × 2s = 60s
 const SMART_LOG_POLL_INTERVAL_MS = 2000;
@@ -48,6 +48,14 @@ export default function LogPage() {
 
   const [selectedFood, setSelectedFood] = useState<FoodSearchItem | null>(null);
   const [mealType, setMealType] = useState<MealType>(() => mealTypeForTime());
+
+  // `/log?meal=lunch` (desde el «+» de cada comida de Hoy) deja esa comida preseleccionada.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("meal");
+    if (requested && (MEAL_TYPES as readonly string[]).includes(requested)) {
+      setMealType(requested as MealType);
+    }
+  }, []);
   const [grams, setGrams] = useState("100");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -397,7 +405,7 @@ export default function LogPage() {
   return (
     <main className="flex flex-col gap-8">
       <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold">Registro diario</h1>
+        <h1 className="text-3xl font-extrabold tracking-tight">Registro diario</h1>
         <input
           type="date"
           className={inputClass}
@@ -420,7 +428,7 @@ export default function LogPage() {
           type="button"
           onClick={() => void onCopyDay()}
           disabled={copying}
-          className="rounded-lg border border-neutral-300 px-3 py-2 disabled:opacity-60 dark:border-neutral-700"
+          className="rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-2 disabled:opacity-60"
         >
           {copying ? "Copiando…" : `Copiar al ${logDate}`}
         </button>
@@ -447,7 +455,7 @@ export default function LogPage() {
         </section>
       )}
 
-      <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <section id="natural" className="scroll-mt-20 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="mb-3 text-lg font-semibold">Registrar con lenguaje natural</h2>
         <p className="mb-3 text-sm text-neutral-500">
           Escribe lo que has comido, p. ej. &quot;dos huevos fritos y una tostada con
@@ -466,7 +474,7 @@ export default function LogPage() {
           <button
             type="submit"
             disabled={smartRequesting}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {smartRequesting ? "Interpretando…" : "Interpretar"}
           </button>
@@ -482,7 +490,7 @@ export default function LogPage() {
           para interpretarlo.
         </label>
 
-        {smartError && <p className="mt-2 text-sm text-red-600">{smartError}</p>}
+        {smartError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{smartError}</p>}
         {smartWarning && (
           <p className="mt-2 text-sm text-neutral-500">
             No se ha encontrado ningún alimento parecido en el catálogo para ese texto.
@@ -494,7 +502,7 @@ export default function LogPage() {
             {smartReviewItems.map((item, index) => (
               <div
                 key={`${item.food_id}-${index}`}
-                className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"
+                className="flex flex-wrap items-end gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3"
               >
                 <div className="min-w-[10rem]">
                   <p className="text-sm font-medium">{item.name_es}</p>
@@ -531,7 +539,7 @@ export default function LogPage() {
                   type="button"
                   disabled={smartConfirmingIndex === index}
                   onClick={() => void confirmSmartReviewItem(index)}
-                  className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm text-white disabled:opacity-60"
+                  className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
                 >
                   Confirmar
                 </button>
@@ -548,7 +556,7 @@ export default function LogPage() {
         )}
       </section>
 
-      <section>
+      <section id="registrar" className="scroll-mt-20">
         <h2 className="mb-3 text-lg font-semibold">Registrar alimento</h2>
         <FoodSearchBox onSelect={onSelectFromSearch} />
         {selectedFood && (
@@ -608,13 +616,13 @@ export default function LogPage() {
             <button
               type="submit"
               disabled={adding}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+              className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
             >
               {adding ? "Guardando…" : "Añadir"}
             </button>
           </form>
         )}
-        {addError && <p className="mt-2 text-sm text-red-600">{addError}</p>}
+        {addError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{addError}</p>}
         {queuedNote && (
           <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">{queuedNote}</p>
         )}
@@ -629,7 +637,7 @@ export default function LogPage() {
             {day.food.length === 0 ? (
               <EmptyState message="Todavía no hay entradas para este día." actionLabel="Escanear un producto" actionHref="/scan" />
             ) : (
-              <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+              <ul className="divide-y divide-[var(--color-border)]">
                 {day.food.map((entry) => (
                   <li key={entry.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
                     {editingId === entry.id ? (
@@ -666,7 +674,7 @@ export default function LogPage() {
                           type="button"
                           onClick={() => onSaveEdit(entry.id)}
                           disabled={rowBusy === entry.id}
-                          className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm text-white disabled:opacity-60"
+                          className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
                         >
                           Guardar
                         </button>
@@ -701,7 +709,7 @@ export default function LogPage() {
                             type="button"
                             onClick={() => onDelete(entry.id)}
                             disabled={rowBusy === entry.id}
-                            className="text-red-600 underline disabled:opacity-60"
+                            className="text-red-600 dark:text-red-400 underline disabled:opacity-60"
                           >
                             Eliminar
                           </button>
@@ -712,9 +720,9 @@ export default function LogPage() {
                 ))}
               </ul>
             )}
-            {rowError && <p className="mt-2 text-sm text-red-600">{rowError}</p>}
+            {rowError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{rowError}</p>}
 
-            <div className="mt-4 flex gap-6 rounded-lg border border-neutral-200 p-4 text-sm dark:border-neutral-800">
+            <div className="mt-4 flex gap-6 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4 text-sm">
               <div>
                 <p className="text-neutral-500">Kcal</p>
                 <p className="font-semibold">{day.totals.kcal}</p>

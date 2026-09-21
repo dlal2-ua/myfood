@@ -148,7 +148,7 @@ export default function DietPlanDetailPage() {
 
   if (loading) return <Skeleton lines={3} />;
   if (error || !plan) {
-    return <p className="text-sm text-red-600">{error ?? "No se encontró el plan."}</p>;
+    return <p className="text-sm text-red-600 dark:text-red-400">{error ?? "No se encontró el plan."}</p>;
   }
 
   return (
@@ -158,7 +158,7 @@ export default function DietPlanDetailPage() {
           ← Volver a planes
         </Link>
         <div className="mt-2 flex items-center justify-between">
-          <h1 className="text-xl font-semibold">{plan.name}</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight">{plan.name}</h1>
           <span className="text-xs uppercase text-neutral-500">{plan.status}</span>
         </div>
         <p className="text-sm text-neutral-500">
@@ -176,14 +176,14 @@ export default function DietPlanDetailPage() {
               Archivar
             </button>
           )}
-          <button type="button" onClick={onDelete} className="text-red-600 underline">
+          <button type="button" onClick={onDelete} className="text-red-600 dark:text-red-400 underline">
             Eliminar
           </button>
         </div>
       </div>
 
       {plan.days.map((day) => (
-        <section key={day.id} className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+        <section key={day.id} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-semibold">Día {day.day_index + 1}</h2>
             <span className="text-sm text-neutral-500">
@@ -229,7 +229,7 @@ export default function DietPlanDetailPage() {
                         )}
                       </div>
                       {openItemId === item.id && (
-                        <div className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+                        <div className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3">
                           {item.alternatives.length > 0 ? (
                             <div>
                               <p className="mb-2 text-xs font-semibold text-neutral-500">
@@ -247,7 +247,7 @@ export default function DietPlanDetailPage() {
                                       type="button"
                                       disabled={busyItemId === item.id}
                                       onClick={() => onSubstitute(item, alt.id)}
-                                      className="rounded bg-[var(--color-primary)] px-2 py-1 text-xs text-white disabled:opacity-60"
+                                      className="rounded bg-[var(--color-primary)] px-2 py-1 text-xs text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
                                     >
                                       Usar
                                     </button>
@@ -328,7 +328,7 @@ export default function DietPlanDetailPage() {
                           type="button"
                           disabled={batchBusy || !batchRecipeId}
                           onClick={() => onBatchCook(day.day_index, meal.meal_type)}
-                          className="rounded bg-[var(--color-primary)] px-2 py-1 text-white disabled:opacity-60"
+                          className="rounded bg-[var(--color-primary)] px-2 py-1 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
                         >
                           {batchBusy ? "Asignando…" : "Asignar"}
                         </button>
@@ -350,7 +350,7 @@ export default function DietPlanDetailPage() {
                       </button>
                     )}
                     {batchError && batchCookMealId === meal.id && (
-                      <p className="mt-1 text-xs text-red-600">{batchError}</p>
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">{batchError}</p>
                     )}
                   </div>
                 )}

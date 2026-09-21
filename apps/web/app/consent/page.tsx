@@ -33,14 +33,14 @@ export default function ConsentPage() {
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-5 px-4 py-8">
-      <h1 className="text-xl font-semibold">Tus datos de salud</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Tus datos de salud</h1>
       <p className="text-sm">
         MyFood guarda información sobre tu salud: tu peso, medidas corporales, sexo, edad, altura,
         lo que comes y bebes, tus suplementos y tus planes de dieta. La ley (RGPD, art. 9) la
         considera una categoría especial y solo puede tratarse con tu consentimiento explícito.
       </p>
 
-      <section className="flex flex-col gap-2 rounded-lg border border-neutral-200 p-4 text-sm dark:border-neutral-800">
+      <section className="flex flex-col gap-2 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4 text-sm">
         <h2 className="font-semibold">Qué haremos con ellos</h2>
         <ul className="list-disc pl-5">
           <li>Calcular tus objetivos (metabolismo, calorías, macronutrientes, agua) y tu progreso.</li>
@@ -77,12 +77,12 @@ export default function ConsentPage() {
           />
           Consiento el tratamiento de mis datos de salud para los fines descritos.
         </label>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
             disabled={!accepted || busy}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {busy ? "Guardando…" : "Aceptar y continuar"}
           </button>

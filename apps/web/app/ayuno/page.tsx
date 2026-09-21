@@ -146,7 +146,7 @@ export default function FastingPage() {
   return (
     <main className="mx-auto flex max-w-xl flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold">Ayuno</h1>
+        <h1 className="text-3xl font-extrabold tracking-tight">Ayuno</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Temporizador de ayuno intermitente. Romper un ayuno antes de tiempo no es un fallo: solo
           queda registrado.
@@ -158,10 +158,10 @@ export default function FastingPage() {
         un profesional sanitario antes de empezar y detén el ayuno si te encuentras mal.
       </MedicalDisclaimer>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       {current ? (
-        <section className="flex flex-col items-center gap-4 rounded-lg border border-neutral-200 p-5 dark:border-neutral-800">
+        <section className="flex flex-col items-center gap-4 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-5">
           <Ring fraction={elapsedHours / current.target_hours}>
             <span className="text-2xl font-semibold">{formatDuration(elapsedHours)}</span>
             <span className="text-xs text-neutral-500">de {current.target_hours} h</span>
@@ -184,13 +184,13 @@ export default function FastingPage() {
             type="button"
             onClick={() => void end()}
             disabled={busy}
-            className="rounded-lg bg-[var(--color-primary)] px-5 py-2 text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-5 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {busy ? "…" : "Terminar ayuno"}
           </button>
         </section>
       ) : (
-        <section className="flex flex-col gap-4 rounded-lg border border-neutral-200 p-5 dark:border-neutral-800">
+        <section className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-5">
           <h2 className="text-sm font-semibold text-neutral-500">Empezar un ayuno</h2>
           <div role="group" aria-label="Duración del ayuno" className="flex flex-wrap gap-2">
             {PRESETS.map((p) => (
@@ -204,8 +204,8 @@ export default function FastingPage() {
                 }}
                 className={`rounded-full border px-4 py-1.5 text-sm ${
                   target === p.hours
-                    ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
-                    : "border-neutral-300 dark:border-neutral-700"
+                    ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-[var(--color-on-primary)]"
+                    : "border-[var(--color-border-strong)]"
                 }`}
               >
                 {p.label}
@@ -224,7 +224,7 @@ export default function FastingPage() {
                   setCustom(e.target.value);
                   if (Number(e.target.value) >= 1) setTarget(Number(e.target.value));
                 }}
-                className="w-24 rounded-lg border border-neutral-300 px-3 py-1.5 dark:border-neutral-700 dark:bg-neutral-900"
+                className="w-24 rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-1.5"
               />
             </label>
           </div>
@@ -235,7 +235,7 @@ export default function FastingPage() {
             type="button"
             onClick={() => void start()}
             disabled={busy || !(target >= 1 && target <= 72)}
-            className="w-fit rounded-lg bg-[var(--color-primary)] px-5 py-2 text-white disabled:opacity-60"
+            className="w-fit rounded-full bg-[var(--color-primary)] px-5 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {busy ? "…" : "Empezar ayuno"}
           </button>
@@ -250,7 +250,7 @@ export default function FastingPage() {
             ["Duración media", stats.avg_hours != null ? formatDuration(stats.avg_hours) : "—"],
             ["Más largo", stats.longest_hours != null ? formatDuration(stats.longest_hours) : "—"],
           ].map(([label, value]) => (
-            <div key={label} className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+            <div key={label} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3">
               <p className="text-lg font-semibold">{value}</p>
               <p className="text-xs text-neutral-500">{label}</p>
             </div>
@@ -267,7 +267,7 @@ export default function FastingPage() {
             {history.map((f) => (
               <li
                 key={f.id}
-                className="flex items-center justify-between gap-2 rounded-lg border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
+                className="flex items-center justify-between gap-2 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] px-3 py-2 text-sm"
               >
                 <span>
                   {formatDate(f.started_at)} · {formatDuration(f.elapsed_hours)} de {f.target_hours} h

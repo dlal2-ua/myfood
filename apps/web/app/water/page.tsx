@@ -12,7 +12,7 @@ import { ErrorState, Skeleton } from "@/components/ui/states";
 const WATER_REMINDER_SCHEDULE = { times: ["10:00", "13:00", "16:00", "19:00"] };
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 function todayIso(): string {
   return localDateIso();
@@ -194,7 +194,7 @@ export default function WaterPage() {
 
   return (
     <main className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">Agua</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Agua</h1>
       {error && <ErrorState message={error} onRetry={() => void load()} />}
       {queuedNote && <p className="text-sm text-amber-700 dark:text-amber-300">{queuedNote}</p>}
 
@@ -211,7 +211,7 @@ export default function WaterPage() {
         </div>
       </section>
 
-      <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="text-sm font-semibold text-neutral-500">Recordatorios</h2>
         <PushSubscribeButton />
         <label className="flex items-center gap-2 text-sm">
@@ -232,7 +232,7 @@ export default function WaterPage() {
             type="button"
             disabled={adding}
             onClick={() => addMl(c.ml)}
-            className="rounded-lg border border-neutral-300 px-4 py-2 text-sm disabled:opacity-60 dark:border-neutral-700"
+            className="rounded-full border border-[var(--color-border-strong)] font-medium px-4 py-2 text-sm disabled:opacity-60"
           >
             + {c.label} ({c.ml} ml)
           </button>
@@ -252,7 +252,7 @@ export default function WaterPage() {
           <button
             type="submit"
             disabled={adding}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             Añadir
           </button>
@@ -353,7 +353,7 @@ export default function WaterPage() {
                 <button
                   type="button"
                   onClick={onAddContainer}
-                  className="rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700"
+                  className="rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-2 text-sm"
                 >
                   Añadir
                 </button>
@@ -363,7 +363,7 @@ export default function WaterPage() {
             <button
               type="submit"
               disabled={savingSettings}
-              className="self-start rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+              className="self-start rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
             >
               {savingSettings ? "Guardando…" : "Guardar ajustes"}
             </button>

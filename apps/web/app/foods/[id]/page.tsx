@@ -62,7 +62,7 @@ export default function FoodDetailPage() {
 
   if (loading) return <Skeleton lines={3} />;
   if (error || !food) {
-    return <p className="text-sm text-red-600">{error ?? "No se encontró el alimento."}</p>;
+    return <p className="text-sm text-red-600 dark:text-red-400">{error ?? "No se encontró el alimento."}</p>;
   }
 
   return (
@@ -72,7 +72,7 @@ export default function FoodDetailPage() {
           ← Volver a la búsqueda
         </Link>
         <div className="mt-2 flex items-center gap-2">
-          <h1 className="text-xl font-semibold">{food.name_es}</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight">{food.name_es}</h1>
           <button
             type="button"
             onClick={onToggleFavorite}
@@ -97,17 +97,17 @@ export default function FoodDetailPage() {
             <p className="text-xs text-neutral-500">Imagen: {food.image_credit}</p>
           )}
         </div>
-        {favoriteError && <p className="text-sm text-red-600">{favoriteError}</p>}
+        {favoriteError && <p className="text-sm text-red-600 dark:text-red-400">{favoriteError}</p>}
       </div>
 
       <table className="w-full max-w-sm text-sm">
         <tbody>
-          <tr className="border-b border-neutral-200 dark:border-neutral-800">
+          <tr className="border-b border-[var(--color-border)]">
             <td className="py-1 text-neutral-500">Energía</td>
             <td className="py-1 text-right">{food.kcal_100g} kcal / 100 g</td>
           </tr>
           {food.serving_size_g != null && food.serving_size_g > 0 && (
-            <tr className="border-b border-neutral-200 dark:border-neutral-800">
+            <tr className="border-b border-[var(--color-border)]">
               <td className="py-1 text-neutral-500">
                 Por porción ({food.serving_size_g} g{food.serving_label ? ` · ${food.serving_label}` : ""})
               </td>
@@ -116,32 +116,32 @@ export default function FoodDetailPage() {
               </td>
             </tr>
           )}
-          <tr className="border-b border-neutral-200 dark:border-neutral-800">
+          <tr className="border-b border-[var(--color-border)]">
             <td className="py-1 text-neutral-500">Proteína</td>
             <td className="py-1 text-right">{food.protein_100g} g</td>
           </tr>
-          <tr className="border-b border-neutral-200 dark:border-neutral-800">
+          <tr className="border-b border-[var(--color-border)]">
             <td className="py-1 text-neutral-500">Grasa</td>
             <td className="py-1 text-right">{food.fat_100g} g</td>
           </tr>
           {food.saturated_100g != null && (
-            <tr className="border-b border-neutral-200 dark:border-neutral-800">
+            <tr className="border-b border-[var(--color-border)]">
               <td className="py-1 pl-4 text-neutral-500">de las cuales saturadas</td>
               <td className="py-1 text-right">{food.saturated_100g} g</td>
             </tr>
           )}
-          <tr className="border-b border-neutral-200 dark:border-neutral-800">
+          <tr className="border-b border-[var(--color-border)]">
             <td className="py-1 text-neutral-500">Carbohidratos</td>
             <td className="py-1 text-right">{food.carbs_100g} g</td>
           </tr>
           {food.sugars_100g != null && (
-            <tr className="border-b border-neutral-200 dark:border-neutral-800">
+            <tr className="border-b border-[var(--color-border)]">
               <td className="py-1 pl-4 text-neutral-500">de los cuales azúcares</td>
               <td className="py-1 text-right">{food.sugars_100g} g</td>
             </tr>
           )}
           {food.fiber_100g != null && (
-            <tr className="border-b border-neutral-200 dark:border-neutral-800">
+            <tr className="border-b border-[var(--color-border)]">
               <td className="py-1 text-neutral-500">Fibra</td>
               <td className="py-1 text-right">{food.fiber_100g} g</td>
             </tr>
@@ -161,7 +161,7 @@ export default function FoodDetailPage() {
           <table className="mt-2 w-full">
             <tbody>
               {Object.entries(food.micros).map(([key, value]) => (
-                <tr key={key} className="border-b border-neutral-200 dark:border-neutral-800">
+                <tr key={key} className="border-b border-[var(--color-border)]">
                   <td className="py-1 text-neutral-500">{MICRO_LABELS[key] ?? key}</td>
                   <td className="py-1 text-right">
                     {value} {microUnit(key)}

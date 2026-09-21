@@ -100,7 +100,7 @@ export function SupplementSuggestions({ onAdded }: { onAdded: () => void }) {
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+    <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
       <h2 className="text-lg font-semibold">¿Te podría convenir algún suplemento?</h2>
       <p className="text-sm text-neutral-500">
         Solo si lo pides: se valora tu ingesta media de los últimos 30 días frente a las referencias y
@@ -124,11 +124,11 @@ export function SupplementSuggestions({ onAdded }: { onAdded: () => void }) {
         type="button"
         onClick={() => void request()}
         disabled={busy}
-        className="w-fit rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+        className="w-fit rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
       >
         {busy ? "Valorando…" : "Valorar mi ingesta"}
       </button>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {suggestions && suggestions.length === 0 && (
         <p className="text-sm">
           Con tus datos no hay ningún suplemento que se pueda justificar. Eso es un buen resultado.
@@ -139,7 +139,7 @@ export function SupplementSuggestions({ onAdded }: { onAdded: () => void }) {
           {suggestions.map((s) => {
             const state = decided[s.proposal_id];
             return (
-              <li key={s.proposal_id} className="rounded-lg border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+              <li key={s.proposal_id} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3 text-sm">
                 <p className="font-medium">
                   {s.name_es} · {s.dose_amount} {s.dose_unit}
                 </p>
@@ -153,14 +153,14 @@ export function SupplementSuggestions({ onAdded }: { onAdded: () => void }) {
                     <button
                       type="button"
                       onClick={() => void decide(s, "approve")}
-                      className="rounded-lg bg-[var(--color-primary)] px-3 py-1 text-xs text-white"
+                      className="rounded-full bg-[var(--color-primary)] px-3 py-1 text-xs text-[var(--color-on-primary)] font-semibold hover:bg-[var(--color-primary-hover)]"
                     >
                       Añadir
                     </button>
                     <button
                       type="button"
                       onClick={() => void decide(s, "reject")}
-                      className="rounded-lg border border-neutral-300 px-3 py-1 text-xs dark:border-neutral-700"
+                      className="rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-1 text-xs"
                     >
                       Descartar
                     </button>

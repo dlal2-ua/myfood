@@ -1,24 +1,18 @@
 "use client";
 
+import { Droplets, Plus, Timer } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useCurrentUserId } from "@/components/CurrentUser";
-import { BottomSheet } from "@/components/ui/BottomSheet";
-import { MacroBar } from "@/components/ui/MacroBar";
-import { Ring } from "@/components/ui/Ring";
+import { DATA_CHANGED_EVENT } from "@/components/shell/QuickAddSheet";
+import { BudgetRing } from "@/components/ui/BudgetRing";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import { localDateIso } from "@/lib/dates";
 import { onQueueChanged, submitOrQueue } from "@/lib/offlineQueue";
-import { entryName, groupByMeal } from "@/lib/today";
+import { diaryMeals, entryName } from "@/lib/today";
 import { MEAL_TYPE_LABELS } from "@/lib/types";
-import type {
-  Fasting,
-  LogDay,
-  SupplementsToday,
-  TargetsResponse,
-  WaterDay,
-} from "@/lib/types";
+import type { Fasting, LogDay, SupplementsToday, TargetsResponse, WaterDay } from "@/lib/types";
 
 interface TodayData {
   log: LogDay;
@@ -28,14 +22,52 @@ interface TodayData {
   fasting: Fasting | null;
 }
 
-/** Pantalla «Hoy» (sección 14.1): anillos de kcal y macros, agua, suplementos pendientes, ayuno y
- * las comidas del día, con un botón flotante para añadir. Los objetivos son orientativos y no
- * se colorean como «bien» o «mal» (R10). */
+const CARD =
+  "rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)]";
+
+function MacroProgress({
+  label,
+  value,
+  target,
+  color,
+}: {
+  label: string;
+  value: number;
+  target: number | null | undefined;
+  color: string;
+}) {
+  const fraction = target && target > 0 ? Math.min(1, Math.max(0, value / target)) : 0;
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between gap-2 text-xs">
+        <span className="font-bold">{label}</span>
+        <span className="text-[var(--color-muted)]">
+          {Math.round(value)}
+          {target ? ` / ${Math.round(target)}` : ""} g
+        </span>
+      </div>
+      <div
+        role="progressbar"
+        aria-label={`${label}: ${Math.round(value)}${target ? ` de ${Math.round(target)}` : ""} g`}
+        aria-valuemin={0}
+        aria-valuemax={target ? Math.round(target) : undefined}
+        aria-valuenow={Math.round(value)}
+        className="h-2.5 overflow-hidden rounded-full bg-[var(--color-surface-2)]"
+      >
+        <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${fraction * 100}%`, background: color }} />
+      </div>
+    </div>
+  );
+}
+
+/** Pantalla «Hoy» (sección 14.1): presupuesto de calorías («objetivo − comida = restantes»),
+ * macros, agua, suplementos pendientes, ayuno y el diario del día. Los objetivos son orientativos
+ * y no se colorean como «bien» o «mal» (R10). El botón «+» de acciones rápidas vive en la barra
+ * de la app, no aquí. */
 export function TodayDashboard({ displayName }: { displayName: string }) {
   const userId = useCurrentUserId();
   const [data, setData] = useState<TodayData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sheetOpen, setSheetOpen] = useState(false);
   const [waterNote, setWaterNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -60,11 +92,13 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
 
   useEffect(() => {
     void load();
-    const onFlushed = () => void load();
-    window.addEventListener("myfood:queue-flushed", onFlushed);
-    const stop = onQueueChanged(() => void load());
+    const reload = () => void load();
+    window.addEventListener("myfood:queue-flushed", reload);
+    window.addEventListener(DATA_CHANGED_EVENT, reload);
+    const stop = onQueueChanged(reload);
     return () => {
-      window.removeEventListener("myfood:queue-flushed", onFlushed);
+      window.removeEventListener("myfood:queue-flushed", reload);
+      window.removeEventListener(DATA_CHANGED_EVENT, reload);
       stop();
     };
   }, [load]);
@@ -87,7 +121,6 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
     } catch (err) {
       setWaterNote(errorMessage(err));
     }
-    setSheetOpen(false);
   }
 
   async function takeSupplement(supplementId: string, skipped: boolean) {
@@ -114,16 +147,18 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
 
   const { log, targets, water, supplements, fasting } = data;
   const totals = log.totals;
-  const meals = groupByMeal(log.food);
+  const meals = diaryMeals(log.food);
   const pendingDoses = (supplements?.doses ?? []).filter(
     (d) => d.status === "pending" || d.status === "overdue",
   );
+  const longDate = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
+  const today = longDate.charAt(0).toUpperCase() + longDate.slice(1);
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold">Hola, {displayName}</h1>
-        <p className="text-sm text-neutral-500">Tu día de hoy, {localDateIso()}.</p>
+        <p className="text-sm font-medium text-[var(--color-muted)]">{today}</p>
+        <h1 className="text-3xl font-extrabold tracking-tight">Hola, {displayName}</h1>
       </div>
 
       {!targets && (
@@ -134,63 +169,76 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
         />
       )}
 
-      <section aria-label="Calorías y macros de hoy" className="rounded-[var(--radius-card)] border border-neutral-200 p-4 dark:border-neutral-800">
-        <div className="grid grid-cols-2 justify-items-center gap-4 sm:grid-cols-4">
-          <Ring value={totals.kcal} target={targets?.kcal} color="var(--color-primary)" label="Energía" unit="kcal" />
-          <Ring value={totals.protein_g} target={targets?.protein_g} color="var(--color-protein)" label="Proteína" unit="g" />
-          <Ring value={totals.fat_g} target={targets?.fat_g} color="var(--color-fat)" label="Grasa" unit="g" />
-          <Ring value={totals.carbs_g} target={targets?.carbs_g} color="var(--color-carbs)" label="Carbohidratos" unit="g" />
+      <section aria-label="Calorías y macros de hoy" className={`${CARD} p-5`}>
+        <div className="flex items-center justify-between gap-4 sm:gap-8">
+          <BudgetRing consumed={totals.kcal} target={targets?.kcal} className="h-32 w-32 sm:h-40 sm:w-40" />
+          <dl className="grid w-full min-w-0 max-w-[16rem] gap-2.5 text-sm">
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-[var(--color-muted)]">Objetivo</dt>
+              <dd className="font-bold">{targets ? `${Math.round(targets.kcal)} kcal` : "—"}</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-[var(--color-muted)]">Comida</dt>
+              <dd className="font-bold">− {Math.round(totals.kcal)} kcal</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3 border-t border-[var(--color-border)] pt-2.5">
+              <dt className="font-semibold">Restantes</dt>
+              <dd className="font-extrabold text-[var(--color-primary)]">
+                {targets ? `${Math.max(0, Math.round(targets.kcal - totals.kcal))} kcal` : "—"}
+              </dd>
+            </div>
+          </dl>
         </div>
-        <div className="mt-4">
-          <MacroBar
-            slices={[
-              { key: "p", label: "Proteína", grams: totals.protein_g, color: "var(--color-protein)" },
-              { key: "f", label: "Grasa", grams: totals.fat_g, color: "var(--color-fat)" },
-              { key: "c", label: "Carbohidratos", grams: totals.carbs_g, color: "var(--color-carbs)" },
-            ]}
-          />
+        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+          <MacroProgress label="Proteína" value={totals.protein_g} target={targets?.protein_g} color="var(--color-protein)" />
+          <MacroProgress label="Carbohidratos" value={totals.carbs_g} target={targets?.carbs_g} color="var(--color-carbs)" />
+          <MacroProgress label="Grasa" value={totals.fat_g} target={targets?.fat_g} color="var(--color-fat)" />
         </div>
       </section>
 
       <div className="grid gap-4 sm:grid-cols-2">
         {water && (
-          <section aria-label="Agua de hoy" className="rounded-[var(--radius-card)] border border-neutral-200 p-4 dark:border-neutral-800">
-            <div className="flex items-center gap-4">
-              <Ring value={water.total_ml} target={water.target_ml} color="var(--color-water)" label="Agua" unit="ml" size={80} />
-              <div className="flex flex-col gap-2 text-sm">
-                <button
-                  type="button"
-                  onClick={() => void addWater(200)}
-                  className="rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700"
-                >
-                  + Vaso (200 ml)
-                </button>
-                <Link href="/water" className="text-neutral-500 underline">
-                  Más opciones
-                </Link>
-              </div>
+          <section aria-label="Agua de hoy" className="rounded-[var(--radius-card)] p-5" style={{ background: "var(--tint-sky)" }}>
+            <div className="flex items-center gap-2 text-sm font-bold">
+              <Droplets size={18} aria-hidden="true" className="text-[var(--color-water)]" /> Agua
             </div>
-            {waterNote && <p className="mt-2 text-xs text-neutral-500">{waterNote}</p>}
+            <p className="mt-2 text-3xl font-extrabold tracking-tight">
+              {Math.round(water.total_ml)}
+              <span className="text-base font-semibold text-[var(--color-muted)]"> / {Math.round(water.target_ml)} ml</span>
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void addWater(200)}
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-[var(--color-surface)] px-4 text-sm font-bold shadow-sm"
+              >
+                <Plus size={16} aria-hidden="true" /> Vaso (200 ml)
+              </button>
+              <Link href="/water" className="text-sm font-semibold text-[var(--color-muted)] underline">
+                Más opciones
+              </Link>
+            </div>
+            {waterNote && <p className="mt-2 text-xs text-[var(--color-muted)]">{waterNote}</p>}
           </section>
         )}
 
-        <section aria-label="Suplementos pendientes" className="rounded-[var(--radius-card)] border border-neutral-200 p-4 dark:border-neutral-800">
-          <h2 className="mb-2 text-sm font-semibold text-neutral-500">Suplementos de hoy</h2>
+        <section aria-label="Suplementos pendientes" className={`${CARD} p-5`}>
+          <h2 className="mb-2 text-sm font-bold">Suplementos de hoy</h2>
           {supplements && supplements.doses.length > 0 ? (
             pendingDoses.length === 0 ? (
-              <p className="text-sm">Todo al día.</p>
+              <p className="text-sm text-[var(--color-muted)]">Todo al día.</p>
             ) : (
               <ul className="flex flex-col gap-2 text-sm">
                 {pendingDoses.map((d) => (
                   <li key={d.schedule_id} className="flex items-center justify-between gap-2">
                     <span>
-                      <span className="mr-2 font-mono">{d.time_of_day}</span>
+                      <span className="mr-2 font-mono text-xs text-[var(--color-muted)]">{d.time_of_day}</span>
                       {d.supplement_name}
                     </span>
                     <button
                       type="button"
                       onClick={() => void takeSupplement(d.supplement_id, false)}
-                      className="rounded-lg bg-[var(--color-primary)] px-3 py-1 text-xs text-white"
+                      className="rounded-full bg-[var(--color-primary)] px-3.5 py-1 text-xs font-bold text-[var(--color-on-primary)]"
                     >
                       Tomada
                     </button>
@@ -199,9 +247,9 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
               </ul>
             )
           ) : (
-            <p className="text-sm text-neutral-500">
+            <p className="text-sm text-[var(--color-muted)]">
               No tienes tomas programadas hoy.{" "}
-              <Link href="/supplements" className="underline">
+              <Link href="/supplements" className="font-semibold underline">
                 Suplementos
               </Link>
             </p>
@@ -210,87 +258,57 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
       </div>
 
       {fasting && (
-        <p className="rounded-[var(--radius-card)] border border-neutral-200 p-3 text-sm dark:border-neutral-800">
-          Ayuno en curso: {Math.floor(fasting.elapsed_hours)} h de {fasting.target_hours} h.{" "}
-          <Link href="/ayuno" className="underline">
-            Ver temporizador
-          </Link>
-        </p>
+        <Link
+          href="/ayuno"
+          className="flex items-center gap-3 rounded-[var(--radius-card)] p-4 text-sm font-semibold"
+          style={{ background: "var(--tint-lilac)" }}
+        >
+          <Timer size={20} aria-hidden="true" className="shrink-0 text-[var(--color-primary)]" />
+          <span>
+            Ayuno en curso: {Math.floor(fasting.elapsed_hours)} h de {fasting.target_hours} h
+          </span>
+          <span className="ml-auto text-[var(--color-muted)] underline">Ver temporizador</span>
+        </Link>
       )}
 
-      <section aria-label="Comidas de hoy">
-        <h2 className="mb-2 text-lg font-semibold">Comidas de hoy</h2>
-        {meals.length === 0 ? (
-          <EmptyState
-            message="Todavía no has registrado nada hoy."
-            actionLabel="Registrar la primera comida"
-            actionHref="/scan"
-          />
-        ) : (
-          <div className="flex flex-col gap-4">
-            {meals.map((group) => (
-              <div key={group.mealType}>
-                <h3 className="mb-1 text-sm font-semibold text-neutral-500">
-                  {MEAL_TYPE_LABELS[group.mealType]}
-                </h3>
-                <ul className="divide-y divide-neutral-200 rounded-[var(--radius-card)] border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
-                  {group.entries.map((e) => (
-                    <li key={e.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                      <span>
-                        {entryName(e)}
-                        <span className="ml-2 text-xs text-neutral-500">{e.grams} g</span>
-                      </span>
-                      <span className="text-xs text-neutral-500">{Math.round(e.kcal)} kcal</span>
-                    </li>
-                  ))}
-                </ul>
+      <section aria-label="Diario de hoy" className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-xl font-extrabold tracking-tight">Diario de hoy</h2>
+          <Link href="/log" className="text-sm font-semibold text-[var(--color-primary)]">
+            Ver y editar
+          </Link>
+        </div>
+        {meals.map((meal) => (
+          <div key={meal.mealType} className={`${CARD} overflow-hidden`}>
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <div>
+                <h3 className="text-[15px] font-bold">{MEAL_TYPE_LABELS[meal.mealType]}</h3>
+                <p className="text-xs text-[var(--color-muted)]">{Math.round(meal.kcal)} kcal</p>
               </div>
-            ))}
-            <Link href="/log" className="text-sm text-neutral-500 underline">
-              Ver y editar el registro del día
-            </Link>
-          </div>
-        )}
-      </section>
-
-      <button
-        type="button"
-        onClick={() => setSheetOpen(true)}
-        aria-label="Añadir"
-        className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-primary)] text-3xl text-white shadow-lg"
-      >
-        <span aria-hidden="true">+</span>
-      </button>
-
-      <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="Añadir">
-        <ul className="flex flex-col gap-2 text-base">
-          {[
-            { href: "/scan", label: "Escanear un producto" },
-            { href: "/foods", label: "Buscar un alimento" },
-            { href: "/log", label: "Registrar con lenguaje natural" },
-            { href: "/chat", label: "Hablar con el chat" },
-          ].map((item) => (
-            <li key={item.href}>
               <Link
-                href={item.href}
-                className="flex min-h-11 items-center rounded-[var(--radius-control)] border border-neutral-200 px-3 dark:border-neutral-800"
-                onClick={() => setSheetOpen(false)}
+                href={`/log?meal=${meal.mealType}#registrar`}
+                aria-label={`Añadir a ${MEAL_TYPE_LABELS[meal.mealType].toLowerCase()}`}
+                className="grid h-10 w-10 place-items-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] transition-colors hover:brightness-95"
               >
-                {item.label}
+                <Plus size={20} strokeWidth={2.5} aria-hidden="true" />
               </Link>
-            </li>
-          ))}
-          <li>
-            <button
-              type="button"
-              onClick={() => void addWater(200)}
-              className="flex min-h-11 w-full items-center rounded-[var(--radius-control)] border border-neutral-200 px-3 text-left dark:border-neutral-800"
-            >
-              Beber un vaso de agua
-            </button>
-          </li>
-        </ul>
-      </BottomSheet>
+            </div>
+            {meal.entries.length > 0 && (
+              <ul className="divide-y divide-[var(--color-border)] border-t border-[var(--color-border)]">
+                {meal.entries.map((e) => (
+                  <li key={e.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{entryName(e)}</span>
+                      <span className="text-xs text-[var(--color-muted)]">{e.grams} g</span>
+                    </span>
+                    <span className="shrink-0 text-xs font-semibold text-[var(--color-muted)]">{Math.round(e.kcal)} kcal</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </section>
     </div>
   );
 }

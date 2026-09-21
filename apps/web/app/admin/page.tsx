@@ -6,7 +6,7 @@ import type { AiCredentialStatus, IafoodLimits } from "@/lib/types";
 import { Skeleton } from "@/components/ui/states";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("es-ES");
@@ -102,7 +102,7 @@ export default function AdminPage() {
 
   if (forbidden) {
     return (
-      <div className="rounded-lg border border-neutral-300 p-4 text-sm dark:border-neutral-700">
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-4 text-sm">
         Esta sección es solo para administradores.
       </div>
     );
@@ -110,7 +110,7 @@ export default function AdminPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <h1 className="text-xl font-semibold">Admin</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Admin</h1>
 
       {error && (
         <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
@@ -118,7 +118,7 @@ export default function AdminPage() {
         </p>
       )}
 
-      <section className="flex flex-col gap-3 rounded-lg border border-neutral-300 p-4 dark:border-neutral-700">
+      <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-4">
         <h2 className="font-medium">Credencial de iafood</h2>
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
           Genera el token en un dispositivo de confianza (nunca en este servidor) con{" "}
@@ -160,7 +160,7 @@ export default function AdminPage() {
         </form>
       </section>
 
-      <section className="flex flex-col gap-3 rounded-lg border border-neutral-300 p-4 dark:border-neutral-700">
+      <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-4">
         <h2 className="font-medium">Límites de uso</h2>
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
           Cuántas llamadas a la IA puede hacer cada perfil y la instancia entera por día, y el

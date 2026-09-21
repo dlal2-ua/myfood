@@ -53,11 +53,11 @@ export function PushSubscribeButton() {
         type="button"
         onClick={onToggle}
         disabled={busy}
-        className="self-start rounded-lg border border-neutral-300 px-3 py-2 text-sm disabled:opacity-60 dark:border-neutral-700"
+        className="self-start rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-2 text-sm disabled:opacity-60"
       >
         {subscribed ? "Desactivar notificaciones" : "Activar notificaciones"}
       </button>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
     </div>
   );
 }

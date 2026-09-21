@@ -30,7 +30,7 @@ export function EmptyState({
   onAction?: () => void;
 }) {
   const button =
-    "mt-3 inline-block rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white";
+    "mt-3 inline-block rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] font-semibold hover:bg-[var(--color-primary-hover)]";
   return (
     <div className="rounded-[var(--radius-card)] border border-dashed border-neutral-300 p-6 text-center dark:border-neutral-700">
       <p className="text-sm text-neutral-600 dark:text-neutral-400">{message}</p>

@@ -6,7 +6,7 @@ import type { Household } from "@/lib/types";
 import { ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 export default function HouseholdPage() {
   const [household, setHousehold] = useState<Household | null>(null);
@@ -89,7 +89,7 @@ export default function HouseholdPage() {
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-8">
       <div>
-        <h1 className="text-xl font-semibold">Modo familia</h1>
+        <h1 className="text-3xl font-extrabold tracking-tight">Modo familia</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Comparte la despensa y la lista de la compra con las personas de tu hogar. El resto de
           tus datos (perfil, registro, planes...) sigue siendo privado.
@@ -100,7 +100,7 @@ export default function HouseholdPage() {
       {error && <ErrorState message={error} onRetry={() => void load()} />}
 
       {!loading && household && (
-        <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+        <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
           <h2 className="text-lg font-semibold">{household.name}</h2>
           <p className="text-sm text-neutral-500">
             Código de invitación:{" "}
@@ -119,7 +119,7 @@ export default function HouseholdPage() {
             type="button"
             onClick={onLeave}
             disabled={leaving}
-            className="mt-2 w-fit rounded-lg border border-red-600 px-4 py-2 text-sm text-red-600 disabled:opacity-60"
+            className="mt-2 w-fit rounded-lg border border-red-600 px-4 py-2 text-sm text-red-600 dark:text-red-400 disabled:opacity-60"
           >
             {leaving ? "Saliendo…" : "Salir del hogar"}
           </button>
@@ -128,7 +128,7 @@ export default function HouseholdPage() {
 
       {!loading && !household && (
         <>
-          <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+          <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
             <h2 className="text-sm font-semibold">Crear un hogar nuevo</h2>
             <form onSubmit={onCreate} className="flex flex-wrap items-end gap-3">
               <input
@@ -141,14 +141,14 @@ export default function HouseholdPage() {
               <button
                 type="submit"
                 disabled={creating || !name.trim()}
-                className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+                className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
               >
                 {creating ? "Creando…" : "Crear hogar"}
               </button>
             </form>
           </section>
 
-          <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+          <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
             <h2 className="text-sm font-semibold">Unirte a un hogar existente</h2>
             <form onSubmit={onJoin} className="flex flex-wrap items-end gap-3">
               <input
@@ -161,7 +161,7 @@ export default function HouseholdPage() {
               <button
                 type="submit"
                 disabled={joining || !inviteCode.trim()}
-                className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+                className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
               >
                 {joining ? "Entrando…" : "Unirme"}
               </button>

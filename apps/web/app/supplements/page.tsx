@@ -10,7 +10,7 @@ import type { Supplement, SupplementList, SupplementsToday, TodayDose } from "@/
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 const SUPPLEMENT_TYPES: { value: string; label: string }[] = [
   { value: "protein", label: "Proteína" },
@@ -94,7 +94,7 @@ function TodayPanel({ reload }: { reload: () => void }) {
 
   if (!today || today.doses.length === 0) return null;
   return (
-    <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+    <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">Hoy</h2>
         <span className="text-sm text-neutral-500">
@@ -103,7 +103,7 @@ function TodayPanel({ reload }: { reload: () => void }) {
             : `${today.pending_count} pendiente${today.pending_count === 1 ? "" : "s"}`}
         </span>
       </div>
-      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      {error && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
       <ul className="flex flex-col gap-2">
         {today.doses.map((d) => {
           const done = d.status === "taken" || d.status === "skipped";
@@ -130,7 +130,7 @@ function TodayPanel({ reload }: { reload: () => void }) {
                     type="button"
                     disabled={busy === d.schedule_id}
                     onClick={() => void log(d, false)}
-                    className="rounded-lg bg-[var(--color-primary)] px-3 py-1 text-xs text-white disabled:opacity-60"
+                    className="rounded-full bg-[var(--color-primary)] px-3 py-1 text-xs text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
                   >
                     Tomada
                   </button>
@@ -138,7 +138,7 @@ function TodayPanel({ reload }: { reload: () => void }) {
                     type="button"
                     disabled={busy === d.schedule_id}
                     onClick={() => void log(d, true)}
-                    className="rounded-lg border border-neutral-300 px-3 py-1 text-xs disabled:opacity-60 dark:border-neutral-700"
+                    className="rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-1 text-xs disabled:opacity-60"
                   >
                     Saltar
                   </button>
@@ -352,7 +352,7 @@ export default function SupplementsPage() {
 
   return (
     <main className="flex flex-col gap-8">
-      <h1 className="text-xl font-semibold">Suplementos</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Suplementos</h1>
 
       <TodayPanel reload={() => void load()} />
 
@@ -474,13 +474,13 @@ export default function SupplementsPage() {
             <button
               type="submit"
               disabled={adding}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+              className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
             >
               {adding ? "Añadiendo…" : "Añadir suplemento"}
             </button>
           </div>
         </form>
-        {addError && <p className="text-sm text-red-600">{addError}</p>}
+        {addError && <p className="text-sm text-red-600 dark:text-red-400">{addError}</p>}
       </section>
 
       <section>
@@ -498,7 +498,7 @@ export default function SupplementsPage() {
 
         {loading && <Skeleton lines={3} />}
         {error && <ErrorState message={error} onRetry={() => void load()} />}
-        {rowError && <p className="mb-2 text-sm text-red-600">{rowError}</p>}
+        {rowError && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{rowError}</p>}
 
         {list && (
           <>
@@ -510,7 +510,7 @@ export default function SupplementsPage() {
             {list.items.length === 0 ? (
               <EmptyState message="Todavía no has añadido ningún suplemento." actionLabel="Añadir el primero" actionHref="#anadir-suplemento" />
             ) : (
-              <ul className="flex flex-col divide-y divide-neutral-200 dark:divide-neutral-800">
+              <ul className="flex flex-col divide-y divide-[var(--color-border)]">
                 {list.items.map((s) => (
                   <li key={s.id} className="flex flex-col gap-2 py-4">
                     {editingId === s.id ? (
@@ -545,7 +545,7 @@ export default function SupplementsPage() {
                           type="button"
                           onClick={() => onSaveEdit(s.id)}
                           disabled={rowBusy === s.id}
-                          className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm text-white disabled:opacity-60"
+                          className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
                         >
                           Guardar
                         </button>
@@ -580,7 +580,7 @@ export default function SupplementsPage() {
                               <span className="text-neutral-400">Sin control de stock</span>
                             ) : (
                               <>
-                                <span className={s.low_stock ? "font-medium text-red-600" : ""}>
+                                <span className={s.low_stock ? "font-medium text-red-600 dark:text-red-400" : ""}>
                                   {s.doses_remaining} dosis restantes
                                   {s.days_remaining != null && ` (≈${s.days_remaining} días)`}
                                 </span>
@@ -600,7 +600,7 @@ export default function SupplementsPage() {
                             type="button"
                             onClick={() => onLogDose(s.id)}
                             disabled={rowBusy === s.id}
-                            className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-white disabled:opacity-60"
+                            className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
                           >
                             Tomar dosis
                           </button>
@@ -626,7 +626,7 @@ export default function SupplementsPage() {
                             type="button"
                             onClick={() => onDelete(s.id)}
                             disabled={rowBusy === s.id}
-                            className="text-red-600 underline disabled:opacity-60"
+                            className="text-red-600 dark:text-red-400 underline disabled:opacity-60"
                           >
                             Eliminar
                           </button>
@@ -635,7 +635,7 @@ export default function SupplementsPage() {
                     )}
 
                     {restockingId === s.id && (
-                      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+                      <div className="flex flex-wrap items-end gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3">
                         <label className="flex flex-col gap-1 text-sm">
                           Dosis añadidas
                           <input
@@ -650,7 +650,7 @@ export default function SupplementsPage() {
                           type="button"
                           onClick={() => onConfirmRestock(s.id)}
                           disabled={rowBusy === s.id || !restockAmount}
-                          className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm text-white disabled:opacity-60"
+                          className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
                         >
                           Confirmar
                         </button>

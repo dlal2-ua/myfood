@@ -1,5 +1,6 @@
 "use client";
 
+import { Logo } from "@/components/Logo";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -72,31 +73,31 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
     }
   }
 
+  const field =
+    "h-12 w-full rounded-2xl px-4 text-[15px] focus-visible:outline-2";
+  const primary =
+    "flex min-h-12 items-center justify-center rounded-full bg-[var(--color-primary)] px-5 text-[15px] font-bold text-[var(--color-on-primary)] shadow-sm transition-colors hover:bg-[var(--color-primary-hover)] disabled:opacity-60";
+
   if (mfaToken) {
     return (
-      <main className="flex flex-col items-center justify-center py-16">
-        <form onSubmit={onVerifyTotp} className="flex w-full max-w-sm flex-col gap-3">
-          <h1 className="mb-2 text-xl font-semibold">Verificación en dos pasos</h1>
-          <p className="text-sm text-neutral-500">
-            Introduce el código de 6 dígitos de tu app de autenticación.
-          </p>
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]{6}"
-            placeholder="000000"
-            required
-            autoFocus
-            value={totpCode}
-            onChange={(e) => setTotpCode(e.target.value)}
-            className="rounded-lg border border-neutral-300 px-3 py-2 text-center text-lg tracking-widest dark:border-neutral-700 dark:bg-neutral-900"
-          />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={loading || totpCode.length !== 6}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
-          >
+      <AuthCard title="Verificación en dos pasos" subtitle="Introduce el código de 6 dígitos de tu app de autenticación.">
+        <form onSubmit={onVerifyTotp} className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5 text-sm font-semibold">
+            Código
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              placeholder="000000"
+              required
+              autoFocus
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value)}
+              className={`${field} text-center text-xl tracking-[0.4em]`}
+            />
+          </label>
+          {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+          <button type="submit" disabled={loading || totpCode.length !== 6} className={primary}>
             {loading ? "Comprobando…" : "Verificar"}
           </button>
           <button
@@ -106,78 +107,112 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
               setTotpCode("");
               setError(null);
             }}
-            className="text-sm text-neutral-500 underline"
+            className="min-h-11 text-sm font-semibold text-[var(--color-muted)]"
           >
             Volver
           </button>
         </form>
-      </main>
+      </AuthCard>
     );
   }
 
   return (
-    <main className="flex flex-col items-center justify-center py-16">
-      <form onSubmit={onSubmit} className="flex w-full max-w-sm flex-col gap-3">
-        <h1 className="mb-2 text-xl font-semibold">
-          {mode === "login" ? "Iniciar sesión" : "Crear cuenta"}
-        </h1>
-
+    <AuthCard
+      title={mode === "login" ? "Te damos la bienvenida" : "Crea tu cuenta"}
+      subtitle={
+        mode === "login"
+          ? "Entra para ver tu día, tu dieta y tu progreso."
+          : "Empieza a registrar lo que comes en menos de un minuto."
+      }
+    >
+      <form onSubmit={onSubmit} className="flex flex-col gap-3.5">
         {mode === "register" && (
-          <input
-            type="text"
-            placeholder="Nombre"
-            required
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            className="rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900"
-          />
+          <label className="flex flex-col gap-1.5 text-sm font-semibold">
+            Nombre
+            <input
+              type="text"
+              autoComplete="given-name"
+              required
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className={field}
+            />
+          </label>
         )}
-        <input
-          type="email"
-          placeholder="Email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900"
-        />
-        <input
-          type="password"
-          placeholder="Contraseña"
-          required
-          minLength={8}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900"
-        />
+        <label className="flex flex-col gap-1.5 text-sm font-semibold">
+          Email
+          <input
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={field}
+          />
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm font-semibold">
+          Contraseña
+          <input
+            type="password"
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            required
+            minLength={8}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={field}
+          />
+          {mode === "register" && (
+            <span className="text-xs font-normal text-[var(--color-muted)]">Mínimo 8 caracteres.</span>
+          )}
+        </label>
 
         {mode === "register" && (
           <>
             <MedicalDisclaimer />
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-[var(--color-muted)]">
               Tras crear la cuenta te pediremos tu consentimiento para tratar tus datos de salud
               (peso, medidas, comidas). Podrás revocarlo y borrar tu cuenta cuando quieras.
             </p>
           </>
         )}
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
-        >
+        <button type="submit" disabled={loading} className={primary}>
           {loading ? "Un momento…" : mode === "login" ? "Entrar" : "Registrarme"}
         </button>
 
         <button
           type="button"
           onClick={() => setMode(mode === "login" ? "register" : "login")}
-          className="text-sm text-neutral-500 underline"
+          className="min-h-11 rounded-full bg-[var(--color-primary-soft)] text-sm font-bold text-[var(--color-primary)]"
         >
           {mode === "login" ? "Crear una cuenta nueva" : "Ya tengo cuenta"}
         </button>
       </form>
+    </AuthCard>
+  );
+}
+
+function AuthCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <main className="flex justify-center px-4 pb-16 pt-6">
+      <div className="w-full max-w-md rounded-[28px] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-card)] sm:p-8">
+        <div className="mb-6 flex flex-col items-center gap-3 text-center">
+          <Logo size={52} showName={false} />
+          <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>
+          <p className="text-sm text-[var(--color-muted)]">{subtitle}</p>
+        </div>
+        {children}
+      </div>
     </main>
   );
 }

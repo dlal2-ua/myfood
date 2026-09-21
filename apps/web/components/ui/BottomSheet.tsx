@@ -49,7 +49,10 @@ export function BottomSheet({
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-[2px] md:items-center md:p-6"
+      onClick={onClose}
+    >
       <div
         ref={panelRef}
         role="dialog"
@@ -57,19 +60,20 @@ export function BottomSheet({
         aria-labelledby={titleId}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-t-[var(--radius-card)] bg-[var(--color-surface)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl outline-none"
+        className="sheet-in max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-t-[28px] bg-[var(--color-surface)] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl outline-none md:rounded-[28px]"
       >
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 id={titleId} className="text-lg font-semibold">
+        <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-[var(--color-border-strong)] md:hidden" aria-hidden="true" />
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 id={titleId} className="text-xl font-extrabold tracking-tight">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Cerrar"
-            className="flex h-11 w-11 items-center justify-center rounded-full text-xl"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-surface-2)] text-xl leading-none text-[var(--color-muted)] hover:text-[var(--color-text)]"
           >
-            ×
+            <span aria-hidden="true">×</span>
           </button>
         </div>
         {children}

@@ -14,7 +14,7 @@ const PERIODS = [
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+    <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3">
       <p className="text-xl font-semibold">{value}</p>
       <p className="text-xs text-neutral-500">{label}</p>
       {hint && <p className="mt-1 text-xs text-neutral-400">{hint}</p>}
@@ -115,8 +115,8 @@ function Trends() {
               onClick={() => setPeriod(p.value)}
               className={`rounded-full border px-3 py-1 text-xs ${
                 period === p.value
-                  ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
-                  : "border-neutral-300 dark:border-neutral-700"
+                  ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-[var(--color-on-primary)]"
+                  : "border-[var(--color-border-strong)]"
               }`}
             >
               {p.label}
@@ -124,7 +124,7 @@ function Trends() {
           ))}
         </div>
       </div>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {summary && weight && intake && (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -184,7 +184,7 @@ function Trends() {
         </>
       )}
       {tdee && tdee.current && (
-        <div className="rounded-lg border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+        <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3 text-sm">
           <h3 className="mb-1 text-xs font-semibold text-neutral-500">
             Gasto energético estimado (TDEE adaptativo)
           </h3>
@@ -245,7 +245,7 @@ export default function ProgressPage() {
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-8">
       <div>
-        <h1 className="text-xl font-semibold">Progreso</h1>
+        <h1 className="text-3xl font-extrabold tracking-tight">Progreso</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Premia el registro constante, nunca el déficit calórico ni el resultado corporal.
         </p>
@@ -253,7 +253,7 @@ export default function ProgressPage() {
 
       <Trends />
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       {data && (
         <>
@@ -284,7 +284,7 @@ export default function ProgressPage() {
                   className={`rounded-lg border p-3 text-sm ${
                     a.earned
                       ? "border-green-300 bg-green-50 dark:border-green-900 dark:bg-green-950/30"
-                      : "border-neutral-200 dark:border-neutral-800"
+                      : "border-[var(--color-border)]"
                   }`}
                 >
                   <div className="flex items-center justify-between">

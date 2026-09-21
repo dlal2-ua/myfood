@@ -29,7 +29,7 @@ export function MicronutrientsPanel({ date }: { date: string }) {
   if (!data) return null;
 
   return (
-    <div className="mt-4 rounded-lg border border-neutral-200 p-4 text-sm dark:border-neutral-800">
+    <div className="mt-4 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4 text-sm">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

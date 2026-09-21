@@ -12,7 +12,7 @@ import {
 import type { LogDay, WaterDay } from "@/lib/types";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 function todayIso(): string {
   return localDateIso();
@@ -155,7 +155,7 @@ export default function WearablesPage() {
   if (!native) {
     return (
       <main className="flex flex-col gap-4">
-        <h1 className="text-xl font-semibold">Wearables</h1>
+        <h1 className="text-3xl font-extrabold tracking-tight">Wearables</h1>
         <p className="text-sm text-neutral-500">
           Esta sección solo está disponible en la app Android de MyFood — necesita Health
           Connect, una API nativa sin equivalente en el navegador.
@@ -166,15 +166,15 @@ export default function WearablesPage() {
 
   return (
     <main className="flex flex-col gap-8">
-      <h1 className="text-xl font-semibold">Wearables (Health Connect)</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Wearables (Health Connect)</h1>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {message && <p className="text-sm text-neutral-600 dark:text-neutral-400">{message}</p>}
 
-      <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="mb-3 text-lg font-semibold">Estado</h2>
         {availability && !availability.available && (
-          <p className="text-sm text-red-600">
+          <p className="text-sm text-red-600 dark:text-red-400">
             Health Connect no está disponible en este dispositivo
             {availability.status === "update_required" && " (necesita actualizarse)"}.
           </p>
@@ -191,7 +191,7 @@ export default function WearablesPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void onRequestPermissions()}
-                className={`${inputClass} bg-[var(--color-primary)] text-white disabled:opacity-60`}
+                className={`${inputClass} bg-[var(--color-primary)] text-[var(--color-on-primary)] disabled:opacity-60`}
               >
                 Conceder permisos
               </button>
@@ -202,13 +202,13 @@ export default function WearablesPage() {
 
       {canRead && (
         <>
-          <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+          <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
             <h2 className="mb-3 text-lg font-semibold">Importar desde Health Connect</h2>
             <button
               type="button"
               disabled={busy}
               onClick={() => void onImport()}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+              className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
             >
               Importar últimos 14 días
             </button>
@@ -278,7 +278,7 @@ export default function WearablesPage() {
       )}
 
       {canWrite && (
-        <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+        <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
           <h2 className="mb-3 text-lg font-semibold">Exportar a Health Connect</h2>
           <p className="mb-3 text-sm text-neutral-500">
             Envía el agua y la comida ya registradas hoy en MyFood a Health Connect, para
@@ -288,7 +288,7 @@ export default function WearablesPage() {
             type="button"
             disabled={busy}
             onClick={() => void onExportToday()}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             Exportar hoy
           </button>

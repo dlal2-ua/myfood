@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { BudgetRing } from "@/components/ui/BudgetRing";
 import { MacroBar } from "@/components/ui/MacroBar";
 import { NumberStepper } from "@/components/ui/NumberStepper";
 import { Ring } from "@/components/ui/Ring";
@@ -176,5 +177,29 @@ describe("ScoreBadges", () => {
   it("ignores values outside the official scales", () => {
     const { container } = render(<ScoreBadges nutriscore="z" nova={9} ecoscore="q" />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("BudgetRing", () => {
+  it("shows what is left and says it in text", () => {
+    render(<BudgetRing consumed={1420.4} target={2100} />);
+    expect(screen.getByRole("group", { name: "Calorías: 1420 de 2100 kcal. Quedan 680 kcal" })).toBeInTheDocument();
+    expect(screen.getByText("680")).toBeInTheDocument();
+    expect(screen.getByText("restantes")).toBeInTheDocument();
+  });
+
+  it("reports going over without alarm colours", () => {
+    const { container } = render(<BudgetRing consumed={2350} target={2100} />);
+    expect(screen.getByText("+250")).toBeInTheDocument();
+    expect(screen.getByText("sobre el objetivo")).toBeInTheDocument();
+    const arc = container.querySelectorAll("circle")[1];
+    expect(arc.getAttribute("stroke")).toBe("var(--color-primary)");
+    expect(Number(arc.getAttribute("stroke-dashoffset"))).toBeCloseTo(0);
+  });
+
+  it("falls back to what was eaten when there is no target", () => {
+    render(<BudgetRing consumed={512} target={null} />);
+    expect(screen.getByRole("group", { name: "Calorías: 512 kcal" })).toBeInTheDocument();
+    expect(screen.getByText("kcal")).toBeInTheDocument();
   });
 });

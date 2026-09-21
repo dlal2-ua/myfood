@@ -8,7 +8,7 @@ export default function FoodsPage() {
 
   return (
     <main className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">Alimentos</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Alimentos</h1>
       <FoodSearchBox onSelect={(item) => router.push(`/foods/${item.id}`)} />
     </main>
   );
