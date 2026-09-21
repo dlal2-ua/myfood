@@ -22,7 +22,10 @@ const log = (...a) => console.log(...a);
     log("food", food.name_es, "|", food.brand, "| nutri", food.nutriscore_grade);
     await page.goto(BASE + `/foods/${food.id}`, { waitUntil: "networkidle" });
     const txt = await page.innerText("main");
-    log("ficha has Fuente:", /Fuente:/.test(txt), "| Licencia:", /Licencia:/.test(txt), "| porción btn:", /1 porción/.test(txt));
+    // La cantidad ya no es una casilla de gramos con un botón de porción: es un selector de
+    // medidas caseras, con la porción del envase entre ellas cuando el catálogo la trae.
+    const medidas = await page.$$eval("#portion-measure option", (els) => els.map((e) => e.textContent.trim()));
+    log("ficha has Fuente:", /Fuente:/.test(txt), "| Licencia:", /Licencia:/.test(txt), "| medidas:", medidas.join(", "));
     await page.screenshot({ path: "ficha.png", fullPage: true });
     // registrar hoy y copiar al día anterior desde la UI
     await api("POST", "/api/log/food", { log_date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })(), meal_type: "lunch", food_id: food.id, grams: 50 });

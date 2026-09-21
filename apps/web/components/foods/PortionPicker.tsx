@@ -87,9 +87,10 @@ export function PortionPicker({
         </div>
       </div>
 
-      <label className="flex min-w-0 flex-1 flex-col gap-1">
+      <label htmlFor="portion-measure" className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="text-xs font-semibold text-[var(--color-muted)]">Medida</span>
         <select
+          id="portion-measure"
           value={portion.key}
           disabled={disabled}
           onChange={(e) => changePortion(e.target.value)}
