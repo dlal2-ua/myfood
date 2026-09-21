@@ -10,7 +10,7 @@ import { submitOrQueue } from "@/lib/offlineQueue";
 import { MEAL_TYPES, MEAL_TYPE_LABELS, type LogFoodEntry, type MealType } from "@/lib/types";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 function todayIso(): string {
   return localDateIso();
@@ -147,7 +147,7 @@ export function AddToLogForm({
           <button
             type="button"
             onClick={() => setGrams(String(servingSizeG))}
-            className="rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700"
+            className="rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-2 text-sm"
             title="Usar la porción indicada en el envase"
           >
             1 porción ({servingSizeG} g{servingLabel ? ` · ${servingLabel}` : ""})
@@ -156,12 +156,12 @@ export function AddToLogForm({
         <button
           type="submit"
           disabled={logging}
-          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+          className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
         >
           {logging ? "Guardando…" : "Registrar"}
         </button>
       </form>
-      {logError && <p className="mt-2 text-sm text-red-600">{logError}</p>}
+      {logError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{logError}</p>}
       {queued && (
         <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
           Sin conexión: guardado en este dispositivo. Se registrará solo al volver la red.

@@ -83,7 +83,7 @@ export function OfflineSync({ userId }: { userId: string | null }) {
       aria-live="polite"
       className="border-b border-amber-300 bg-amber-50 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
     >
-      <div className="mx-auto flex max-w-3xl flex-col gap-2 px-4 py-2">
+      <div className="mx-auto flex max-w-4xl flex-col gap-2 px-4 py-2 md:px-8">
         {!online && (
           <p>
             Sin conexión. Puedes seguir registrando comidas y agua: se guardan en este dispositivo y

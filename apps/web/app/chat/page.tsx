@@ -12,8 +12,8 @@ import type {
 import { Skeleton } from "@/components/ui/states";
 
 const bubbleBase = "max-w-[85%] rounded-2xl px-4 py-2 text-sm";
-const userBubble = `${bubbleBase} self-end bg-[var(--color-primary)] text-white`;
-const assistantBubble = `${bubbleBase} self-start border border-neutral-200 dark:border-neutral-800`;
+const userBubble = `${bubbleBase} self-end bg-[var(--color-primary)] text-[var(--color-on-primary)]`;
+const assistantBubble = `${bubbleBase} self-start border border-[var(--color-border)]`;
 
 export default function ChatPage() {
   const [history, setHistory] = useState<ChatHistoryItem[]>([]);
@@ -191,7 +191,7 @@ export default function ChatPage() {
   return (
     <main className="mx-auto flex h-[calc(100vh-4rem)] max-w-2xl flex-col gap-4 px-4 py-6">
       <div>
-        <h1 className="text-xl font-semibold">Chat</h1>
+        <h1 className="text-3xl font-extrabold tracking-tight">Chat</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Pídeme cambios sobre la marcha — nunca aplico nada sin que lo confirmes.
         </p>
@@ -203,7 +203,7 @@ export default function ChatPage() {
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+      <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3">
         {loadingHistory && <Skeleton lines={3} />}
         {!loadingHistory && history.length === 0 && (
           <p className="text-sm text-neutral-500">
@@ -252,7 +252,7 @@ export default function ChatPage() {
                 type="button"
                 disabled={deciding}
                 onClick={() => void decideProposal("approve")}
-                className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm text-white disabled:opacity-60"
+                className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
               >
                 Aprobar
               </button>
@@ -260,7 +260,7 @@ export default function ChatPage() {
                 type="button"
                 disabled={deciding}
                 onClick={() => void decideProposal("reject")}
-                className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-60 dark:border-neutral-700"
+                className="rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-1.5 text-sm disabled:opacity-60"
               >
                 Rechazar
               </button>
@@ -270,9 +270,9 @@ export default function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {needsConsent && (
-        <div className="rounded-lg border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+        <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3 text-sm">
           <p className="mb-2">
             Antes de usar el chat, acepta que tus mensajes se procesen con Claude (nunca tu
             nombre, email ni historial identificable).
@@ -280,7 +280,7 @@ export default function ChatPage() {
           <button
             type="button"
             onClick={() => void acceptConsent()}
-            className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm text-white"
+            className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             Aceptar y continuar
           </button>
@@ -294,7 +294,7 @@ export default function ChatPage() {
 
       <form onSubmit={onSendText} className="flex items-end gap-2">
         <textarea
-          className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+          className="min-h-[2.5rem] flex-1 resize-none rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-sm"
           rows={1}
           placeholder="Escribe un mensaje…"
           value={text}
@@ -314,7 +314,7 @@ export default function ChatPage() {
           className={`rounded-lg border px-3 py-2 text-sm disabled:opacity-60 ${
             recording
               ? "border-red-400 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950"
-              : "border-neutral-300 dark:border-neutral-700"
+              : "border-[var(--color-border-strong)]"
           }`}
           title={recording ? "Detener grabación" : "Grabar nota de voz"}
         >
@@ -323,7 +323,7 @@ export default function ChatPage() {
         <button
           type="submit"
           disabled={sending || recording || !text.trim()}
-          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+          className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
         >
           {sending ? "…" : "Enviar"}
         </button>

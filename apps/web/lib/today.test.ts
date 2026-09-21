@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entryName, groupByMeal, percentOf } from "@/lib/today";
+import { calorieBudget, diaryMeals, entryName, groupByMeal, percentOf } from "@/lib/today";
 import type { LogFoodEntry } from "@/lib/types";
 
 const entry = (over: Partial<LogFoodEntry>): LogFoodEntry => ({
@@ -47,5 +47,40 @@ describe("percentOf", () => {
     expect(percentOf(10, 0)).toBeNull();
     expect(percentOf(10, null)).toBeNull();
     expect(percentOf(10, undefined)).toBeNull();
+  });
+});
+
+describe("diaryMeals", () => {
+  it("always lists breakfast, lunch and dinner, even empty", () => {
+    const meals = diaryMeals([]);
+    expect(meals.map((m) => m.mealType)).toEqual(["breakfast", "lunch", "dinner"]);
+    expect(meals.every((m) => m.kcal === 0 && m.entries.length === 0)).toBe(true);
+  });
+
+  it("adds snacks only when they have entries, in the natural order, with kcal subtotals", () => {
+    const meals = diaryMeals([
+      entry({ id: "a", meal_type: "afternoon_snack", kcal: 120 }),
+      entry({ id: "b", meal_type: "breakfast", kcal: 300 }),
+      entry({ id: "c", meal_type: "breakfast", kcal: 50 }),
+    ]);
+    expect(meals.map((m) => m.mealType)).toEqual(["breakfast", "lunch", "afternoon_snack", "dinner"]);
+    expect(meals[0].kcal).toBe(350);
+    expect(meals[2].kcal).toBe(120);
+  });
+});
+
+describe("calorieBudget", () => {
+  it("is target minus food, never negative", () => {
+    expect(calorieBudget(1420, 2100)).toMatchObject({ remaining: 680, over: 0 });
+    expect(calorieBudget(2100, 2100)).toMatchObject({ remaining: 0, over: 0, fraction: 1 });
+  });
+
+  it("reports going over as data, capped ring", () => {
+    expect(calorieBudget(2350, 2100)).toMatchObject({ remaining: 0, over: 250, fraction: 1 });
+  });
+
+  it("has no budget without a target", () => {
+    expect(calorieBudget(500, null)).toBeNull();
+    expect(calorieBudget(500, 0)).toBeNull();
   });
 });

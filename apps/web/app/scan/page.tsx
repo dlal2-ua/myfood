@@ -11,7 +11,7 @@ import type { FoodDetail, Recipe } from "@/lib/types";
 const SCANNER_ELEMENT_ID = "barcode-scanner";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 interface ManualForm {
   name_es: string;
@@ -156,7 +156,7 @@ export default function ScanPage() {
 
   return (
     <main className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">Escanear producto</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Escanear producto</h1>
 
       {scanning && (
         <div>
@@ -167,7 +167,7 @@ export default function ScanPage() {
         </div>
       )}
 
-      {scannerError && <p className="text-sm text-red-600">{scannerError}</p>}
+      {scannerError && <p className="text-sm text-red-600 dark:text-red-400">{scannerError}</p>}
       {!scanning && lookupLoading && <p className="text-sm text-neutral-500">Buscando…</p>}
 
       {recipe && (
@@ -278,12 +278,12 @@ export default function ScanPage() {
             <button
               type="submit"
               disabled={manualSaving}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+              className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
             >
               {manualSaving ? "Guardando…" : "Guardar y añadir al catálogo"}
             </button>
           </form>
-          {manualError && <p className="mt-2 text-sm text-red-600">{manualError}</p>}
+          {manualError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{manualError}</p>}
         </section>
       )}
 

@@ -30,7 +30,7 @@ const BMR_FORMULAS: { value: Profile["bmr_formula"]; label: string }[] = [
 ];
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 function todayIso(): string {
   return localDateIso();
@@ -166,13 +166,13 @@ export default function ProfilePage() {
   }
 
   if (!profile) {
-    return <p className="text-sm text-red-600">{profileError ?? "No se pudo cargar el perfil."}</p>;
+    return <p className="text-sm text-red-600 dark:text-red-400">{profileError ?? "No se pudo cargar el perfil."}</p>;
   }
 
   return (
     <main className="flex flex-col gap-10 pb-16">
       <section>
-        <h1 className="mb-4 text-xl font-semibold">Perfil</h1>
+        <h1 className="mb-4 text-3xl font-extrabold tracking-tight">Perfil</h1>
         <form onSubmit={onSaveProfile} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
             Sexo
@@ -313,7 +313,7 @@ export default function ProfilePage() {
             </label>
           </fieldset>
 
-          {profileError && <p className="text-sm text-red-600 sm:col-span-2">{profileError}</p>}
+          {profileError && <p className="text-sm text-red-600 dark:text-red-400 sm:col-span-2">{profileError}</p>}
           {profileSaved && (
             <p className="text-sm text-[var(--color-primary)] sm:col-span-2">Perfil guardado.</p>
           )}
@@ -322,7 +322,7 @@ export default function ProfilePage() {
             <button
               type="submit"
               disabled={profileSaving}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+              className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
             >
               {profileSaving ? "Guardando…" : "Guardar perfil"}
             </button>
@@ -332,7 +332,7 @@ export default function ProfilePage() {
 
       <RestrictionsPanel />
 
-      <section>
+      <section id="medida" className="scroll-mt-20">
         <h2 className="mb-4 text-xl font-semibold">Nueva medida corporal</h2>
         <form onSubmit={onSaveMeasurement} className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-sm">
@@ -368,12 +368,12 @@ export default function ProfilePage() {
           <button
             type="submit"
             disabled={measurementSaving}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {measurementSaving ? "Guardando…" : "Guardar medida"}
           </button>
         </form>
-        {measurementError && <p className="mt-2 text-sm text-red-600">{measurementError}</p>}
+        {measurementError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{measurementError}</p>}
 
         <div className="mt-6">
           <h3 className="mb-2 text-sm font-medium text-neutral-500">Tendencia de peso</h3>
@@ -388,12 +388,12 @@ export default function ProfilePage() {
           type="button"
           onClick={onCalculate}
           disabled={calcLoading}
-          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+          className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
         >
           {calcLoading ? "Calculando…" : "Calcular BMR / TDEE / objetivos"}
         </button>
 
-        {calcError && <p className="mt-2 text-sm text-red-600">{calcError}</p>}
+        {calcError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{calcError}</p>}
 
         {bmr && (
           <div className="mt-4 flex gap-6 text-sm">

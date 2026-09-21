@@ -7,7 +7,7 @@ import type { DietPlan, FoodSearchItem, ShoppingList, ShoppingListItem } from "@
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 export default function ShoppingListPage() {
   const [list, setList] = useState<ShoppingList | null>(null);
@@ -172,7 +172,7 @@ export default function ShoppingListPage() {
 
   return (
     <main className="flex flex-col gap-8">
-      <h1 className="text-xl font-semibold">Lista de la compra</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Lista de la compra</h1>
 
       {plans.length > 0 && (
         <section className="flex flex-col gap-2">
@@ -201,12 +201,12 @@ export default function ShoppingListPage() {
               type="button"
               onClick={onGenerateFromPlan}
               disabled={generating || !selectedPlanId}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+              className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
             >
               {generating ? "Generando…" : "Generar lista"}
             </button>
           </div>
-          {generateError && <p className="text-sm text-red-600">{generateError}</p>}
+          {generateError && <p className="text-sm text-red-600 dark:text-red-400">{generateError}</p>}
         </section>
       )}
 
@@ -236,12 +236,12 @@ export default function ShoppingListPage() {
           <button
             type="submit"
             disabled={addingText || !freeText.trim()}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {addingText ? "Añadiendo…" : "Añadir texto"}
           </button>
         </form>
-        {textError && <p className="text-sm text-red-600">{textError}</p>}
+        {textError && <p className="text-sm text-red-600 dark:text-red-400">{textError}</p>}
 
         <div>
           <p className="mb-2 text-sm text-neutral-500">O elige un alimento del catálogo:</p>
@@ -273,13 +273,13 @@ export default function ShoppingListPage() {
               <button
                 type="submit"
                 disabled={addingFood}
-                className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+                className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
               >
                 {addingFood ? "Añadiendo…" : "Añadir alimento"}
               </button>
             </form>
           )}
-          {foodError && <p className="mt-2 text-sm text-red-600">{foodError}</p>}
+          {foodError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{foodError}</p>}
         </div>
       </section>
 
@@ -304,7 +304,7 @@ export default function ShoppingListPage() {
             {list.items.length === 0 ? (
               <EmptyState message="Tu lista de la compra está vacía. Genérala desde un plan o añade productos a mano." />
             ) : (
-              <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+              <ul className="divide-y divide-[var(--color-border)]">
                 {list.items.map((item) => (
                   <li
                     key={item.id}
@@ -330,7 +330,7 @@ export default function ShoppingListPage() {
                       type="button"
                       onClick={() => onDelete(item.id)}
                       disabled={rowBusy === item.id}
-                      className="text-sm text-red-600 underline disabled:opacity-60"
+                      className="text-sm text-red-600 dark:text-red-400 underline disabled:opacity-60"
                     >
                       Eliminar
                     </button>
@@ -338,7 +338,7 @@ export default function ShoppingListPage() {
                 ))}
               </ul>
             )}
-            {rowError && <p className="mt-2 text-sm text-red-600">{rowError}</p>}
+            {rowError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{rowError}</p>}
           </>
         )}
       </section>

@@ -7,7 +7,7 @@ import { ConsentsPanel } from "@/components/ConsentsPanel";
 import type { PrivacySummary } from "@/lib/types";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 export default function PrivacyPage() {
   const router = useRouter();
@@ -51,7 +51,7 @@ export default function PrivacyPage() {
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-8">
-      <h1 className="text-xl font-semibold">Privacidad de datos de salud</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Privacidad de datos de salud</h1>
       <p className="text-sm text-neutral-600 dark:text-neutral-400">
         MyFood es una aplicación autoalojada de uso personal/familiar. Cuando accede a
         Health Connect, lo hace solo para:
@@ -71,7 +71,7 @@ export default function PrivacyPage() {
 
       {authenticated && summary && (
         <>
-          <hr className="my-4 border-neutral-200 dark:border-neutral-800" />
+          <hr className="my-4 border-[var(--color-border)]" />
 
           <section className="flex flex-col gap-2">
             <h2 className="text-lg font-semibold">Tus datos</h2>
@@ -89,13 +89,13 @@ export default function PrivacyPage() {
             <div className="mt-2 flex flex-wrap gap-3">
               <a
                 href="/api/privacy/export"
-                className="inline-block w-fit rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white"
+                className="inline-block w-fit rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] font-semibold hover:bg-[var(--color-primary-hover)]"
               >
                 Descargar todos mis datos (JSON)
               </a>
               <a
                 href="/api/privacy/export?format=zip"
-                className="inline-block w-fit rounded-lg border border-neutral-300 px-4 py-2 text-sm dark:border-neutral-700"
+                className="inline-block w-fit rounded-full border border-[var(--color-border-strong)] font-medium px-4 py-2 text-sm"
               >
                 Descargar en hojas de cálculo (ZIP con CSV)
               </a>
@@ -141,7 +141,7 @@ export default function PrivacyPage() {
               >
                 {deleting ? "Eliminando…" : "Eliminar mi cuenta"}
               </button>
-              {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
+              {deleteError && <p className="text-sm text-red-600 dark:text-red-400">{deleteError}</p>}
             </form>
           </section>
         </>

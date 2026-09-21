@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 interface TotpSetup {
   secret: string;
@@ -91,8 +91,8 @@ export default function SecurityPage() {
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-8">
-      <h1 className="text-xl font-semibold">Seguridad</h1>
-      {loadError && <p className="text-sm text-red-600">{loadError}</p>}
+      <h1 className="text-3xl font-extrabold tracking-tight">Seguridad</h1>
+      {loadError && <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>}
 
       {enabled === true && (
         <section className="flex flex-col gap-3">
@@ -100,7 +100,7 @@ export default function SecurityPage() {
             La verificación en dos pasos está activada. Al iniciar sesión te pedirá además el
             código de tu app de autenticación.
           </p>
-          <form onSubmit={onDisable} className="flex flex-col gap-3 rounded-lg border border-neutral-300 p-4 dark:border-neutral-700">
+          <form onSubmit={onDisable} className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-4">
             <h2 className="text-sm font-semibold">Desactivar verificación en dos pasos</h2>
             <label className="flex flex-col gap-1 text-sm">
               Confirma tu contraseña
@@ -114,11 +114,11 @@ export default function SecurityPage() {
             <button
               type="submit"
               disabled={disabling || !disablePassword}
-              className="w-fit rounded-lg border border-red-600 px-4 py-2 text-sm text-red-600 disabled:opacity-60"
+              className="w-fit rounded-lg border border-red-600 px-4 py-2 text-sm text-red-600 dark:text-red-400 disabled:opacity-60"
             >
               {disabling ? "Desactivando…" : "Desactivar"}
             </button>
-            {disableError && <p className="text-sm text-red-600">{disableError}</p>}
+            {disableError && <p className="text-sm text-red-600 dark:text-red-400">{disableError}</p>}
           </form>
         </section>
       )}
@@ -133,7 +133,7 @@ export default function SecurityPage() {
             type="button"
             onClick={onStartSetup}
             disabled={settingUp}
-            className="w-fit rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+            className="w-fit rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {settingUp ? "Generando…" : "Activar verificación en dos pasos"}
           </button>
@@ -141,7 +141,7 @@ export default function SecurityPage() {
       )}
 
       {setup && (
-        <section className="flex flex-col gap-3 rounded-lg border border-neutral-300 p-4 dark:border-neutral-700">
+        <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-4">
           <h2 className="text-sm font-semibold">
             1. Añade esta clave a tu app de autenticación
           </h2>
@@ -167,12 +167,12 @@ export default function SecurityPage() {
             <button
               type="submit"
               disabled={confirming || confirmCode.length !== 6}
-              className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+              className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
             >
               {confirming ? "Comprobando…" : "Confirmar"}
             </button>
           </form>
-          {confirmError && <p className="text-sm text-red-600">{confirmError}</p>}
+          {confirmError && <p className="text-sm text-red-600 dark:text-red-400">{confirmError}</p>}
         </section>
       )}
     </main>

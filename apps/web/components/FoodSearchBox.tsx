@@ -37,12 +37,12 @@ export function FoodSearchBox({ onSelect }: { onSelect: (item: FoodSearchItem) =
         placeholder="Busca un alimento (mín. 2 letras)…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        className="rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900"
+        className="rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2"
       />
       {loading && <p className="text-xs text-neutral-500">Buscando…</p>}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
       {results.length > 0 && (
-        <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+        <ul className="divide-y divide-neutral-200 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] dark:divide-neutral-800">
           {results.map((item) => (
             <li key={item.id}>
               <button

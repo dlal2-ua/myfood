@@ -112,7 +112,7 @@ export function ReceiptScanPanel({ onAdded }: { onAdded: () => void }) {
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+    <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -141,14 +141,14 @@ export function ReceiptScanPanel({ onAdded }: { onAdded: () => void }) {
             className="text-sm"
           />
           {scanning && <p className="text-sm text-neutral-500">Leyendo el ticket…</p>}
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
           {reviewItems.length > 0 && (
             <ul className="mt-2 flex flex-col gap-3">
               {reviewItems.map((item, index) => (
                 <li
                   key={`${item.food_id}-${index}`}
-                  className="flex flex-wrap items-center gap-3 rounded-lg border border-neutral-200 p-3 text-sm dark:border-neutral-700"
+                  className="flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3 text-sm dark:border-neutral-700"
                 >
                   <div className="flex-1">
                     <p className="font-medium">{item.name_es}</p>
@@ -161,14 +161,14 @@ export function ReceiptScanPanel({ onAdded }: { onAdded: () => void }) {
                     min={1}
                     value={item.quantityInput}
                     onChange={(e) => updateItem(index, e.target.value)}
-                    className="w-24 rounded-lg border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                    className="w-24 rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1"
                   />
                   <span className="text-xs text-neutral-400">g</span>
                   <button
                     type="button"
                     onClick={() => confirmItem(index)}
                     disabled={addingIndex === index}
-                    className="rounded-lg bg-[var(--color-primary)] px-3 py-1 text-white disabled:opacity-60"
+                    className="rounded-full bg-[var(--color-primary)] px-3 py-1 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
                   >
                     {addingIndex === index ? "Añadiendo…" : "Añadir"}
                   </button>

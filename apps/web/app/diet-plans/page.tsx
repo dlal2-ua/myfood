@@ -9,7 +9,7 @@ import type { AiProposal, AiSession, DietPlan, FoodDetail } from "@/lib/types";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 const MAX_POLL_ATTEMPTS = 60; // 60 × 2s = 120s (sección 10.6)
 const POLL_INTERVAL_MS = 2000;
@@ -173,7 +173,7 @@ export default function DietPlansPage() {
 
   return (
     <main className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">Planes de dieta</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Planes de dieta</h1>
       <MedicalDisclaimer />
 
       <section>
@@ -206,19 +206,19 @@ export default function DietPlansPage() {
           <button
             type="submit"
             disabled={generating}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {generating ? "Generando…" : "Generar plan"}
           </button>
         </form>
-        {generateError && <p className="mt-2 text-sm text-red-600">{generateError}</p>}
+        {generateError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{generateError}</p>}
         <p className="mt-2 text-sm text-neutral-500">
           Necesitas el perfil completo (sexo, fecha de nacimiento, altura) y al menos un peso
           registrado en Medidas.
         </p>
       </section>
 
-      <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="mb-3 text-lg font-semibold">Generar con IA (iafood)</h2>
         <p className="mb-3 text-sm text-neutral-500">
           Claude propone la estructura de comidas (nunca gramos ni calorías) a partir de tu
@@ -240,7 +240,7 @@ export default function DietPlansPage() {
           <button
             type="submit"
             disabled={aiRequesting || aiSession?.status === "running"}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {aiRequesting || aiSession?.status === "running" ? "Generando…" : "Generar con IA"}
           </button>
@@ -256,7 +256,7 @@ export default function DietPlansPage() {
           identificativos) se envíen a Claude para diseñar la estructura del plan.
         </label>
 
-        {aiError && <p className="mt-2 text-sm text-red-600">{aiError}</p>}
+        {aiError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{aiError}</p>}
 
         {aiSession?.status === "rejected_validation" && (
           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
@@ -280,7 +280,7 @@ export default function DietPlansPage() {
               .map((proposal) => (
                 <div
                   key={proposal.id}
-                  className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"
+                  className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3"
                 >
                   <p className="font-medium">Día {proposal.payload.day_index + 1}</p>
                   {proposal.rationale && (
@@ -304,7 +304,7 @@ export default function DietPlansPage() {
                       type="button"
                       disabled={decidingId === proposal.id}
                       onClick={() => void decideProposal(proposal.id, "approve")}
-                      className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm text-white disabled:opacity-60"
+                      className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
                     >
                       Aprobar
                     </button>
@@ -312,7 +312,7 @@ export default function DietPlansPage() {
                       type="button"
                       disabled={decidingId === proposal.id}
                       onClick={() => void decideProposal(proposal.id, "reject")}
-                      className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-60 dark:border-neutral-700"
+                      className="rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-1.5 text-sm disabled:opacity-60"
                     >
                       Rechazar
                     </button>
@@ -335,7 +335,7 @@ export default function DietPlansPage() {
             <li key={plan.id}>
               <Link
                 href={`/diet-plans/${plan.id}`}
-                className="block rounded-lg border border-neutral-200 p-3 hover:border-[var(--color-primary)] dark:border-neutral-800"
+                className="block rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3 hover:border-[var(--color-primary)]"
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{plan.name}</span>

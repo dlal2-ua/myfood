@@ -15,7 +15,7 @@ const KIND_LABELS: Record<RestrictionKind, string> = {
 };
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 /** Alergias, intolerancias y alimentos vetados o que no te gustan. El generador de
  * dietas, iafood y el chat los tratan como restricción dura: nunca proponen un
@@ -36,10 +36,10 @@ export function RestrictionsPanel() {
   async function load() {
     try {
       const [rs, as] = await Promise.all([
-        apiFetch<Restriction[]>("/api/restrictions"),
+        apiFetch<{ items: Restriction[] }>("/api/restrictions"),
         apiFetch<{ items: Allergen[] }>("/api/allergens"),
       ]);
-      setRestrictions(rs);
+      setRestrictions(rs.items);
       setAllergens(as.items);
       setError(null);
     } catch (err) {
@@ -95,7 +95,7 @@ export function RestrictionsPanel() {
       </div>
 
       {loading && <Skeleton lines={3} />}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {!loading && restrictions.length === 0 && (
         <p className="text-sm text-neutral-500">
           Todavía no has declarado ninguna restricción. Si tienes alguna alergia, añádela aquí
@@ -107,7 +107,7 @@ export function RestrictionsPanel() {
         {restrictions.map((r) => (
           <li
             key={r.id}
-            className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
+            className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] px-3 py-2 text-sm"
           >
             <span>
               <span className="mr-2 rounded bg-neutral-100 px-1.5 py-0.5 text-xs uppercase text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
@@ -127,7 +127,7 @@ export function RestrictionsPanel() {
         ))}
       </ul>
 
-      <form onSubmit={onAdd} className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+      <form onSubmit={onAdd} className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3">
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-sm">
             Tipo
@@ -167,7 +167,7 @@ export function RestrictionsPanel() {
           <button
             type="submit"
             disabled={busy || !canAdd}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             Añadir
           </button>

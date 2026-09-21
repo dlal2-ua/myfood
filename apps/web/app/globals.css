@@ -1,18 +1,78 @@
 @import "tailwindcss";
 
+/* El tema oscuro lo decide `data-theme` en <html> (lo fija un script en <head> antes de pintar,
+   ver `lib/theme.ts`), no solo el ajuste del sistema: así el usuario puede forzarlo. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Grises con un matiz verdoso para que todo lo que usa `neutral-*` case con la paleta. En claro,
+   el 500 es el texto secundario (contraste AA sobre las tarjetas); en oscuro se aclara más abajo. */
+@theme {
+  --color-neutral-50: #f4faf8;
+  --color-neutral-100: #e8f2ef;
+  --color-neutral-200: #d5e5e0;
+  --color-neutral-300: #b7cdc6;
+  --color-neutral-400: #8ba79f;
+  --color-neutral-500: #526d65;
+  --color-neutral-600: #435a53;
+  --color-neutral-700: #34473f;
+  --color-neutral-800: #22332e;
+  --color-neutral-900: #14221e;
+  --color-neutral-950: #0a1512;
+}
+
 :root {
-  --color-primary: #16a34a;
-  --color-bg: #fafaf9;
+  color-scheme: light;
+  --color-primary: #0a7a6e;
+  --color-primary-hover: #086b60;
+  --color-primary-soft: #d6f2ea;
+  --color-on-primary: #ffffff;
+  --color-accent: #34d399;
+  --color-bg: #f3faf7;
   --color-surface: #ffffff;
-  --color-text: #1c1917;
-  --color-muted: #57534e;
+  --color-surface-2: #e8f5ef;
+  --color-border: #d9e8e3;
+  --color-border-strong: #b7cdc6;
+  --color-text: #0e1f1b;
+  --color-muted: #4a625b;
   /* Un macro tiene SIEMPRE el mismo color en toda la app (y siempre lleva su etiqueta de texto). */
   --color-protein: #ef4444;
   --color-fat: #f59e0b;
   --color-carbs: #3b82f6;
   --color-water: #0ea5e9;
-  --radius-control: 8px;
-  --radius-card: 16px;
+  /* Tonos pastel de las tarjetas de portada y de sugerencias. */
+  --tint-mint: #dcf5ea;
+  --tint-lime: #ecf7cf;
+  --tint-sky: #dbeffa;
+  --tint-lilac: #ebe6fa;
+  --radius-control: 12px;
+  --radius-card: 20px;
+  --shadow-card: 0 1px 2px rgb(14 31 27 / 0.05), 0 8px 24px rgb(14 31 27 / 0.06);
+  --nav-height: 4.25rem;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-primary: #2dd4bf;
+  --color-primary-hover: #5eead4;
+  --color-primary-soft: #113830;
+  --color-on-primary: #04201b;
+  --color-accent: #34d399;
+  --color-bg: #08120f;
+  --color-surface: #0f1d19;
+  --color-surface-2: #152722;
+  --color-border: #1f3730;
+  --color-border-strong: #2c4a41;
+  --color-text: #e6f4ef;
+  --color-muted: #93b0a7;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.35);
+  --tint-mint: #0f3129;
+  --tint-lime: #232f12;
+  --tint-sky: #0f2e3c;
+  --tint-lilac: #25213d;
+  --color-neutral-400: #a9c4bb;
+  --color-neutral-500: #8fb0a5;
+  --color-neutral-600: #a3c0b6;
+  --color-neutral-700: #bcd3cb;
 }
 
 body {
@@ -21,12 +81,32 @@ body {
   font-family: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #1c1917;
-    --color-surface: #292524;
-    --color-text: #fafaf9;
-    --color-muted: #d6d3d1;
+@layer base {
+  h1,
+  h2 {
+    letter-spacing: -0.015em;
+  }
+
+  /* Los controles de formulario heredan la paleta (también en oscuro) aunque una pantalla no
+     les ponga clases. Las utilidades de Tailwind siguen ganando a esto. */
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"]),
+  select,
+  textarea {
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-control);
+  }
+
+  ::placeholder {
+    color: var(--color-muted);
+    opacity: 0.75;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"] {
+    accent-color: var(--color-primary);
   }
 }
 
@@ -68,8 +148,35 @@ body {
   }
 }
 
+@keyframes myfood-sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+
 .skeleton {
   animation: myfood-pulse 1.5s ease-in-out infinite;
   background: color-mix(in srgb, currentColor 12%, transparent);
   border-radius: var(--radius-control);
+}
+
+.sheet-in {
+  animation: myfood-sheet-in 0.18s ease-out;
+}
+
+/* Fondo de las pantallas de entrada: un resplandor verde-turquesa, como un amanecer suave. */
+.hero-glow {
+  background:
+    radial-gradient(60rem 28rem at 50% -8rem, color-mix(in srgb, var(--color-accent) 28%, transparent), transparent 70%),
+    radial-gradient(34rem 22rem at 100% 12rem, color-mix(in srgb, var(--color-primary) 16%, transparent), transparent 70%),
+    var(--color-bg);
+}
+
+/* Las barras de desplazamiento horizontal de las filas de chips y tarjetas no se ven. */
+.scroll-row {
+  scrollbar-width: none;
+}
+.scroll-row::-webkit-scrollbar {
+  display: none;
 }

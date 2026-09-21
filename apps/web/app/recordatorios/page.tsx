@@ -8,7 +8,7 @@ import type { MealType, NotificationRule, Supplement, SupplementList } from "@/l
 import { Skeleton } from "@/components/ui/states";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 const DAY_LABELS = ["L", "M", "X", "J", "V", "S", "D"];
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -114,21 +114,21 @@ export default function RemindersPage() {
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-8">
       <div>
-        <h1 className="text-xl font-semibold">Recordatorios</h1>
+        <h1 className="text-3xl font-extrabold tracking-tight">Recordatorios</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Los avisos son cortos y solo llegan si todavía tienen sentido: si ya has bebido tu agua,
           tomado el suplemento, registrado esa comida o pesado hoy, no se envían.
         </p>
       </div>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {message && <p className="text-sm text-[var(--color-primary)]">{message}</p>}
 
-      <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="text-lg font-semibold">Notificaciones en este dispositivo</h2>
         <PushSubscribeButton />
       </section>
 
-      <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="text-lg font-semibold">No molestar</h2>
         <p className="text-sm text-neutral-500">
           Dentro de este tramo no se envía ningún aviso. Se aplica a todos tus recordatorios.
@@ -155,7 +155,7 @@ export default function RemindersPage() {
             Hasta
             <input type="time" className={inputClass} value={quietTo} onChange={(e) => setQuietTo(e.target.value)} />
           </label>
-          <button type="submit" className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white">
+          <button type="submit" className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] font-semibold hover:bg-[var(--color-primary-hover)]">
             Guardar
           </button>
         </form>
@@ -166,7 +166,7 @@ export default function RemindersPage() {
         {rules.length === 0 ? (
           <p className="text-sm text-neutral-500">Todavía no tienes ninguno.</p>
         ) : (
-          <ul className="flex flex-col divide-y divide-neutral-200 dark:divide-neutral-800">
+          <ul className="flex flex-col divide-y divide-[var(--color-border)]">
             {rules.map((rule) => (
               <li key={rule.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
                 <span className={rule.is_enabled ? "" : "text-neutral-400"}>
@@ -208,7 +208,7 @@ export default function RemindersPage() {
         </p>
       </section>
 
-      <section className="flex flex-col gap-4 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <section className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="text-lg font-semibold">Añadir un recordatorio</h2>
 
         <form onSubmit={addWater} className="flex flex-wrap items-end gap-3">
@@ -216,7 +216,7 @@ export default function RemindersPage() {
             Agua (hasta 8 horas al día)
             <input className={inputClass} value={waterTimes} onChange={(e) => setWaterTimes(e.target.value)} />
           </label>
-          <button type="submit" className="rounded-lg border border-neutral-300 px-4 py-2 text-sm dark:border-neutral-700">
+          <button type="submit" className="rounded-full border border-[var(--color-border-strong)] font-medium px-4 py-2 text-sm">
             Añadir
           </button>
         </form>
@@ -245,7 +245,7 @@ export default function RemindersPage() {
             Hora
             <input type="time" className={inputClass} value={mealTime} onChange={(e) => setMealTime(e.target.value)} />
           </label>
-          <button type="submit" className="rounded-lg border border-neutral-300 px-4 py-2 text-sm dark:border-neutral-700">
+          <button type="submit" className="rounded-full border border-[var(--color-border-strong)] font-medium px-4 py-2 text-sm">
             Añadir
           </button>
         </form>
@@ -282,8 +282,8 @@ export default function RemindersPage() {
                   }
                   className={`h-9 w-9 rounded-full border text-sm ${
                     on
-                      ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
-                      : "border-neutral-300 dark:border-neutral-700"
+                      ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-[var(--color-on-primary)]"
+                      : "border-[var(--color-border-strong)]"
                   }`}
                 >
                   {label}
@@ -291,7 +291,7 @@ export default function RemindersPage() {
               );
             })}
           </div>
-          <button type="submit" className="rounded-lg border border-neutral-300 px-4 py-2 text-sm dark:border-neutral-700">
+          <button type="submit" className="rounded-full border border-[var(--color-border-strong)] font-medium px-4 py-2 text-sm">
             Añadir
           </button>
         </form>

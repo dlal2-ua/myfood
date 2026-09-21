@@ -6,7 +6,7 @@ import { apiFetch, errorMessage } from "@/lib/api";
 import type { BmrFormula, BmrResponse, BodyFatMethod, BodyFatResult } from "@/lib/types";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 const BMR_FORMULAS: { value: BmrFormula; label: string; needsBodyFat: boolean }[] = [
   { value: "mifflin", label: "Mifflin-St Jeor (recomendada)", needsBodyFat: false },
@@ -80,7 +80,7 @@ function BmrCalculator() {
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+    <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
       <h2 className="text-lg font-semibold">Metabolismo basal y gasto diario</h2>
       <p className="text-sm text-neutral-500">
         Usa tu perfil (sexo, edad, altura, actividad) y tu última pesada.
@@ -103,19 +103,19 @@ function BmrCalculator() {
         <button
           type="submit"
           disabled={busy}
-          className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+          className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
         >
           Calcular
         </button>
       </form>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {result && (
         <dl className="grid grid-cols-2 gap-3 text-sm" aria-live="polite">
-          <div className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+          <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3">
             <dt className="text-xs text-neutral-500">Metabolismo basal (TMB)</dt>
             <dd className="text-xl font-semibold">{result.bmr} kcal</dd>
           </div>
-          <div className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+          <div className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3">
             <dt className="text-xs text-neutral-500">Gasto diario (TDEE)</dt>
             <dd className="text-xl font-semibold">{result.tdee} kcal</dd>
           </div>
@@ -179,7 +179,7 @@ function BodyFatCalculator() {
   );
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+    <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
       <h2 className="text-lg font-semibold">Grasa corporal, masa magra y FFMI</h2>
       <form onSubmit={onCalculate} className="flex flex-col gap-3">
         <div className="flex flex-wrap gap-3">
@@ -236,12 +236,12 @@ function BodyFatCalculator() {
         <button
           type="submit"
           disabled={busy}
-          className="w-fit rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+          className="w-fit rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
         >
           Calcular
         </button>
       </form>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {result && (
         <div aria-live="polite" className="flex flex-col gap-3">
           <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
@@ -251,7 +251,7 @@ function BodyFatCalculator() {
               ["FFMI", result.ffmi != null ? String(result.ffmi) : "—"],
               ["IMC", result.bmi != null ? String(result.bmi) : "—"],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+              <div key={label} className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3">
                 <dt className="text-xs text-neutral-500">{label}</dt>
                 <dd className="text-xl font-semibold">{value}</dd>
               </div>
@@ -283,7 +283,7 @@ export default function CalculatorsPage() {
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold">Calculadoras</h1>
+        <h1 className="text-3xl font-extrabold tracking-tight">Calculadoras</h1>
         <p className="mt-1 text-sm text-neutral-500">
           Todos los cálculos se hacen en el servidor con fórmulas publicadas; nada de esto pasa por la
           IA.

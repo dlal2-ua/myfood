@@ -16,7 +16,7 @@ import type {
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
-  "rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900";
+  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
 // Importar una receta hace una llamada al agente POR CADA línea de
 // ingrediente (sección 20 — cada línea pasa por el mismo resolutor que
@@ -314,9 +314,9 @@ export default function RecipesPage() {
 
   return (
     <main className="flex flex-col gap-8">
-      <h1 className="text-xl font-semibold">Recetas</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Recetas</h1>
 
-      <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="mb-3 text-lg font-semibold">Importar desde URL</h2>
         <p className="mb-3 text-sm text-neutral-500">
           Pega el enlace de una receta y Claude interpretará cada ingrediente (nunca
@@ -334,7 +334,7 @@ export default function RecipesPage() {
           <button
             type="submit"
             disabled={importRequesting}
-            className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {importRequesting ? "Importando…" : "Importar"}
           </button>
@@ -349,10 +349,10 @@ export default function RecipesPage() {
           Acepto que el contenido de esa página se envíe a Claude para interpretarlo.
         </label>
 
-        {importError && <p className="mt-2 text-sm text-red-600">{importError}</p>}
+        {importError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{importError}</p>}
 
         {importMeta && importDraft && (
-          <div className="mt-4 flex flex-col gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+          <div className="mt-4 flex flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3">
             <p className="text-sm font-medium">
               {importMeta.name} · {importMeta.servings} raciones
               {importMeta.prep_minutes != null && ` · ${importMeta.prep_minutes} min`}
@@ -435,7 +435,7 @@ export default function RecipesPage() {
                 type="button"
                 disabled={savingDraft}
                 onClick={() => void onSaveDraft()}
-                className="rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+                className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
               >
                 {savingDraft ? "Guardando…" : "Guardar receta"}
               </button>
@@ -454,7 +454,7 @@ export default function RecipesPage() {
         )}
       </section>
 
-      <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+      <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="mb-3 text-lg font-semibold">Crear receta manualmente</h2>
         <form onSubmit={onCreateRecipe} className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-3">
@@ -516,7 +516,7 @@ export default function RecipesPage() {
                 <button
                   type="button"
                   onClick={addPickedFoodToNewIngredients}
-                  className="rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm text-white"
+                  className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] font-semibold hover:bg-[var(--color-primary-hover)]"
                 >
                   Añadir a la receta
                 </button>
@@ -532,7 +532,7 @@ export default function RecipesPage() {
                     <button
                       type="button"
                       onClick={() => removeNewIngredient(index)}
-                      className="text-red-600 underline"
+                      className="text-red-600 dark:text-red-400 underline"
                     >
                       Quitar
                     </button>
@@ -545,11 +545,11 @@ export default function RecipesPage() {
           <button
             type="submit"
             disabled={creating}
-            className="w-fit rounded-lg bg-[var(--color-primary)] px-4 py-2 text-white disabled:opacity-60"
+            className="w-fit rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {creating ? "Creando…" : "Crear receta"}
           </button>
-          {createError && <p className="text-sm text-red-600">{createError}</p>}
+          {createError && <p className="text-sm text-red-600 dark:text-red-400">{createError}</p>}
         </form>
       </section>
 
@@ -560,7 +560,7 @@ export default function RecipesPage() {
         {!loading && recipes.length === 0 && (
           <EmptyState message="Todavía no tienes recetas. Crea una a mano o impórtala desde una URL." />
         )}
-        <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+        <ul className="divide-y divide-[var(--color-border)]">
           {recipes.map((r) => (
             <li key={r.id} className="flex items-center justify-between gap-3 py-2">
               <button
@@ -576,7 +576,7 @@ export default function RecipesPage() {
               <button
                 type="button"
                 onClick={() => void onDeleteRecipe(r.id)}
-                className="text-sm text-red-600 underline"
+                className="text-sm text-red-600 dark:text-red-400 underline"
               >
                 Eliminar
               </button>
@@ -585,8 +585,8 @@ export default function RecipesPage() {
         </ul>
 
         {selectedId && (
-          <div className="mt-4 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
-            {detailError && <p className="text-sm text-red-600">{detailError}</p>}
+          <div className="mt-4 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
+            {detailError && <p className="text-sm text-red-600 dark:text-red-400">{detailError}</p>}
             {selected && (
               <>
                 <div className="mb-3 flex items-center justify-between gap-3">
@@ -618,7 +618,7 @@ export default function RecipesPage() {
                       <button
                         type="button"
                         onClick={() => void onRemoveIngredient(ing.id)}
-                        className="text-red-600 underline"
+                        className="text-red-600 dark:text-red-400 underline"
                       >
                         Quitar
                       </button>
