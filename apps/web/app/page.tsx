@@ -64,9 +64,33 @@ function Landing() {
           </div>
         </div>
 
+        <div className="order-first md:order-last">
+          <div className="mx-auto flex w-full max-w-md items-center justify-center rounded-[36px] border border-[var(--color-border)] bg-white p-6 shadow-[var(--shadow-card)] sm:p-10">
+            {/* eslint-disable-next-line @next/next/no-img-element -- portada estática de marca */}
+            <img
+              src="/brand/logo-cover.png"
+              alt="MyFood: tres rombos verdes entrelazados; el central lleva hojas y frutas"
+              width={1200}
+              height={914}
+              className="h-auto w-full"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="tu-dia" className="grid items-center gap-8 md:grid-cols-2">
+        <div className="flex flex-col gap-3">
+          <h2 id="tu-dia" className="text-3xl font-extrabold tracking-tight sm:text-4xl">
+            Tu día, <span className="text-[var(--color-primary)]">de un vistazo</span>
+          </h2>
+          <p className="max-w-md text-lg leading-relaxed text-[var(--color-muted)]">
+            Cuántas calorías te quedan, cómo van tus macros y lo que has comido en cada momento,
+            en una sola pantalla.
+          </p>
+        </div>
         <div
           aria-hidden="true"
-          className="relative mx-auto w-full max-w-sm rounded-[32px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-card)]"
+          className="relative mx-auto w-full max-w-sm md:mx-0 md:justify-self-end rounded-[32px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-card)]"
         >
           <div className="mb-4 flex items-center justify-between">
             <span className="text-sm font-bold">Hoy</span>

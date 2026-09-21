@@ -32,3 +32,7 @@ cd android && ./gradlew assembleDebug
 El APK queda en `android/app/build/outputs/apk/debug/app-debug.apk`, listo
 para sideload (autofirmado por Gradle, no requiere keystore propia para
 depuración).
+
+## Iconos y pantalla de arranque
+
+Los iconos del lanzador y la pantalla de arranque (`android/app/src/main/res/mipmap-*` y `drawable*/splash.png`) se generan a partir del logo de la marca con `scripts/build_brand_assets.py` (ver `docs/brand/README.md`); no los edites a mano.
