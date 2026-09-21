@@ -13,6 +13,7 @@ from myfood.cache import get_cached_barcode_lookup, set_cached_barcode_lookup
 from myfood.db.models import Food, FoodNutrient
 from myfood.db.session import get_session
 from myfood.deps import get_current_user_id, get_db
+from myfood.domain import portions as portions_calc
 from myfood.domain.food_candidates import find_alternatives
 from myfood.domain.food_suggestions import SuggestedFood, build_suggestions
 from myfood.domain.food_taxonomy import (
@@ -231,6 +232,12 @@ class FoodAllergenOut(BaseModel):
     origin: str
 
 
+class PortionOut(BaseModel):
+    key: str
+    label: str
+    grams: float
+
+
 class FoodDetail(BaseModel):
     id: str
     kind: str
@@ -262,6 +269,11 @@ class FoodDetail(BaseModel):
     allergens: list[FoodAllergenOut] = []
     # Atribución obligatoria de las imágenes de OFF (CC BY-SA), si el alimento tiene una.
     image_credit: str | None = None
+    # Medidas caseras con las que registrarlo («1 huevo», «1 vaso», «100 g»). Los gramos de
+    # cada una los pone el servidor (R1): la pantalla solo multiplica por la cantidad.
+    portions: list[PortionOut] = []
+    # Cantidad propuesta al abrir el formulario, en gramos.
+    default_grams: float = 100.0
 
 
 def _f(value) -> float | None:
@@ -303,6 +315,12 @@ def _to_detail(
     allergens: list[FoodAllergenOut] | None = None,
     image_credit: str | None = None,
 ) -> FoodDetail:
+    portion_list = portions_calc.build_portions(
+        name_es=food.name_es,
+        category=food.category,
+        serving_size_g=_f(food.serving_size_g),
+        serving_label=food.serving_label,
+    )
     return FoodDetail(
         id=str(food.id),
         kind=food.kind,
@@ -316,6 +334,8 @@ def _to_detail(
         category=food.category,
         serving_size_g=_f(food.serving_size_g),
         serving_label=food.serving_label,
+        portions=[PortionOut(**p.__dict__) for p in portion_list],
+        default_grams=portions_calc.default_grams(portion_list),
         cooking_yield_factor=_f(food.cooking_yield_factor),
         quality_rank=food.quality_rank,
         nutriscore_grade=food.nutriscore_grade,

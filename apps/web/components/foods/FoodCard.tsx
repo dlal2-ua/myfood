@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { Plus } from "lucide-react";
 import Link from "next/link";
 import { FoodImage } from "@/components/FoodImage";
 import { ScoreBadges } from "@/components/ScoreBadges";
@@ -21,13 +21,34 @@ function Macros({ item }: { item: FoodSearchItem }) {
   );
 }
 
-/** Alimento en una lista: foto, nombre, dónde se vende y macros por 100 g. */
-export function FoodRow({ item }: { item: FoodSearchItem }) {
+/** Botón de «añadir al diario» de una tarjeta. Va SUPERPUESTO al enlace, no dentro: un
+ * <button> dentro de un <a> no es HTML válido y el navegador lo desmonta. */
+function AddButton({ onAdd, name }: { onAdd: () => void; name: string }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onAdd();
+      }}
+      aria-label={`Añadir ${name} al diario`}
+      className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)] hover:text-[var(--color-on-primary)]"
+    >
+      <Plus size={20} aria-hidden="true" />
+    </button>
+  );
+}
+
+/** Alimento en una lista: foto, nombre, dónde se vende y macros por 100 g, con un botón para
+ * registrarlo sin salir de la lista. */
+export function FoodRow({ item, onAdd }: { item: FoodSearchItem; onAdd?: () => void }) {
   const brand = brandLabel(item.brand, item.supermarket);
   return (
+    <div className="relative">
     <Link
       href={`/foods/${item.id}`}
-      className="flex items-center gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-[var(--shadow-card)] transition-colors hover:border-[var(--color-primary)]"
+      className="flex items-center gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 pr-16 shadow-[var(--shadow-card)] transition-colors hover:border-[var(--color-primary)]"
     >
       <FoodImage foodId={item.id} size={200} px={60} className="rounded-2xl" />
       <span className="min-w-0 flex-1">
@@ -50,15 +71,21 @@ export function FoodRow({ item }: { item: FoodSearchItem }) {
           <ScoreBadges nutriscore={item.nutriscore_grade} nova={item.nova_group} ecoscore={item.ecoscore_grade} />
         </span>
       </span>
-      <ChevronRight size={18} aria-hidden="true" className="shrink-0 text-[var(--color-muted)]" />
     </Link>
+      {onAdd && (
+        <span className="absolute right-3 top-1/2 -translate-y-1/2">
+          <AddButton onAdd={onAdd} name={item.name_es} />
+        </span>
+      )}
+    </div>
   );
 }
 
 /** Alimento en una fila horizontal de sugerencias: tarjeta vertical y estrecha. */
-export function FoodTile({ item }: { item: FoodSearchItem }) {
+export function FoodTile({ item, onAdd }: { item: FoodSearchItem; onAdd?: () => void }) {
   const brand = brandLabel(item.brand, item.supermarket);
   return (
+    <div className="relative flex">
     <Link
       href={`/foods/${item.id}`}
       className="flex w-40 shrink-0 flex-col gap-2 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-[var(--shadow-card)] transition-colors hover:border-[var(--color-primary)]"
@@ -75,5 +102,11 @@ export function FoodTile({ item }: { item: FoodSearchItem }) {
         · P {grams(item.protein_100g)}
       </span>
     </Link>
+      {onAdd && (
+        <span className="absolute bottom-2 right-2">
+          <AddButton onAdd={onAdd} name={item.name_es} />
+        </span>
+      )}
+    </div>
   );
 }

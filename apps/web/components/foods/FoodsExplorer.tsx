@@ -1,10 +1,11 @@
 "use client";
 
-import { ChevronDown, Search, SlidersHorizontal, X } from "lucide-react";
+import { ChevronDown, ScanBarcode, Search, SlidersHorizontal, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FacetSheet } from "@/components/foods/FacetSheet";
 import { FoodRow, FoodTile } from "@/components/foods/FoodCard";
+import { LogFoodSheet } from "@/components/foods/LogFoodSheet";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { localDateIso } from "@/lib/dates";
@@ -34,7 +35,13 @@ import type {
 const FACET_KEYS: FacetKey[] = ["supermarket", "food_type", "nutrition"];
 const DEBOUNCE_MS = 300;
 
-function Suggestions({ sections }: { sections: SuggestionSection[] }) {
+function Suggestions({
+  sections,
+  onAdd,
+}: {
+  sections: SuggestionSection[];
+  onAdd: (item: FoodSearchItem) => void;
+}) {
   return (
     <div className="flex flex-col gap-7">
       {sections.map((section) => (
@@ -48,7 +55,7 @@ function Suggestions({ sections }: { sections: SuggestionSection[] }) {
           <ul className="scroll-row -mx-4 flex gap-3 overflow-x-auto px-4 pb-2 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
             {section.items.map((item) => (
               <li key={item.id} className="flex">
-                <FoodTile item={item} />
+                <FoodTile item={item} onAdd={() => onAdd(item)} />
               </li>
             ))}
           </ul>
@@ -78,6 +85,7 @@ export function FoodsExplorer() {
   const [suggestions, setSuggestions] = useState<SuggestionSection[] | null>(null);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
 
+  const [adding, setAdding] = useState<FoodSearchItem | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const criteria = hasCriteria(debounced, filters);
   const requestId = useRef(0);
@@ -168,7 +176,7 @@ export function FoodsExplorer() {
           placeholder="Busca un alimento o una marca…"
           className="h-12 w-full rounded-full pl-11 pr-11 text-[15px] shadow-[var(--shadow-card)]"
         />
-        {query && (
+        {query ? (
           <button
             type="button"
             onClick={() => setQuery("")}
@@ -177,6 +185,15 @@ export function FoodsExplorer() {
           >
             <X size={18} aria-hidden="true" />
           </button>
+        ) : (
+          <Link
+            href="/scan"
+            aria-label="Escanear un código de barras"
+            title="Escanear un código de barras"
+            className="absolute right-2 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
+          >
+            <ScanBarcode size={18} aria-hidden="true" />
+          </Link>
         )}
       </label>
 
@@ -263,7 +280,7 @@ export function FoodsExplorer() {
               <ul className="flex flex-col gap-2.5">
                 {items.map((item) => (
                   <li key={item.id}>
-                    <FoodRow item={item} />
+                    <FoodRow item={item} onAdd={() => setAdding(item)} />
                   </li>
                 ))}
               </ul>
@@ -290,8 +307,15 @@ export function FoodsExplorer() {
       ) : suggestions.length === 0 ? (
         <EmptyState message="Escribe el nombre de un alimento o elige un filtro para empezar." />
       ) : (
-        <Suggestions sections={suggestions} />
+        <Suggestions sections={suggestions} onAdd={setAdding} />
       )}
+
+      <LogFoodSheet
+        foodId={adding?.id ?? null}
+        foodName={adding?.name_es}
+        onClose={() => setAdding(null)}
+        onLogged={() => void loadSuggestions()}
+      />
 
       <FacetSheet
         facetKey={openFacet}

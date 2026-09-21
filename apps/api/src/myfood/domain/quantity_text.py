@@ -54,9 +54,11 @@ _UNIT_TO_GRAMS = {
     "g": 1.0, "gr": 1.0, "gramo": 1.0, "gramos": 1.0,
 }  # fmt: skip
 
+# Medidas caseras (gramos por medida) — públicas: `domain/portions.py` ofrece las mismas al
+# usuario, y el mismo alimento no puede pesar distinto según por dónde se registre.
 # Medidas caseras (gramos por medida) y su peso cuando el alimento es una grasa de cocina, que
 # pesa menos por cucharada que un polvo o un azúcar.
-_MEASURES = {
+MEASURES = {
     "cucharadita": 5.0,
     "cucharada": 15.0,
     "chorrito": 5.0,
@@ -73,10 +75,10 @@ _MEASURES = {
 _MEASURE_ALIASES = {"cucharadas": "cucharada", "cucharaditas": "cucharadita", "vasos": "vaso",
                     "tazas": "taza", "tazones": "tazon", "copas": "copa", "platos": "plato",
                     "latas": "lata", "tazón": "tazon"}  # fmt: skip
-_OIL_MEASURES = {"cucharada": 10.0, "cucharadita": 4.0, "chorrito": 5.0}
+OIL_MEASURES = {"cucharada": 10.0, "cucharadita": 4.0, "chorrito": 5.0}
 
 # Peso típico de UNA unidad de cada grupo cuando el catálogo no trae la ración.
-_UNIT_GRAMS_BY_GROUP = {
+UNIT_GRAMS_BY_GROUP = {
     fg.EGG: 60.0,
     fg.FRUIT: 130.0,
     fg.BREAD: 30.0,
@@ -118,8 +120,8 @@ def _unit_grams(serving_size_g: float | None, food_name: str | None, category: s
         return float(serving_size_g)
     if food_name:
         group = fg.classify_food(food_name, category)
-        if group in _UNIT_GRAMS_BY_GROUP:
-            return _UNIT_GRAMS_BY_GROUP[group]
+        if group in UNIT_GRAMS_BY_GROUP:
+            return UNIT_GRAMS_BY_GROUP[group]
     return DEFAULT_SERVING_GRAMS
 
 
@@ -148,10 +150,10 @@ def resolve_grams(
     group = fg.classify_food(food_name, category) if food_name else None
     for word in re.findall(r"[a-záéíóúñ]+", text):
         measure = _MEASURE_ALIASES.get(word, word)
-        if measure in _MEASURES:
-            grams = _MEASURES[measure]
-            if group == fg.OIL_FAT and measure in _OIL_MEASURES:
-                grams = _OIL_MEASURES[measure]
+        if measure in MEASURES:
+            grams = MEASURES[measure]
+            if group == fg.OIL_FAT and measure in OIL_MEASURES:
+                grams = OIL_MEASURES[measure]
             return round(_count(text) * grams, 1)
 
     return round(_count(text) * _unit_grams(serving_size_g, food_name, category), 1)

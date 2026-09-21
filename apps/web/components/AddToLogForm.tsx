@@ -5,51 +5,56 @@ import { mealTypeForTime } from "@/lib/meals";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useCurrentUserId } from "@/components/CurrentUser";
+import { MacroPreview, PortionPicker } from "@/components/foods/PortionPicker";
 import { errorMessage } from "@/lib/api";
 import { submitOrQueue } from "@/lib/offlineQueue";
-import { MEAL_TYPES, MEAL_TYPE_LABELS, type LogFoodEntry, type MealType } from "@/lib/types";
+import { GRAMS_KEY, toGrams, type Portion } from "@/lib/portions";
+import {
+  MEAL_TYPES,
+  MEAL_TYPE_LABELS,
+  type FoodDetail,
+  type LogFoodEntry,
+  type MealType,
+} from "@/lib/types";
 
 const inputClass =
-  "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
+  "h-11 rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3";
 
-function todayIso(): string {
-  return localDateIso();
-}
+const FALLBACK_PORTION: Portion = { key: GRAMS_KEY, label: "gramos", grams: 1 };
 
-/** Formulario de "añadir al registro diario" — compartido entre la ficha de
- * producto (`/foods/[id]`) y el flujo de escaneo (`/scan`), misma lógica en
- * los dos sitios. */
+/** Formulario de "añadir al registro diario" — compartido entre la ficha de producto
+ * (`/foods/[id]`) y el flujo de escaneo (`/scan`), misma lógica en los dos sitios.
+ *
+ * La cantidad se elige por medida casera («1 huevo», «1 vaso») y no solo en gramos: los
+ * gramos de cada medida los da el servidor en `food.portions` (R1). */
 export function AddToLogForm({
-  foodId,
-  foodName,
-  servingSizeG,
-  servingLabel,
-  cookingYieldFactor,
+  food,
+  /** Adónde ir tras registrar (el flujo de escaneo vuelve al registro del día). */
   redirectTo,
 }: {
-  foodId: string;
-  foodName?: string;
-  /** Porción habitual del producto: es la cantidad por defecto (y un atajo). */
-  servingSizeG?: number | null;
-  servingLabel?: string | null;
-  /** gramos cocido / gramos crudo: si el alimento lo tiene, se puede indicar que se pesó cocinado. */
-  cookingYieldFactor?: number | null;
-  /** Adónde ir tras registrar (el flujo de escaneo vuelve al registro del día). */
+  food: FoodDetail;
   redirectTo?: string;
 }) {
   const router = useRouter();
   const userId = useCurrentUserId();
-  const [logDate, setLogDate] = useState(todayIso());
+  const portions = food.portions?.length ? food.portions : [FALLBACK_PORTION];
+  const [logDate, setLogDate] = useState(localDateIso());
   const [mealType, setMealType] = useState<MealType>(() => mealTypeForTime());
-  const [grams, setGrams] = useState(String(servingSizeG && servingSizeG > 0 ? servingSizeG : 100));
+  const [portion, setPortion] = useState<Portion>(portions[0]);
+  const [quantity, setQuantity] = useState(
+    portions[0].key === GRAMS_KEY ? (food.default_grams ?? 100) : 1,
+  );
   const [logging, setLogging] = useState(false);
   const [logError, setLogError] = useState<string | null>(null);
   const [logged, setLogged] = useState<LogFoodEntry | null>(null);
   const [queued, setQueued] = useState(false);
   const [weighedAs, setWeighedAs] = useState<"raw" | "cooked">("raw");
 
+  const grams = toGrams(quantity, portion);
+
   async function onLog(e: React.FormEvent) {
     e.preventDefault();
+    if (logging || grams <= 0) return;
     setLogging(true);
     setLogError(null);
     setLogged(null);
@@ -58,13 +63,13 @@ export function AddToLogForm({
       const outcome = await submitOrQueue<LogFoodEntry>({
         userId: userId ?? "",
         kind: "food",
-        label: `${foodName ?? "Alimento"} — ${Number(grams)} g (${MEAL_TYPE_LABELS[mealType]}, ${logDate})`,
+        label: `${food.name_es} — ${grams} g (${MEAL_TYPE_LABELS[mealType]}, ${logDate})`,
         payload: {
           log_date: logDate,
           meal_type: mealType,
-          food_id: foodId,
-          grams: Number(grams),
-          weighed_as: cookingYieldFactor ? weighedAs : "raw",
+          food_id: food.id,
+          grams,
+          weighed_as: food.cooking_yield_factor ? weighedAs : "raw",
         },
       });
       if (outcome.queued) setQueued(true);
@@ -82,81 +87,82 @@ export function AddToLogForm({
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold">Añadir al registro diario</h2>
-      <form onSubmit={onLog} className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-sm">
-          Fecha
-          <input
-            type="date"
-            required
-            className={inputClass}
-            value={logDate}
-            onChange={(e) => setLogDate(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Comida
-          <select
-            className={inputClass}
-            value={mealType}
-            onChange={(e) => setMealType(e.target.value as MealType)}
-          >
-            {MEAL_TYPES.map((mt) => (
-              <option key={mt} value={mt}>
-                {MEAL_TYPE_LABELS[mt]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Cantidad (g)
-          <input
-            type="number"
-            required
-            min={1}
-            max={5000}
-            className={inputClass}
-            value={grams}
-            onChange={(e) => setGrams(e.target.value)}
-          />
-        </label>
-        {cookingYieldFactor ? (
-          <fieldset className="flex flex-col gap-1 text-sm">
-            <legend className="mb-1">¿Lo pesaste crudo o ya cocinado?</legend>
-            <div className="flex gap-3">
+      <form onSubmit={onLog} className="flex flex-col gap-3">
+        <PortionPicker
+          portions={portions}
+          portion={portion}
+          quantity={quantity}
+          disabled={logging}
+          onChange={({ portion: p, quantity: q }) => {
+            setPortion(p);
+            setQuantity(q);
+          }}
+        />
+
+        <div className="flex flex-wrap gap-3">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-xs font-semibold text-[var(--color-muted)]">Fecha</span>
+            <input
+              type="date"
+              required
+              className={inputClass}
+              value={logDate}
+              onChange={(e) => setLogDate(e.target.value)}
+            />
+          </label>
+          <label className="flex min-w-[8rem] flex-1 flex-col gap-1 text-sm">
+            <span className="text-xs font-semibold text-[var(--color-muted)]">Comida</span>
+            <select
+              className={inputClass}
+              value={mealType}
+              onChange={(e) => setMealType(e.target.value as MealType)}
+            >
+              {MEAL_TYPES.map((mt) => (
+                <option key={mt} value={mt}>
+                  {MEAL_TYPE_LABELS[mt]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {food.cooking_yield_factor ? (
+          <fieldset className="flex flex-col gap-1.5 text-sm">
+            <legend className="text-xs font-semibold text-[var(--color-muted)]">
+              ¿Lo pesaste crudo o ya cocinado?
+            </legend>
+            <div className="flex gap-2">
               {(["raw", "cooked"] as const).map((v) => (
-                <label key={v} className="flex items-center gap-1">
-                  <input
-                    type="radio"
-                    name="weighed-as"
-                    checked={weighedAs === v}
-                    onChange={() => setWeighedAs(v)}
-                  />
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setWeighedAs(v)}
+                  aria-pressed={weighedAs === v}
+                  className={`min-h-10 flex-1 rounded-full border px-3 text-sm font-semibold ${
+                    weighedAs === v
+                      ? "border-[var(--color-primary)] bg-[var(--color-primary-soft)] text-[var(--color-primary)]"
+                      : "border-[var(--color-border-strong)]"
+                  }`}
+                >
                   {v === "raw" ? "Crudo" : "Cocinado"}
-                </label>
+                </button>
               ))}
             </div>
-            {weighedAs === "cooked" && Number(grams) > 0 && (
-              <span className="text-xs text-neutral-500">
-                ≈ {Math.round(Number(grams) / cookingYieldFactor)} g en crudo: se calcula sobre el peso
-                crudo.
+            {weighedAs === "cooked" && grams > 0 && (
+              <span className="text-xs text-[var(--color-muted)]">
+                ≈ {Math.round(grams / food.cooking_yield_factor)} g en crudo: se calcula sobre el
+                peso crudo.
               </span>
             )}
           </fieldset>
         ) : null}
-        {servingSizeG && servingSizeG > 0 ? (
-          <button
-            type="button"
-            onClick={() => setGrams(String(servingSizeG))}
-            className="rounded-full border border-[var(--color-border-strong)] font-medium px-3 py-2 text-sm"
-            title="Usar la porción indicada en el envase"
-          >
-            1 porción ({servingSizeG} g{servingLabel ? ` · ${servingLabel}` : ""})
-          </button>
-        ) : null}
+
+        <MacroPreview per100g={food} grams={grams} quantity={quantity} portion={portion} />
+
         <button
           type="submit"
-          disabled={logging}
-          className="rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
+          disabled={logging || grams <= 0}
+          className="min-h-12 self-start rounded-full bg-[var(--color-primary)] px-6 font-bold text-[var(--color-on-primary)] disabled:opacity-60 hover:bg-[var(--color-primary-hover)]"
         >
           {logging ? "Guardando…" : "Registrar"}
         </button>
