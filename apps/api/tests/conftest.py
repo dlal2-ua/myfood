@@ -407,6 +407,9 @@ async def diet_candidates(superuser_conn):
         await superuser_conn.execute(
             text("DELETE FROM pantry_items WHERE food_id = :id"), {"id": str(food_id)}
         )
+        await superuser_conn.execute(
+            text("DELETE FROM food_log WHERE food_id = :id"), {"id": str(food_id)}
+        )
     await superuser_conn.execute(
         text("DELETE FROM foods WHERE id = ANY(:ids)"), {"ids": [str(i) for i in ids]}
     )

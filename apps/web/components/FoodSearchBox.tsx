@@ -2,6 +2,7 @@
 
 import { ScoreBadges } from "@/components/ScoreBadges";
 import { FoodImage } from "@/components/FoodImage";
+import { brandLabel } from "@/lib/foodDisplay";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { FoodSearchItem, FoodSearchResponse } from "@/lib/types";
@@ -54,7 +55,14 @@ export function FoodSearchBox({ onSelect }: { onSelect: (item: FoodSearchItem) =
                   <FoodImage foodId={item.id} />
                   <span>
                     {item.name_es}
-                    {item.brand && <span className="text-neutral-500"> · {item.brand}</span>}
+                    {item.supermarket && (
+                      <span className="ml-2 rounded-full bg-[var(--color-primary-soft)] px-2 py-0.5 text-[11px] font-bold text-[var(--color-primary)]">
+                        {item.supermarket}
+                      </span>
+                    )}
+                    {brandLabel(item.brand, item.supermarket) && (
+                      <span className="text-neutral-500"> · {brandLabel(item.brand, item.supermarket)}</span>
+                    )}
                     <span className="block">
                       <ScoreBadges
                         nutriscore={item.nutriscore_grade}

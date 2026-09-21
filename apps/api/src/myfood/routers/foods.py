@@ -1,4 +1,5 @@
 import re
+from datetime import date
 from typing import Literal
 from uuid import UUID
 
@@ -13,9 +14,16 @@ from myfood.db.models import Food, FoodNutrient
 from myfood.db.session import get_session
 from myfood.deps import get_current_user_id, get_db
 from myfood.domain.food_candidates import find_alternatives
+from myfood.domain.food_suggestions import SuggestedFood, build_suggestions
+from myfood.domain.food_taxonomy import (
+    FOOD_TYPE_LABELS,
+    NUTRITION_TAGS,
+    SUPERMARKET_LABELS,
+    SUPERMARKETS,
+)
 from myfood.errors import AppError
 from myfood.off_client import fetch_product
-from myfood.search import search_foods
+from myfood.search import FoodFilters, search_foods_filtered
 from myfood.services.images import ALLOWED_SIZES, IMAGE_TYPES, resolve_image
 
 router = APIRouter(prefix="/foods", tags=["foods"])
@@ -33,28 +41,100 @@ class FoodSearchItem(BaseModel):
     brand: str | None
     kcal_100g: float | None
     protein_100g: float | None
+    fat_100g: float | None = None
+    carbs_100g: float | None = None
     image_url: str | None
     source: str
     # Puntuaciones de Open Food Facts (solo productos de marca): el badge solo se pinta si hay dato.
     nutriscore_grade: str | None = None
     nova_group: int | None = None
     ecoscore_grade: str | None = None
+    # Nombres para mostrar (no códigos): supermercado y tipo de alimento, si se conocen.
+    supermarket: str | None = None
+    food_type: str | None = None
+
+
+class FacetOption(BaseModel):
+    code: str
+    label: str
+    # Alimentos que quedarían con esta opción, dados los demás filtros elegidos.
+    count: int
+    description: str | None = None
+
+
+class FoodFacets(BaseModel):
+    supermarket: list[FacetOption]
+    food_type: list[FacetOption]
+    nutrition: list[FacetOption]
 
 
 class FoodSearchResponse(BaseModel):
     items: list[FoodSearchItem]
     total: int
+    facets: FoodFacets | None = None
+
+
+def _validated(values: list[str], allowed: set[str], name: str) -> tuple[str, ...]:
+    unknown = sorted(set(values) - allowed)
+    if unknown:
+        raise AppError(
+            "INVALID_FILTER",
+            f"Filtro no válido ({name}): {', '.join(unknown)}.",
+            status_code=422,
+            details={"filter": name, "values": unknown},
+        )
+    return tuple(dict.fromkeys(values))
+
+
+def _facets(distribution: dict[str, dict[str, int]]) -> FoodFacets:
+    supermarkets = [
+        FacetOption(code=s.code, label=s.label, count=distribution["supermarket"].get(s.code, 0))
+        for s in SUPERMARKETS
+    ]
+    food_types = [
+        FacetOption(code=code, label=label, count=distribution["food_group"].get(code, 0))
+        for code, label in FOOD_TYPE_LABELS.items()
+    ]
+    nutrition = [
+        FacetOption(
+            code=t.code,
+            label=t.label,
+            description=t.description,
+            count=distribution["nutrition_tags"].get(t.code, 0),
+        )
+        for t in NUTRITION_TAGS
+    ]
+    supermarkets.sort(key=lambda o: -o.count)
+    food_types.sort(key=lambda o: -o.count)
+    return FoodFacets(supermarket=supermarkets, food_type=food_types, nutrition=nutrition)
 
 
 @router.get("/search")
 async def search(
-    q: str = Query(min_length=1),
+    q: str = Query(default="", max_length=200),
     kind: Literal["generic", "branded", "recipe", "user"] | None = None,
+    supermarket: list[str] = Query(default=[]),
+    food_type: list[str] = Query(default=[]),
+    nutrition: list[str] = Query(default=[]),
+    sort: Literal["relevance", "kcal_asc", "protein_desc"] = "relevance",
+    facets: bool = False,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     _user_id: UUID = Depends(get_current_user_id),
 ) -> FoodSearchResponse:
-    hits, total = await search_foods(q, kind, limit, offset)
+    """Búsqueda y exploración del catálogo. Sin texto y sin filtros no hay nada que buscar: para
+    eso están las sugerencias (`/foods/suggestions`). Dentro de un mismo filtro las opciones
+    se suman (Lidl o Aldi); las de nutrición se exigen todas. Con `facets=true` devuelve además
+    cuántos alimentos tiene cada opción para pintar los filtros."""
+    filters = FoodFilters(
+        kind=kind,
+        supermarkets=_validated(supermarket, set(SUPERMARKET_LABELS), "supermercado"),
+        food_types=_validated(food_type, set(FOOD_TYPE_LABELS), "tipo de alimento"),
+        nutrition=_validated(nutrition, {t.code for t in NUTRITION_TAGS}, "nutrición"),
+    )
+    result = await search_foods_filtered(
+        q, filters, sort=sort, limit=limit, offset=offset, with_facets=facets
+    )
     items = [
         FoodSearchItem(
             id=hit["id"],
@@ -62,15 +142,79 @@ async def search(
             brand=hit.get("brand"),
             kcal_100g=hit.get("kcal_100g"),
             protein_100g=hit.get("protein_100g"),
+            fat_100g=hit.get("fat_100g"),
+            carbs_100g=hit.get("carbs_100g"),
             image_url=_image_url(hit),
             source=hit["source"],
             nutriscore_grade=hit.get("nutriscore_grade"),
             nova_group=hit.get("nova_group"),
             ecoscore_grade=hit.get("ecoscore_grade"),
+            supermarket=SUPERMARKET_LABELS.get(hit.get("supermarket") or ""),
+            food_type=FOOD_TYPE_LABELS.get(hit.get("food_group") or ""),
         )
-        for hit in hits
+        for hit in result.hits
     ]
-    return FoodSearchResponse(items=items, total=total)
+    return FoodSearchResponse(
+        items=items, total=result.total, facets=_facets(result.facets) if facets else None
+    )
+
+
+class SuggestionSectionOut(BaseModel):
+    key: str
+    title: str
+    subtitle: str | None
+    items: list[FoodSearchItem]
+
+
+class SuggestionsResponse(BaseModel):
+    sections: list[SuggestionSectionOut]
+
+
+def _suggested_item(food: SuggestedFood) -> FoodSearchItem:
+    return FoodSearchItem(
+        id=food.id,
+        name_es=food.name_es,
+        brand=food.brand,
+        kcal_100g=food.kcal_100g,
+        protein_100g=food.protein_100g,
+        fat_100g=food.fat_100g,
+        carbs_100g=food.carbs_100g,
+        image_url=f"/api/foods/{food.id}/image?type=front&size=100",
+        source=food.source,
+        nutriscore_grade=food.nutriscore_grade,
+        nova_group=food.nova_group,
+        ecoscore_grade=food.ecoscore_grade,
+    )
+
+
+@router.get("/suggestions")
+async def get_suggestions(
+    meal_type: Literal[
+        "breakfast", "morning_snack", "lunch", "afternoon_snack", "dinner", "supper"
+    ]
+    | None = None,
+    day: date | None = Query(default=None, alias="date"),
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> SuggestionsResponse:
+    """Qué mostrar al entrar en «Alimentos»: favoritos, habituales, recientes, alimentos ricos en
+    proteína si hoy falta, básicos para la comida que toca y la despensa. `date` es el día local
+    del usuario (el servidor no conoce su zona horaria). Lo que se propone de fuera del historial
+    respeta sus alergias, intolerancias y vetos."""
+    sections = await build_suggestions(
+        session, user_id, day=day or date.today(), meal_type=meal_type
+    )
+    return SuggestionsResponse(
+        sections=[
+            SuggestionSectionOut(
+                key=section.key,
+                title=section.title,
+                subtitle=section.subtitle,
+                items=[_suggested_item(food) for food in section.items],
+            )
+            for section in sections
+        ]
+    )
 
 
 def _image_url(hit: dict) -> str | None:
