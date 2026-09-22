@@ -50,11 +50,9 @@ SUPERMARKETS: tuple[Supermarket, ...] = (
     Supermarket("condis", "Condis", ("condis",)),
     Supermarket("froiz", "Froiz", ("froiz",)),
     Supermarket("spar", "Spar", ("spar",)),
-    Supermarket("masymas", "Masymas", ("masymas", "mas y mas")),
-    Supermarket("ahorramas", "Ahorramás", ("ahorramas",)),
-    Supermarket("caprabo", "Caprabo", ("caprabo",)),
-    Supermarket("gadis", "Gadis", ("gadis",)),
-    Supermarket("bonarea", "bonÀrea", ("bonarea",)),
+    # Masymas, Ahorramás, Caprabo, Gadis y bonÀrea se retiraron a petición del usuario. Los
+    # alimentos siguen en el catálogo; lo que desaparece es la etiqueta de supermercado y su
+    # opción en el filtro. Hace falta reindexar Meilisearch para que deje de ofrecerlos.
 )
 SUPERMARKET_LABELS: dict[str, str] = {s.code: s.label for s in SUPERMARKETS}
 

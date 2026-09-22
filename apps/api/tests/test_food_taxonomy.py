@@ -30,7 +30,6 @@ from myfood.domain.food_taxonomy import (
         ("El Corte Ingles", "el_corte_ingles"),
         ("CONSUM S. COOP. V., consum", "consum"),
         ("Aldi, Golden Bridge", "aldi"),
-        ("Ahorramás", "ahorramas"),
     ],
 )
 def test_store_brands_map_to_their_chain(brand, expected):
@@ -115,3 +114,11 @@ def test_the_declared_tags_are_exactly_the_ones_the_function_can_emit():
         )
     )
     assert emitted == {t.code for t in NUTRITION_TAGS}
+
+
+@pytest.mark.parametrize("brand", ["Caprabo", "Gadis", "bonÀrea", "Masymas", "Ahorramás"])
+def test_retired_chains_are_no_longer_labelled(brand):
+    """Se retiraron a petición del usuario: sus alimentos siguen en el catálogo, pero ya no
+    se etiquetan con supermercado ni aparecen como opción del filtro."""
+    assert supermarket_for_brand(brand) is None
+    assert brand.lower() not in {code for code in SUPERMARKET_LABELS}

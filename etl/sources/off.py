@@ -59,12 +59,10 @@ DEFAULT_TARGET_BRANDS: tuple[str, ...] = (
     "bonpreu",
     "el-corte-ingles",
     "mercadona",
-    "caprabo",
-    "gadis",
-    "ahorramas",
-    "masymas",
     "froiz",
     "spar",
+    # Caprabo, Gadis, Ahorramás y Masymas se retiraron a petición del usuario: ya no se
+    # etiquetan como supermercado, así que tampoco se incorporan productos nuevos suyos.
     "hipercor",
 )
 

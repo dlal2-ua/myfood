@@ -94,3 +94,39 @@ export function visibleOptions(key: FacetKey, options: FacetOption[], selected: 
   if (key === "nutrition") return options;
   return options.filter((o) => o.count > 0 || selected.includes(o.code));
 }
+
+/** La búsqueda entera en la barra de direcciones: texto, filtros y orden.
+ *
+ * Existe para que abrir un alimento y volver no pierda lo que estabas mirando. Antes el
+ * estado vivía solo en React y, al volver, el componente se montaba de cero: los filtros
+ * desaparecían y había que elegirlos otra vez. */
+export function toUrlParams(query: string, filters: FilterState, sort: SortKey): string {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("q", query.trim());
+  for (const key of Object.keys(filters) as FacetKey[]) {
+    if (filters[key].length > 0) params.set(key, filters[key].join(","));
+  }
+  if (sort !== "relevance") params.set("sort", sort);
+  return params.toString();
+}
+
+export interface UrlState {
+  query: string;
+  filters: FilterState;
+  sort: SortKey;
+}
+
+export function fromUrlParams(search: string): UrlState {
+  const params = new URLSearchParams(search);
+  const filters = emptyFilters();
+  for (const key of Object.keys(filters) as FacetKey[]) {
+    const raw = params.get(key);
+    if (raw) filters[key] = raw.split(",").filter(Boolean);
+  }
+  const sort = params.get("sort");
+  return {
+    query: params.get("q") ?? "",
+    filters,
+    sort: sort === "kcal_asc" || sort === "protein_desc" ? sort : "relevance",
+  };
+}

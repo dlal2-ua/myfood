@@ -3,8 +3,7 @@
 import { ScoreBadges } from "@/components/ScoreBadges";
 import { MICRO_LABELS, microUnit } from "@/lib/micros";
 import { FoodImage } from "@/components/FoodImage";
-import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { AddToLogForm } from "@/components/AddToLogForm";
@@ -14,6 +13,7 @@ import { Skeleton } from "@/components/ui/states";
 
 export default function FoodDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const foodId = params.id;
 
   const [food, setFood] = useState<FoodDetail | null>(null);
@@ -68,9 +68,13 @@ export default function FoodDetailPage() {
   return (
     <main className="flex flex-col gap-6">
       <div>
-        <Link href="/foods" className="text-sm text-neutral-500 underline">
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="text-sm text-neutral-500 underline"
+        >
           ← Volver a la búsqueda
-        </Link>
+        </button>
         <div className="mt-2 flex items-center gap-2">
           <h1 className="text-3xl font-extrabold tracking-tight">{food.name_es}</h1>
           <button
