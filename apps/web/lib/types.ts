@@ -588,6 +588,28 @@ export interface RecipeSummary {
   prep_minutes: number | null;
 }
 
+/** Una receta del recetario compartido: no es de nadie y no se puede editar. */
+export interface CatalogRecipe {
+  id: string;
+  name: string;
+  servings: number;
+  cuisine: string | null;
+  category: string | null;
+  image_url: string | null;
+  ingredient_count: number;
+  kcal_per_serving: number;
+  protein_g_per_serving: number;
+  fat_g_per_serving: number;
+  carbs_g_per_serving: number;
+}
+
+export interface CatalogPage {
+  items: CatalogRecipe[];
+  total: number;
+  cuisines: string[];
+  categories: string[];
+}
+
 export interface RecipeImportIngredient {
   food_id: string;
   name_es: string;

@@ -674,7 +674,9 @@ async def batch_cook(
     plan = await _get_plan(session, user_id, plan_id)
 
     recipe = await session.get(Recipe, body.recipe_id)
-    if recipe is None or recipe.user_id != user_id:
+    # `user_id IS NULL` es una receta del recetario compartido: se puede usar en un plan
+    # aunque no sea tuya (migración 0022), igual que se puede leer.
+    if recipe is None or recipe.user_id not in (user_id, None):
         raise AppError("RECIPE_NOT_FOUND", "No existe esa receta.", status_code=404)
 
     ingredients = list(

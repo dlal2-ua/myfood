@@ -15,7 +15,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai.consent import require_ai_processing_consent
@@ -96,11 +96,19 @@ def _scale(nutrient_100g, grams: float) -> float:
     return round(float(nutrient_100g or 0) * grams / 100, 2)
 
 
-async def _get_recipe(session: AsyncSession, user_id: UUID, recipe_id: UUID) -> Recipe:
+async def _get_recipe(
+    session: AsyncSession, user_id: UUID, recipe_id: UUID, *, allow_catalog: bool = False
+) -> Recipe:
+    """Por defecto solo las del usuario. `allow_catalog` añade las del recetario compartido
+    (`user_id IS NULL`), que se pueden LEER y usar pero nunca editar ni borrar."""
     recipe = await session.get(Recipe, recipe_id)
-    if recipe is None or recipe.user_id != user_id:
+    if recipe is None:
         raise AppError("RECIPE_NOT_FOUND", "No existe esa receta.", status_code=404)
-    return recipe
+    if recipe.user_id == user_id:
+        return recipe
+    if allow_catalog and recipe.user_id is None:
+        return recipe
+    raise AppError("RECIPE_NOT_FOUND", "No existe esa receta.", status_code=404)
 
 
 async def _ensure_internal_ean(session: AsyncSession, recipe: Recipe) -> str:
@@ -221,6 +229,168 @@ async def list_recipes(
     ]
 
 
+class CatalogRecipeOut(BaseModel):
+    """Una receta del recetario compartido, con lo justo para la lista: la nutrición POR
+    RACIÓN, que es como se decide si un plato encaja en tu día."""
+
+    id: UUID
+    name: str
+    servings: int
+    cuisine: str | None
+    category: str | None
+    image_url: str | None
+    ingredient_count: int
+    kcal_per_serving: float
+    protein_g_per_serving: float
+    fat_g_per_serving: float
+    carbs_g_per_serving: float
+
+
+class CatalogPageOut(BaseModel):
+    items: list[CatalogRecipeOut]
+    total: int
+    cuisines: list[str]
+    categories: list[str]
+
+
+CATALOG_PAGE_SIZE = 24
+
+
+@router.get("/catalog")
+async def list_catalog(
+    q: str | None = None,
+    cuisine: str | None = None,
+    category: str | None = None,
+    max_kcal: float | None = None,
+    offset: int = 0,
+    limit: int = CATALOG_PAGE_SIZE,
+    _user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> CatalogPageOut:
+    """Recetario compartido: platos que no son de nadie y todo el mundo ve.
+
+    Las calorías se calculan aquí sumando los `food_nutrients` de sus ingredientes (R9), no se
+    guardan: si mañana se corrige un alimento del catálogo, la receta se corrige sola."""
+    limit = max(1, min(limit, 60))
+    filters = ["r.user_id IS NULL"]
+    params: dict = {"limit": limit, "offset": max(0, offset)}
+    if q and q.strip():
+        filters.append("r.name ILIKE :q")
+        params["q"] = f"%{q.strip()}%"
+    if cuisine:
+        filters.append("r.cuisine = :cuisine")
+        params["cuisine"] = cuisine
+    if category:
+        filters.append("r.category = :category")
+        params["category"] = category
+    where = " AND ".join(filters)
+
+    having = ""
+    if max_kcal is not None:
+        params["max_kcal"] = max_kcal
+        having = "HAVING COALESCE(SUM(n.kcal_100g * ri.grams / 100), 0) / r.servings <= :max_kcal"
+
+    rows = (
+        await session.execute(
+            text(f"""
+                SELECT r.id, r.name, r.servings, r.cuisine, r.category, r.image_url,
+                       COUNT(ri.id) AS ingredient_count,
+                       COALESCE(SUM(n.kcal_100g    * ri.grams / 100), 0) AS kcal,
+                       COALESCE(SUM(n.protein_100g * ri.grams / 100), 0) AS protein_g,
+                       COALESCE(SUM(n.fat_100g     * ri.grams / 100), 0) AS fat_g,
+                       COALESCE(SUM(n.carbs_100g   * ri.grams / 100), 0) AS carbs_g
+                FROM recipes r
+                LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id
+                LEFT JOIN food_nutrients n ON n.food_id = ri.food_id
+                WHERE {where}
+                GROUP BY r.id
+                {having}
+                ORDER BY r.name
+                LIMIT :limit OFFSET :offset
+            """),
+            params,
+        )
+    ).all()
+
+    total = await session.scalar(
+        text(f"SELECT count(*) FROM recipes r WHERE {where}"),
+        {k: v for k, v in params.items() if k not in ("limit", "offset", "max_kcal")},
+    )
+
+    facets = (
+        await session.execute(
+            text("""
+                SELECT DISTINCT cuisine, category FROM recipes
+                WHERE user_id IS NULL
+            """)
+        )
+    ).all()
+
+    def _per_serving(value, servings: int) -> float:
+        return round(float(value) / max(servings, 1), 1)
+
+    return CatalogPageOut(
+        items=[
+            CatalogRecipeOut(
+                id=r.id,
+                name=r.name,
+                servings=r.servings,
+                cuisine=r.cuisine,
+                category=r.category,
+                image_url=r.image_url,
+                ingredient_count=r.ingredient_count,
+                kcal_per_serving=_per_serving(r.kcal, r.servings),
+                protein_g_per_serving=_per_serving(r.protein_g, r.servings),
+                fat_g_per_serving=_per_serving(r.fat_g, r.servings),
+                carbs_g_per_serving=_per_serving(r.carbs_g, r.servings),
+            )
+            for r in rows
+        ],
+        total=total or 0,
+        cuisines=sorted({r.cuisine for r in facets if r.cuisine}),
+        categories=sorted({r.category for r in facets if r.category}),
+    )
+
+
+@router.post("/{recipe_id}/copy", status_code=201)
+async def copy_catalog_recipe(
+    recipe_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> RecipeOut:
+    """Guarda una receta del catálogo entre las tuyas, para poder ajustarla.
+
+    Se copia en vez de enlazarla: el catálogo puede cambiar al reimportarlo, y lo que tú
+    hayas ajustado — las raciones, un ingrediente que cambiaste — no puede depender de eso."""
+    original = await _get_recipe(session, user_id, recipe_id, allow_catalog=True)
+    if original.user_id is not None:
+        raise AppError("RECIPE_NOT_IN_CATALOG", "Esa receta ya es tuya.", status_code=422)
+
+    copy = Recipe(
+        user_id=user_id,
+        name=original.name,
+        servings=original.servings,
+        prep_minutes=original.prep_minutes,
+        instructions=original.instructions,
+        source="user",
+        image_url=original.image_url,
+        cuisine=original.cuisine,
+        category=original.category,
+        attribution=original.attribution,
+    )
+    session.add(copy)
+    await session.flush()
+    for ingredient in await _load_ingredients(session, original.id):
+        session.add(
+            RecipeIngredient(
+                recipe_id=copy.id, food_id=ingredient.food_id, grams=ingredient.grams
+            )
+        )
+    await session.commit()
+    await session.refresh(copy)
+    return await _to_out(session, copy)
+
+
 @router.get("/by-ean/{ean}")
 async def get_recipe_by_ean(
     ean: str,
@@ -287,8 +457,11 @@ async def get_recipe(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> RecipeOut:
-    recipe = await _get_recipe(session, user_id, recipe_id)
-    await _ensure_internal_ean(session, recipe)
+    recipe = await _get_recipe(session, user_id, recipe_id, allow_catalog=True)
+    if recipe.user_id is not None:
+        # El EAN interno es para imprimir la etiqueta de TU receta: una del catálogo no
+        # se etiqueta ni se guarda con un código propio.
+        await _ensure_internal_ean(session, recipe)
     return await _to_out(session, recipe)
 
 

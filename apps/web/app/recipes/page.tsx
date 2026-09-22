@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { LogRecipeForm } from "@/components/LogRecipeForm";
+import { RecipeCatalog } from "@/components/recipes/RecipeCatalog";
 import { UserImageUpload } from "@/components/UserImageUpload";
 import { FoodSearchBox } from "@/components/FoodSearchBox";
 import type {
@@ -315,6 +316,8 @@ export default function RecipesPage() {
   return (
     <main className="flex flex-col gap-8">
       <h1 className="text-3xl font-extrabold tracking-tight">Recetas</h1>
+
+      <RecipeCatalog />
 
       <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <h2 className="mb-3 text-lg font-semibold">Importar desde URL</h2>
