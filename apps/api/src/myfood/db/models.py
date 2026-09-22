@@ -637,11 +637,19 @@ class Recipe(Base):
     __tablename__ = "recipes"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    # `NULL` = receta del catálogo compartido: la ve todo el mundo y no la edita nadie
+    # (migración 0022).
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     servings: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="user")
+    source_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    cuisine: Mapped[str | None] = mapped_column(String, nullable=True)
+    category: Mapped[str | None] = mapped_column(String, nullable=True)
+    attribution: Mapped[str | None] = mapped_column(String, nullable=True)
     prep_minutes: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     instructions: Mapped[str | None] = mapped_column(String, nullable=True)
     food_id: Mapped[uuid.UUID | None] = mapped_column(
