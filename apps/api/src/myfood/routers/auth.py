@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pyotp
@@ -6,9 +7,11 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from myfood.app_settings import load_app_settings
 from myfood.db.models import Consent, User
 from myfood.db.session import get_session
 from myfood.deps import get_current_user_id, get_db
+from myfood.domain import invites
 from myfood.errors import AppError
 from myfood.ratelimit import (
     client_ip,
@@ -40,6 +43,8 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     display_name: str = Field(min_length=1, max_length=200)
+    # Obligatorio mientras la instancia esté en «solo con invitación».
+    invite_code: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -62,6 +67,16 @@ def _set_session_cookie(response: Response, token: str) -> None:
 async def register(
     body: RegisterRequest, response: Response, session: AsyncSession = Depends(get_session)
 ) -> dict:
+    settings = load_app_settings()
+    code = invites.normalize_code(body.invite_code or "")
+    if settings.invite_only:
+        if not code or not await invites.is_usable(session, code):
+            raise AppError(
+                "INVITE_REQUIRED",
+                "Esta app es por invitación: pide un código al administrador.",
+                403,
+            )
+
     existing = await session.scalar(select(User).where(User.email == body.email))
     if existing is not None:
         raise AppError("EMAIL_ALREADY_REGISTERED", "Ya existe una cuenta con ese email.", 409)
@@ -70,8 +85,22 @@ async def register(
         email=body.email,
         password_hash=hash_password(body.password),
         display_name=body.display_name,
+        ai_enabled=settings.ai_enabled_by_default,
     )
     session.add(user)
+    await session.flush()
+
+    if settings.invite_only:
+        # Se reclama en el último momento y de forma atómica: entre la comprobación de
+        # arriba y este punto, otro registro simultáneo puede haberlo gastado.
+        if not await invites.claim(session, code, user_id=user.id):
+            await session.rollback()
+            raise AppError(
+                "INVITE_REQUIRED",
+                "Ese código ya no es válido: pide uno nuevo al administrador.",
+                403,
+            )
+        user.invited_with = code
     await session.commit()
 
     token = await create_session(user.id)
@@ -97,6 +126,10 @@ async def login(
     # Un acierto reinicia solo el contador del par (email, IP): los fallos de otras IPs
     # contra esta misma cuenta siguen contando.
     await reset(rules[0])
+    # Se anota aquí y no en cada petición: el panel necesita saber quién sigue usando la app,
+    # y escribir en `users` en cada llamada sería un INSERT/UPDATE por request.
+    user.last_seen_at = datetime.now(UTC)
+    await session.commit()
 
     if user.totp_enabled:
         # Contraseña correcta, pero no se emite sesión todavía: hace falta
@@ -247,3 +280,14 @@ async def me(
         "pending_consents": [c for c in REQUIRED_CONSENTS if c not in granted_consents],
         "totp_enabled": user.totp_enabled,
     }
+
+
+class PublicConfigOut(BaseModel):
+    """Lo que la pantalla de registro necesita saber ANTES de que nadie inicie sesión."""
+
+    invite_only: bool
+
+
+@router.get("/config")
+async def public_config() -> PublicConfigOut:
+    return PublicConfigOut(invite_only=load_app_settings().invite_only)

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { apiFetch, ApiError, errorMessage } from "@/lib/api";
 import type { AiCredentialStatus, IafoodLimits } from "@/lib/types";
 import { Skeleton } from "@/components/ui/states";
+import { AdminDashboard } from "@/components/admin/AdminDashboard";
 
 const inputClass =
   "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
@@ -110,7 +111,9 @@ export default function AdminPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <h1 className="text-3xl font-extrabold tracking-tight">Admin</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Administración</h1>
+
+      <AdminDashboard />
 
       {error && (
         <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">

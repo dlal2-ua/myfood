@@ -169,6 +169,19 @@ def clean_ai_credentials_before_each_test(protect_real_ai_credential):
     yield
 
 
+@pytest.fixture(autouse=True)
+def signup_open_unless_the_test_says_otherwise(monkeypatch):
+    """En producción la instancia nace CERRADA (hace falta código de invitación), pero casi
+    todos los tests se registran por el camino normal. Se abre aquí para el conjunto; los
+    tests de invitaciones vuelven a cerrarla con su propio fixture, que se aplica después."""
+    from myfood.app_settings import AppSettings
+
+    monkeypatch.setattr(
+        "myfood.routers.auth.load_app_settings",
+        lambda: AppSettings(invite_only=False, ai_enabled_by_default=True),
+    )
+
+
 @pytest_asyncio.fixture
 async def superuser_conn():
     engine = create_async_engine(settings.database_url_superuser)

@@ -38,6 +38,11 @@ class User(Base):
     locale: Mapped[str] = mapped_column(String, nullable=False, default="es")
     timezone: Mapped[str] = mapped_column(String, nullable=False, default="Europe/Madrid")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Tener cuenta y poder gastar la cuota de Claude son dos cosas distintas: esto lo decide
+    # el administrador, porque es lo que cuesta dinero (migración 0019).
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    invited_with: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # 2FA (Fase 7): secreto TOTP cifrado en reposo (R4-adjacent — es una
     # credencial, mismo criterio que `ai_credentials.token_encrypted`), solo
     # activo cuando `totp_enabled` — permite regenerar el secreto sin
@@ -751,3 +756,25 @@ class UserAchievement(Base):
     earned_on: Mapped[date] = mapped_column(Date, nullable=False)
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Invite(Base):
+    """Código de invitación de un solo uso (migración 0019).
+
+    La app está abierta a internet: registrarse exige un código que genera el administrador,
+    mismo mecanismo que openGym. `used_by` lo quema — un código no sirve dos veces — y
+    `revoked_at` lo anula antes de que nadie lo use."""
+
+    __tablename__ = "invites"
+
+    code: Mapped[str] = mapped_column(String, primary_key=True)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    used_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

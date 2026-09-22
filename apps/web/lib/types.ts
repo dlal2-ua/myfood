@@ -777,3 +777,63 @@ export interface BodyFatResult {
   whtr: number | null;
   warnings: string[];
 }
+
+// --- Panel de administración ---
+
+export interface AdminUser {
+  id: string;
+  display_name: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  /** Si el administrador le deja gastar cuota de Claude. */
+  ai_enabled: boolean;
+  created_at: string;
+  last_seen_at: string | null;
+  invited_with: string | null;
+  logging_days: number;
+  last_log_date: string | null;
+  ai_used_today: number;
+  ai_used_30d: number;
+}
+
+export interface AdminInvite {
+  code: string;
+  note: string | null;
+  created_at: string;
+  used_at: string | null;
+  used_by_name: string | null;
+  revoked_at: string | null;
+  status: "disponible" | "usado" | "revocado";
+}
+
+export interface AdminOverview {
+  users_total: number;
+  users_active: number;
+  users_with_ai: number;
+  users_logging_last_7d: number;
+  invites_usable: number;
+  invite_only: boolean;
+  food_entries_today: number;
+  food_entries_7d: number;
+  new_users_30d: number;
+  top_foods_7d: { name: string; uses: number }[];
+  ai_used_today: number;
+  ai_instance_limit: number;
+  ai_sessions_30d: number;
+  ai_failed_7d: number;
+  foods_total: number;
+  database_size: string;
+  last_food_ingested_at: string | null;
+}
+
+export interface AdminActivityDay {
+  date: string;
+  entries: number;
+  users: number;
+}
+
+export interface AdminAppSettings {
+  invite_only: boolean;
+  ai_enabled_by_default: boolean;
+}
