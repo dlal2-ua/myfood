@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
+import { RecipePicker } from "@/components/recipes/RecipePicker";
 import { MEAL_TYPE_LABELS } from "@/lib/types";
 import type {
   DietPlanDetail,
@@ -33,6 +34,9 @@ export default function DietPlanDetailPage() {
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
   const [batchCookMealId, setBatchCookMealId] = useState<string | null>(null);
   const [batchRecipeId, setBatchRecipeId] = useState("");
+  // El nombre se guarda aparte: una receta del recetario no está en `recipes`, así que sin
+  // esto no habría forma de enseñar cuál se ha elegido.
+  const [batchRecipeName, setBatchRecipeName] = useState("");
   const [batchServings, setBatchServings] = useState("1");
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
@@ -77,6 +81,7 @@ export default function DietPlanDetailPage() {
       });
       setBatchCookMealId(null);
       setBatchRecipeId("");
+      setBatchRecipeName("");
       setBatchServings("1");
       await load();
     } catch (err) {
@@ -304,18 +309,15 @@ export default function DietPlanDetailPage() {
                   <div className="mt-2">
                     {batchCookMealId === meal.id ? (
                       <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <select
+                        <RecipePicker
+                          own={recipes}
                           value={batchRecipeId}
-                          onChange={(e) => setBatchRecipeId(e.target.value)}
-                          className="rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
-                        >
-                          <option value="">Elige una receta…</option>
-                          {recipes.map((r) => (
-                            <option key={r.id} value={r.id}>
-                              {r.name}
-                            </option>
-                          ))}
-                        </select>
+                          disabled={batchBusy}
+                          onChange={(id, name) => {
+                            setBatchRecipeId(id);
+                            setBatchRecipeName(name);
+                          }}
+                        />
                         <input
                           type="number"
                           min={1}
@@ -324,6 +326,11 @@ export default function DietPlanDetailPage() {
                           className="w-16 rounded border border-neutral-300 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
                         />
                         <span className="text-neutral-400">raciones</span>
+                        {batchRecipeName && (
+                          <span className="w-full text-[11px] text-[var(--color-primary)]">
+                            Elegida: {batchRecipeName}
+                          </span>
+                        )}
                         <button
                           type="button"
                           disabled={batchBusy || !batchRecipeId}
