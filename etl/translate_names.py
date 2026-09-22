@@ -28,11 +28,18 @@ import time
 
 from etl.db import get_connection
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "apps", "api", "src"))
 
-from myfood.ai.agent import AiAgentError, run_agent  # noqa: E402
-from myfood.ai.client import get_decrypted_token  # noqa: E402
-from myfood.db.session import AdminSessionLocal  # noqa: E402
+def _api_imports():
+    """El SDK de Claude y la sesión de la API se cargan al ejecutar, no al importar.
+
+    El entorno del ETL no los tiene instalados: importarlos arriba dejaba el módulo —y sus
+    tests, que solo miran el parseo— sin poder cargarse fuera del contenedor de la API."""
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "apps", "api", "src"))
+    from myfood.ai.agent import AiAgentError, run_agent
+    from myfood.ai.client import get_decrypted_token
+    from myfood.db.session import AdminSessionLocal
+
+    return AiAgentError, run_agent, get_decrypted_token, AdminSessionLocal
 
 SOURCES = ("usda_sr", "usda_foundation", "ciqual")
 BATCH_SIZE = 40
@@ -129,6 +136,8 @@ def revert() -> int:
 
 
 async def translate_all(limit: int | None, dry_run: bool) -> int:
+    AiAgentError, run_agent, get_decrypted_token, AdminSessionLocal = _api_imports()
+
     async with AdminSessionLocal() as session:
         token = await get_decrypted_token(session)
     if token is None:
