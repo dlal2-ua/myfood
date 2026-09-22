@@ -4,6 +4,7 @@ from myfood.chat import router as chat
 from myfood.errors import AppError, app_error_handler, unhandled_exception_handler
 from myfood.routers import (
     admin,
+    admin_panel,
     ai,
     auth,
     calc,
@@ -57,6 +58,7 @@ app.include_router(push.router, prefix="/api")
 app.include_router(notification_rules.router, prefix="/api")
 app.include_router(diet_plans.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(admin_panel.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
 app.include_router(recipes.router, prefix="/api")
 app.include_router(receipts.router, prefix="/api")

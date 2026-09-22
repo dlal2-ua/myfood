@@ -3,7 +3,7 @@
 import { Logo } from "@/components/Logo";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { clearUserCaches } from "@/lib/offlineQueue";
 
@@ -24,6 +24,18 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
 
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  // La app está abierta a internet: si la instancia es «solo con invitación», registrarse
+  // exige un código que da el administrador.
+  const [inviteOnly, setInviteOnly] = useState(false);
+
+  useEffect(() => {
+    apiFetch<{ invite_only: boolean }>("/api/auth/config")
+      .then((c) => setInviteOnly(c.invite_only))
+      .catch(() => {
+        // Si no se puede consultar, el servidor lo exigirá igualmente al registrarse.
+      });
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -32,7 +44,9 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
 
     const path = mode === "login" ? "/api/auth/login" : "/api/auth/register";
     const body =
-      mode === "login" ? { email, password } : { email, password, display_name: displayName };
+      mode === "login"
+        ? { email, password }
+        : { email, password, display_name: displayName, invite_code: inviteCode.trim() };
 
     try {
       const result = await apiFetch<LoginResult>(path, {
@@ -165,6 +179,26 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
             <span className="text-xs font-normal text-[var(--color-muted)]">Mínimo 8 caracteres.</span>
           )}
         </label>
+
+        {mode === "register" && inviteOnly && (
+          <label className="flex flex-col gap-1.5 text-sm font-semibold">
+            Código de invitación
+            <input
+              type="text"
+              required
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              placeholder="XXXXX-XXXXX"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+              className={`${field} tracking-widest`}
+            />
+            <span className="text-xs font-normal text-[var(--color-muted)]">
+              Esta app es por invitación. Pídele un código a quien la administra.
+            </span>
+          </label>
+        )}
 
         {mode === "register" && (
           <>
