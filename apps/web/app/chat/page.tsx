@@ -1,6 +1,8 @@
 "use client";
 
+import { RefreshCw, Trash2 } from "lucide-react";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
+import { DiaryProposalCard } from "@/components/chat/DiaryProposalCard";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import type {
@@ -35,6 +37,8 @@ export default function ChatPage() {
   const [recording, setRecording] = useState(false);
   const [micUnsupported, setMicUnsupported] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const elapsed = useElapsedSeconds(sending);
   const { quota, reload: reloadQuota } = useAiQuota("chat");
 
@@ -129,6 +133,42 @@ export default function ChatPage() {
     }
   }
 
+  /** Empieza de cero sin borrar nada: deja un corte, y a partir de ahí Claude no arrastra
+   * lo anterior. El historial sigue estando para consultarlo. */
+  async function onNewConversation() {
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch("/api/chat/reset", { method: "POST" });
+      setProposal(null);
+      setNotice("Empezamos de cero.");
+      await loadHistory();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Borra los mensajes del servidor. No toca nada de lo que ya se apuntó en el diario. */
+  async function onDeleteHistory() {
+    if (!window.confirm("Se borrarán todos los mensajes del chat y no se pueden recuperar. Lo que ya apuntaste en tu diario no se toca. ¿Seguimos?")) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch("/api/chat/history", { method: "DELETE" });
+      setHistory([]);
+      setProposal(null);
+      setNotice("Historial borrado.");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSendText(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = text.trim();
@@ -200,6 +240,7 @@ export default function ChatPage() {
         method: "POST",
       });
       setProposal(null);
+      if (decision === "approve") setNotice("Apuntado en tu diario.");
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -216,6 +257,29 @@ export default function ChatPage() {
             Pídeme cambios sobre la marcha — nunca aplico nada sin que lo confirmes.
           </p>
           <QuotaBadge quota={quota} />
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void onNewConversation()}
+            disabled={sending || busy}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--color-border-strong)] px-3 text-xs font-semibold disabled:opacity-60"
+          >
+            <RefreshCw size={13} aria-hidden="true" /> Conversación nueva
+          </button>
+          <button
+            type="button"
+            onClick={() => void onDeleteHistory()}
+            disabled={sending || busy || history.length === 0}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--color-border-strong)] px-3 text-xs font-semibold text-[var(--color-muted)] disabled:opacity-60"
+          >
+            <Trash2 size={13} aria-hidden="true" /> Borrar el historial
+          </button>
+          {notice && (
+            <span role="status" className="self-center text-xs font-semibold text-[var(--color-primary)]">
+              {notice}
+            </span>
+          )}
         </div>
         <div className="mt-2">
           <MedicalDisclaimer>
@@ -234,7 +298,17 @@ export default function ChatPage() {
           </p>
         )}
         <div className="flex flex-col gap-2">
-          {history.map((m) => (
+          {history.map((m) =>
+            m.role === "divider" ? (
+              <p
+                key={m.id}
+                className="my-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-muted)]"
+              >
+                <span aria-hidden="true" className="h-px flex-1 bg-[var(--color-border)]" />
+                Conversación nueva
+                <span aria-hidden="true" className="h-px flex-1 bg-[var(--color-border)]" />
+              </p>
+            ) : (
             <div key={m.id} className={m.role === "user" ? userBubble : assistantBubble}>
               {m.source === "voice" && (
                 <span className="mr-1 text-xs opacity-70" title="Enviado por voz">
@@ -243,7 +317,8 @@ export default function ChatPage() {
               )}
               {m.content}
             </div>
-          ))}
+            ),
+          )}
           {pendingMessage && (
             <div className={`${userBubble} opacity-70`}>{pendingMessage}</div>
           )}
@@ -255,7 +330,15 @@ export default function ChatPage() {
           )}
         </div>
 
-        {proposal && (
+        {proposal?.scope === "diary" && (
+          <DiaryProposalCard
+            payload={proposal.payload}
+            deciding={deciding}
+            onDecide={(decision) => void decideProposal(decision)}
+          />
+        )}
+
+        {proposal && proposal.scope !== "diary" && (
           <div className="mt-2 self-start rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
             <p className="font-medium">Propuesta de cambio</p>
             {proposal.scope === "day" ? (

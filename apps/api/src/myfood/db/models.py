@@ -256,6 +256,9 @@ class FoodLog(Base):
     weighed_as: Mapped[str] = mapped_column(String, nullable=False, default="raw")
     entered_grams: Mapped[object | None] = mapped_column(Numeric(8, 2), nullable=True)
     entry_source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    # Nombre de una entrada que no es un alimento del catálogo — un plato que el chat
+    # estimó porque sus ingredientes no estaban (migración 0020).
+    custom_name: Mapped[str | None] = mapped_column(String, nullable=True)
     # Snapshot nutricional congelado en el momento del registro (sección 6.5)
     # — si el catálogo cambia después, el histórico del usuario no cambia.
     kcal: Mapped[object] = mapped_column(Numeric(9, 2), nullable=False)

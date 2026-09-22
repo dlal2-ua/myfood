@@ -2,6 +2,8 @@
 //   BASE_URL=... CHROME_PATH=... node e2e/scan.cjs
 const { chromium } = require("playwright-core");
 const BASE = process.env.BASE_URL || "https://myfood.cartagena.dpdns.org";
+// Con la instancia en «solo con invitación», registrarse exige un código.
+const INVITE_CODE = process.env.INVITE_CODE || "";
 const rnd = Math.random().toString(36).slice(2, 10);
 const email = `e2e-scan-${rnd}@test.myfood`;
 const password = "correcthorse-" + rnd;
@@ -19,7 +21,7 @@ const check = (ok, what) => { log(ok ? "ok  " : "FAIL", what); if (!ok) failures
   }, { method, path, body });
   try {
     await page.goto(BASE + "/login");
-    await api("POST", "/api/auth/register", { email, password, display_name: "Scan" });
+    await api("POST", "/api/auth/register", { email, password, display_name: "Scan" , invite_code: INVITE_CODE});
     await api("POST", "/api/consents", { kind: "health_data", version: "v1" });
     const found = await api("GET", "/api/foods/search?q=galletas%20maria&limit=10");
     let withCode = null;

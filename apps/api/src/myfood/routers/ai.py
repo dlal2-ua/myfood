@@ -30,6 +30,7 @@ from myfood.db.models import (
     Supplement,
 )
 from myfood.deps import get_current_user_id, get_db
+from myfood.domain import diary_proposal
 from myfood.domain.food_candidates import compute_alternatives_for_item
 from myfood.errors import AppError
 
@@ -197,6 +198,11 @@ async def _materialize_proposal(session: AsyncSession, user_id: UUID, proposal: 
     mismo criterio que `batch_cook`, `routers/diet_plans.py`, solo que para
     el día completo en vez de una comida suelta). `scope='pantry'`: no toca
     planes, va aparte."""
+    if proposal.scope == "diary":
+        # Lo que el chat propuso apuntar en el diario: se guardan los números que el usuario
+        # acaba de aceptar, tal cual, sin recalcularlos.
+        await diary_proposal.materialize(session, user_id, proposal.payload)
+        return
     if proposal.scope == "pantry":
         await _materialize_pantry_proposal(session, user_id, proposal.payload)
         return

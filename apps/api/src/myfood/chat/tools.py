@@ -31,6 +31,7 @@ from sqlalchemy import bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import DietPlan, Food, PantryItem
+from myfood.domain import diary_proposal
 from myfood.domain.diet_engine import CandidateFood
 from myfood.domain.food_candidates import EXCLUDE_RESTRICTED_SQL
 from myfood.search import search_foods as meili_search_foods
@@ -316,6 +317,211 @@ def _build_add_to_pantry_tool(sink: list[dict]) -> SdkMcpTool[Any]:
     return _add_to_pantry
 
 
+# --------------------------------------------------------------------------- diario
+
+READ_DIARY_TOOL_NAME = "read_diary_day"
+LOG_MEAL_TOOL_NAME = "propose_diary_entries"
+EDIT_ENTRY_TOOL_NAME = "propose_diary_edit"
+
+_READ_DIARY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["date"],
+    "properties": {"date": {"type": "string", "format": "date"}},
+}
+
+
+def _build_read_diary_tool(session: AsyncSession, user_id: UUID) -> SdkMcpTool[Any]:
+    @tool(
+        READ_DIARY_TOOL_NAME,
+        "Lee lo que el usuario YA tiene apuntado en su diario ese día, con sus calorías y "
+        "macros y el identificador de cada entrada. Úsalo antes de corregir o borrar algo, y "
+        "para responder a preguntas sobre lo que lleva comido.",
+        _READ_DIARY_SCHEMA,
+    )
+    async def _read_diary(args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            day = date.fromisoformat(str(args.get("date")))
+        except (TypeError, ValueError):
+            return {"content": [{"type": "text", "text": "Fecha no válida."}]}
+        entries = await diary_proposal.read_day(session, user_id, day)
+        totals = {
+            key: round(sum(e[key] for e in entries), 1)
+            for key in ("kcal", "protein_g", "fat_g", "carbs_g")
+        }
+        payload = {"date": day.isoformat(), "entries": entries, "totals": totals}
+        return {"content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}]}
+
+    return _read_diary
+
+
+LOG_MEAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["date", "meal_type", "items"],
+    "properties": {
+        "date": {"type": "string", "format": "date"},
+        "meal_type": {
+            "type": "string",
+            "enum": [
+                "breakfast", "morning_snack", "lunch",
+                "afternoon_snack", "dinner", "supper",
+            ],
+        },
+        "request": {
+            "type": "string",
+            "description": "Lo que pidió el usuario, con sus palabras, para la confirmación.",
+        },
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "alias": {
+                        "type": "string",
+                        "description": (
+                            "Alias de un candidate de search_foods. Preferible SIEMPRE: con "
+                            "él, las calorías salen del dato oficial y no de ti."
+                        ),
+                    },
+                    "quantity_text": {
+                        "type": "string",
+                        "description": "Cuánto, con palabras: «dos rebanadas», «un vaso», «30 g».",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Solo si NO hay alias: cómo se llama el ingrediente.",
+                    },
+                    "grams": {"type": "number", "description": "Solo si no hay alias."},
+                    "kcal_100g": {"type": "number", "description": "Solo si no hay alias."},
+                    "protein_100g": {"type": "number"},
+                    "fat_100g": {"type": "number"},
+                    "carbs_100g": {"type": "number"},
+                },
+            },
+        },
+    },
+}
+
+
+def _build_log_meal_tool(sink: list[dict]) -> SdkMcpTool[Any]:
+    @tool(
+        LOG_MEAL_TOOL_NAME,
+        "Propone apuntar alimentos en el diario del usuario. Un plato compuesto se "
+        "descompone en sus ingredientes, uno por elemento de `items`. Para cada ingrediente, "
+        "busca antes con search_foods y usa su `alias`; solo si de verdad no existe nada "
+        "parecido, pon `name`, `grams` y los valores por 100 g, que quedarán marcados como "
+        "estimación tuya. No se guarda nada hasta que el usuario lo confirme.",
+        LOG_MEAL_SCHEMA,
+    )
+    async def _log_meal(args: dict[str, Any]) -> dict[str, Any]:
+        sink.append(args)
+        return {"content": [{"type": "text", "text": "Preparado, pendiente de confirmar."}]}
+
+    return _log_meal
+
+
+EDIT_ENTRY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["changes"],
+    "properties": {
+        "changes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["entry_id", "action"],
+                "properties": {
+                    "entry_id": {
+                        "type": "string",
+                        "description": "El que devuelve read_diary_day, nunca inventado.",
+                    },
+                    "action": {"type": "string", "enum": ["delete", "update"]},
+                    "grams": {"type": "number"},
+                    "meal_type": {
+                        "type": "string",
+                        "enum": [
+                            "breakfast", "morning_snack", "lunch",
+                            "afternoon_snack", "dinner", "supper",
+                        ],
+                    },
+                },
+            },
+        },
+    },
+}
+
+
+def _build_edit_entry_tool(sink: list[dict]) -> SdkMcpTool[Any]:
+    @tool(
+        EDIT_ENTRY_TOOL_NAME,
+        "Propone corregir o borrar entradas que YA están en el diario. Lee antes el día con "
+        "read_diary_day para tener los identificadores. No se aplica nada sin confirmación.",
+        EDIT_ENTRY_SCHEMA,
+    )
+    async def _edit_entry(args: dict[str, Any]) -> dict[str, Any]:
+        sink.append(args)
+        return {"content": [{"type": "text", "text": "Preparado, pendiente de confirmar."}]}
+
+    return _edit_entry
+
+
+LOG_WATER_TOOL_NAME = "propose_water"
+
+_LOG_WATER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["ml"],
+    "properties": {
+        "date": {"type": "string", "format": "date"},
+        "ml": {"type": "number", "description": "Un vaso son 200 ml; una botella, 500."},
+    },
+}
+
+
+def _build_log_water_tool(sink: list[dict]) -> SdkMcpTool[Any]:
+    @tool(
+        LOG_WATER_TOOL_NAME,
+        "Propone apuntar agua bebida. No se guarda hasta que el usuario lo confirme.",
+        _LOG_WATER_SCHEMA,
+    )
+    async def _log_water(args: dict[str, Any]) -> dict[str, Any]:
+        sink.append(args)
+        return {"content": [{"type": "text", "text": "Preparado, pendiente de confirmar."}]}
+
+    return _log_water
+
+
+ADD_TO_SHOPPING_LIST_TOOL_NAME = "propose_shopping_list"
+
+_SHOPPING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["items"],
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "alias": {"type": "string", "description": "Si viene de search_foods."},
+                },
+            },
+        },
+    },
+}
+
+
+def _build_shopping_list_tool(sink: list[dict]) -> SdkMcpTool[Any]:
+    @tool(
+        ADD_TO_SHOPPING_LIST_TOOL_NAME,
+        "Propone añadir cosas a la lista de la compra del usuario.",
+        _SHOPPING_SCHEMA,
+    )
+    async def _shopping(args: dict[str, Any]) -> dict[str, Any]:
+        sink.append(args)
+        return {"content": [{"type": "text", "text": "Preparado, pendiente de confirmar."}]}
+
+    return _shopping
+
+
 def build_chat_tools(
     session: AsyncSession,
     user_id: UUID,
@@ -323,11 +529,26 @@ def build_chat_tools(
     alias_map: dict[str, CandidateFood],
     day_change_sink: list[dict],
     pantry_sink: list[dict],
+    # Opcionales: quien solo quiera las herramientas de lectura (los tests de alias, por
+    # ejemplo) no tiene por qué montar un recipiente para cada propuesta.
+    diary_sink: list[dict] | None = None,
+    edit_sink: list[dict] | None = None,
+    water_sink: list[dict] | None = None,
+    shopping_sink: list[dict] | None = None,
 ) -> list[SdkMcpTool[Any]]:
+    diary_sink = [] if diary_sink is None else diary_sink
+    edit_sink = [] if edit_sink is None else edit_sink
+    water_sink = [] if water_sink is None else water_sink
+    shopping_sink = [] if shopping_sink is None else shopping_sink
     return [
         _build_read_pantry_tool(session, user_id),
         _build_search_foods_tool(session, user_id, alias_map),
+        _build_read_diary_tool(session, user_id),
         _build_read_plan_day_tool(session, user_id, alias_map),
+        _build_log_meal_tool(diary_sink),
+        _build_edit_entry_tool(edit_sink),
+        _build_log_water_tool(water_sink),
+        _build_shopping_list_tool(shopping_sink),
         _build_propose_day_change_tool(day_change_sink),
         _build_add_to_pantry_tool(pantry_sink),
     ]
