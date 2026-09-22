@@ -16,8 +16,10 @@ import {
   activeChips,
   activeCount,
   emptyFilters,
+  fromUrlParams,
   hasCriteria,
   toSearchQuery,
+  toUrlParams,
   toggleOption,
   type FacetKey,
   type FilterState,
@@ -69,10 +71,16 @@ function Suggestions({
  * Sin texto ni filtros enseña sugerencias (favoritos, habituales, lo que falta hoy, básicos para
  * la comida que toca, despensa); con ellos, los resultados con cuántos alimentos deja cada opción. */
 export function FoodsExplorer() {
-  const [query, setQuery] = useState("");
-  const [debounced, setDebounced] = useState("");
-  const [filters, setFilters] = useState<FilterState>(emptyFilters);
-  const [sort, setSort] = useState<SortKey>("relevance");
+  // Lo que se está mirando vive en la barra de direcciones: así, abrir un alimento y volver
+  // no pierde el texto ni los filtros. Antes el estado solo vivía aquí y, al volver, el
+  // componente se montaba de cero y había que elegirlo todo otra vez.
+  const initial = typeof window === "undefined"
+    ? { query: "", filters: emptyFilters(), sort: "relevance" as SortKey }
+    : fromUrlParams(window.location.search);
+  const [query, setQuery] = useState(initial.query);
+  const [debounced, setDebounced] = useState(initial.query);
+  const [filters, setFilters] = useState<FilterState>(initial.filters);
+  const [sort, setSort] = useState<SortKey>(initial.sort);
   const [openFacet, setOpenFacet] = useState<FacetKey | null>(null);
 
   const [items, setItems] = useState<FoodSearchItem[]>([]);
@@ -94,6 +102,15 @@ export function FoodsExplorer() {
     const handle = setTimeout(() => setDebounced(query), DEBOUNCE_MS);
     return () => clearTimeout(handle);
   }, [query]);
+
+  // `replaceState` y no `router.replace`: cambiar un filtro no debe añadir una entrada al
+  // historial (volver atrás tendría que deshacer filtro a filtro) ni volver a montar la
+  // pantalla en cada pulsación.
+  useEffect(() => {
+    const params = toUrlParams(debounced, filters, sort);
+    const url = params ? `${window.location.pathname}?${params}` : window.location.pathname;
+    window.history.replaceState(null, "", url);
+  }, [debounced, filters, sort]);
 
   const loadSuggestions = useCallback(async () => {
     setSuggestionsError(null);

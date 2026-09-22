@@ -3,6 +3,8 @@ import {
   activeChips,
   activeCount,
   emptyFilters,
+  fromUrlParams,
+  toUrlParams,
   hasCriteria,
   toSearchQuery,
   toggleOption,
@@ -82,5 +84,32 @@ describe("activeChips and visibleOptions", () => {
     expect(visibleOptions("supermarket", facets.supermarket, []).map((o) => o.code)).toEqual(["lidl"]);
     expect(visibleOptions("supermarket", facets.supermarket, ["aldi"]).map((o) => o.code)).toEqual(["lidl", "aldi"]);
     expect(visibleOptions("nutrition", facets.nutrition, []).length).toBe(2);
+  });
+});
+
+describe("la búsqueda cabe en la barra de direcciones", () => {
+  it("no ensucia la URL cuando no hay nada elegido", () => {
+    expect(toUrlParams("", emptyFilters(), "relevance")).toBe("");
+  });
+
+  it("lleva texto, filtros y orden", () => {
+    const filters = { ...emptyFilters(), supermarket: ["mercadona", "lidl"], nutrition: ["high_protein"] };
+    const params = new URLSearchParams(toUrlParams(" yogur ", filters, "protein_desc"));
+    expect(params.get("q")).toBe("yogur");
+    expect(params.get("supermarket")).toBe("mercadona,lidl");
+    expect(params.get("nutrition")).toBe("high_protein");
+    expect(params.get("sort")).toBe("protein_desc");
+  });
+
+  it("lo que sale vuelve a entrar igual: es lo que hace que volver conserve los filtros", () => {
+    const filters = { ...emptyFilters(), supermarket: ["mercadona"], food_type: ["fish"] };
+    const restored = fromUrlParams(toUrlParams("atún", filters, "kcal_asc"));
+    expect(restored).toEqual({ query: "atún", filters, sort: "kcal_asc" });
+  });
+
+  it("una URL vacía o manipulada no rompe la pantalla", () => {
+    expect(fromUrlParams("")).toEqual({ query: "", filters: emptyFilters(), sort: "relevance" });
+    expect(fromUrlParams("sort=inventado&supermarket=").sort).toBe("relevance");
+    expect(fromUrlParams("supermarket=,,").filters.supermarket).toEqual([]);
   });
 });
