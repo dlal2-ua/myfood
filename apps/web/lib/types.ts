@@ -635,7 +635,9 @@ export interface GamificationSummary {
   newly_earned: string[];
 }
 
-export type ChatRole = "user" | "assistant";
+/** `divider` no es un mensaje: marca dónde empezó una conversación nueva, para que el
+ * modelo no arrastre lo anterior. */
+export type ChatRole = "user" | "assistant" | "divider";
 export type ChatSource = "text" | "voice";
 
 export interface ChatHistoryItem {
@@ -675,7 +677,49 @@ export interface ChatPantryProposal {
   payload: ChatPantryPayload;
 }
 
-export type ChatProposal = ChatDayProposal | ChatPantryProposal;
+/** Una línea de lo que el chat propone apuntar en el diario. */
+export interface DiaryProposalItem {
+  name: string;
+  grams: number;
+  kcal: number;
+  protein_g: number;
+  fat_g: number;
+  carbs_g: number;
+  /** `null` cuando el ingrediente no está en el catálogo y los valores los puso el modelo. */
+  food_id: string | null;
+  estimated: boolean;
+}
+
+export interface DiaryProposalEdit {
+  entry_id: string;
+  action: "delete" | "update";
+  name: string;
+  grams?: number;
+  kcal?: number;
+}
+
+export interface ChatDiaryPayload {
+  date: string;
+  /** `null` cuando la propuesta no apunta comida (solo agua, una corrección o la compra). */
+  meal_type: MealType | null;
+  /** Lo que pidió el usuario, con sus palabras. */
+  request: string | null;
+  items: DiaryProposalItem[];
+  totals: DayTotals;
+  has_estimates: boolean;
+  /** Correcciones o borrados sobre entradas que ya estaban. */
+  edits?: DiaryProposalEdit[];
+  water?: { date: string; ml: number };
+  shopping?: { text: string; food_id: string | null }[];
+}
+
+export interface ChatDiaryProposal {
+  scope: "diary";
+  ai_proposal_id: string;
+  payload: ChatDiaryPayload;
+}
+
+export type ChatProposal = ChatDayProposal | ChatPantryProposal | ChatDiaryProposal;
 
 export interface ChatMessageResponse {
   message: string;

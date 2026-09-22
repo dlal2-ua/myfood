@@ -15,7 +15,7 @@ from myfood.ai.consent import require_ai_processing_consent
 from myfood.ai.limits import load_limits
 from myfood.ai.queue import wait_for_chat_result
 from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
-from myfood.chat.flow import request_chat_message
+from myfood.chat.flow import DIVIDER_ROLE, request_chat_message
 from myfood.db.models import ChatMessage
 from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
@@ -171,3 +171,27 @@ async def delete_chat_history(
     borra el propio historial de la conversación."""
     await session.execute(delete(ChatMessage).where(ChatMessage.user_id == user_id))
     await session.commit()
+
+
+@router.post("/reset", status_code=201)
+async def start_new_conversation(
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> ChatHistoryItem:
+    """Empieza una conversación nueva sin borrar nada.
+
+    Deja una marca en el historial; `chat/flow.py::_recent_history` no lee más atrás de la
+    última, así que el modelo deja de arrastrar el contexto anterior. Se separa a propósito
+    de `DELETE /history`, que sí borra: querer empezar de cero y querer que no quede rastro
+    son dos cosas distintas."""
+    marker = ChatMessage(user_id=user_id, role=DIVIDER_ROLE, content="", source="text")
+    session.add(marker)
+    await session.commit()
+    await session.refresh(marker)
+    return ChatHistoryItem(
+        id=marker.id,
+        role=marker.role,
+        content=marker.content,
+        source=marker.source,
+        created_at=marker.created_at.isoformat(),
+    )

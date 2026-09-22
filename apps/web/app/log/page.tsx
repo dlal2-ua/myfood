@@ -1,5 +1,6 @@
 "use client";
 
+import { Sparkles } from "lucide-react";
 import { DayPager } from "@/components/DayPager";
 import { localDateIso } from "@/lib/dates";
 import { groupByMeal } from "@/lib/today";
@@ -532,9 +533,18 @@ export default function LogPage() {
                     ) : (
                       <>
                         <div>
-                          <p className="text-sm font-medium">
+                          <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
                             {entry.recipe_name ??
+                              entry.food_name ??
                               ((entry.food_id && foodNames[entry.food_id]) || "Alimento")}
+                            {entry.entry_source === "ai_estimate" && (
+                              <span
+                                title="Este alimento no está en el catálogo: sus valores los estimó Claude."
+                                className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                              >
+                                <Sparkles size={9} aria-hidden="true" /> estimado
+                              </span>
+                            )}
                           </p>
                           <p className="text-xs text-neutral-500">
                                                         {entry.weighed_as === "cooked" && entry.entered_grams

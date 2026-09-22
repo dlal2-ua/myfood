@@ -1,5 +1,7 @@
 const { chromium } = require("playwright-core");
 const BASE = process.env.BASE_URL || "https://myfood.cartagena.dpdns.org";
+// Con la instancia en «solo con invitación», registrarse exige un código.
+const INVITE_CODE = process.env.INVITE_CODE || "";
 const exe = process.env.CHROME_PATH;
 const rnd = Math.random().toString(36).slice(2, 10);
 const email = `e2e-ui-${rnd}@test.myfood`, password = "correcthorse-" + rnd;
@@ -15,7 +17,7 @@ const log = (...a) => console.log(...a);
   }, { method, path, body });
   try {
     await page.goto(BASE + "/login");
-    await api("POST", "/api/auth/register", { email, password, display_name: "E2E" });
+    await api("POST", "/api/auth/register", { email, password, display_name: "E2E" , invite_code: INVITE_CODE});
     await api("POST", "/api/consents", { kind: "health_data", version: "v1" });
     const s = await api("GET", "/api/foods/search?q=galletas%20maria&limit=5");
     const food = s.body.items.find((i) => i.brand) || s.body.items[0];

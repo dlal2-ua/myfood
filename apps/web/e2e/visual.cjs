@@ -5,6 +5,8 @@
 const { chromium } = require("playwright-core");
 const fs = require("node:fs");
 const BASE = process.env.BASE_URL || "https://myfood.cartagena.dpdns.org";
+// Con la instancia en «solo con invitación», registrarse exige un código.
+const INVITE_CODE = process.env.INVITE_CODE || "";
 const OUT = process.env.OUT || "visual-out";
 const rnd = Math.random().toString(36).slice(2, 10);
 const email = `e2e-vis-${rnd}@test.myfood`;
@@ -61,7 +63,7 @@ const only = process.argv.slice(2);
       let j = null; try { j = await r.json(); } catch {}
       return { status: r.status, body: j };
     }, { method, path, body });
-    await api("POST", "/api/auth/register", { email, password, display_name: "Vera" });
+    await api("POST", "/api/auth/register", { email, password, display_name: "Vera" , invite_code: INVITE_CODE});
     await api("POST", "/api/consents", { kind: "health_data", version: "v1" });
     await api("PUT", "/api/profile", { sex: "female", birth_date: "1994-06-12", height_cm: 168, meals_per_day: 3, activity_level: "moderate", goal: "maintain" });
     const d = new Date();

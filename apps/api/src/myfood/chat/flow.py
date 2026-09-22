@@ -46,12 +46,16 @@ from myfood.db.models import (
     Food,
 )
 from myfood.db.session import AdminSessionLocal
+from myfood.domain import diary_proposal
 from myfood.domain.diet_engine import DayTargets, solve_day_with_fixed_items
 from myfood.domain.quantity_text import resolve_grams
 from myfood.domain.targets import resolve_targets
 from myfood.errors import AppError
 
 _MAX_AUDIO_BYTES = 15 * 1024 * 1024
+# Marca de «conversación nueva»: no es un mensaje, es un corte. El modelo no lee más atrás
+# de la última, así que se puede empezar de cero sin borrar nada.
+DIVIDER_ROLE = "divider"
 # Contexto de conversación que se le da al modelo: sin él cada mensaje es una
 # conversación nueva (no recuerda sus propias preguntas aclaratorias).
 _HISTORY_MAX_MESSAGES = 10
@@ -129,7 +133,14 @@ async def _recent_history(session: AsyncSession, user_id: UUID) -> list[tuple[st
             .limit(_HISTORY_MAX_MESSAGES)
         )
     ).all()
-    return [(m.role, m.content) for m in reversed(rows)]
+    # `rows` viene del más reciente al más antiguo: en cuanto aparece un corte, lo de antes
+    # pertenece a la conversación anterior y no se le pasa al modelo.
+    recent: list[ChatMessage] = []
+    for message in rows:
+        if message.role == DIVIDER_ROLE:
+            break
+        recent.append(message)
+    return [(m.role, m.content) for m in reversed(recent)]
 
 
 async def _build_day_change_proposal(
@@ -250,6 +261,59 @@ async def _build_day_change_proposal(
     return {"scope": "day", "ai_proposal_id": str(proposal.id), "payload": payload}, None
 
 
+async def _build_diary_proposal(
+    session: AsyncSession, user_id: UUID, ai_session: AiSession, turn: ChatTurnResult
+) -> tuple[dict | None, str | None]:
+    """Propuesta de apuntar en el diario. Los gramos y los macros ya vienen resueltos
+    (`domain/diary_proposal`), así que la confirmación enseña exactamente lo que se va a
+    guardar: la petición, cada línea y el total. Nada se escribe hasta que se apruebe."""
+    today = date.today()
+    try:
+        if turn.diary_args is not None:
+            payload = await diary_proposal.build_payload(
+                session,
+                turn.diary_args,
+                alias_to_candidate=turn.alias_to_candidate,
+                today=today,
+            )
+        else:
+            # Solo agua, una corrección o la lista de la compra: no hay nada que apuntar,
+            # pero sigue siendo una propuesta que el usuario tiene que confirmar.
+            payload = {
+                "date": today.isoformat(),
+                "meal_type": None,
+                "request": None,
+                "items": [],
+                "totals": {"kcal": 0, "protein_g": 0, "fat_g": 0, "carbs_g": 0},
+                "has_estimates": False,
+            }
+        if turn.edit_args is not None:
+            payload["edits"] = await diary_proposal.build_edits_payload(
+                session, user_id, turn.edit_args
+            )
+        if turn.water_args is not None:
+            payload["water"] = diary_proposal.build_water_payload(turn.water_args, today=today)
+        if turn.shopping_args is not None:
+            payload["shopping"] = diary_proposal.build_shopping_payload(
+                turn.shopping_args, alias_to_candidate=turn.alias_to_candidate
+            )
+    except AppError as exc:
+        # Un mensaje honesto de por qué no puede, en vez de apuntar algo dudoso.
+        return None, exc.message
+
+    proposal = AiProposal(
+        ai_session_id=ai_session.id,
+        user_id=user_id,
+        scope="diary",
+        payload=payload,
+        rationale=None,
+        status="pending",
+    )
+    session.add(proposal)
+    await session.flush()
+    return {"scope": "diary", "ai_proposal_id": str(proposal.id), "payload": payload}, None
+
+
 async def _build_pantry_proposal(
     session: AsyncSession, user_id: UUID, ai_session: AiSession, turn: ChatTurnResult
 ) -> dict | None:
@@ -337,7 +401,21 @@ async def process_chat_job(ai_session_id: str) -> None:
         proposal_out: dict | None = None
         assistant_text = turn.text or "Vale."
 
-        if turn.day_change_args is not None:
+        # El diario va primero: es lo que pide el usuario la mayoría de las veces, y una
+        # misma respuesta no puede dejar dos propuestas pendientes. Todo lo que el turno
+        # quiera escribir (apuntar, corregir, agua, lista) va en la MISMA propuesta, para
+        # que se confirme de una vez (decisión del usuario).
+        if any(
+            args is not None
+            for args in (turn.diary_args, turn.edit_args, turn.water_args, turn.shopping_args)
+        ):
+            proposal_out, diary_error = await _build_diary_proposal(
+                session, user_id, ai_session, turn
+            )
+            if diary_error:
+                assistant_text = diary_error
+
+        if turn.day_change_args is not None and proposal_out is None:
             proposal_out, day_error = await _build_day_change_proposal(
                 session, user_id, ai_session, turn
             )

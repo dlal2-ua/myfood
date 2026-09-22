@@ -37,6 +37,11 @@ class ChatTurnResult:
     text: str
     day_change_args: dict | None
     pantry_args: dict | None
+    # Lo que el turno quiere escribir en el diario del usuario, pendiente de que lo confirme.
+    diary_args: dict | None = None
+    edit_args: dict | None = None
+    water_args: dict | None = None
+    shopping_args: dict | None = None
     alias_to_candidate: dict[str, CandidateFood] = field(default_factory=dict)
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -52,6 +57,10 @@ async def run_chat_turn(
     alias_map: dict[str, CandidateFood] = {}
     day_change_sink: list[dict] = []
     pantry_sink: list[dict] = []
+    diary_sink: list[dict] = []
+    edit_sink: list[dict] = []
+    water_sink: list[dict] = []
+    shopping_sink: list[dict] = []
 
     tools = build_chat_tools(
         session,
@@ -59,6 +68,10 @@ async def run_chat_turn(
         alias_map=alias_map,
         day_change_sink=day_change_sink,
         pantry_sink=pantry_sink,
+        diary_sink=diary_sink,
+        edit_sink=edit_sink,
+        water_sink=water_sink,
+        shopping_sink=shopping_sink,
     )
 
     agent_result: AgentResult = await run_agent(
@@ -77,6 +90,10 @@ async def run_chat_turn(
         # — mismo criterio que el resto de flujos sink-based (`sink[-1]`).
         day_change_args=day_change_sink[-1] if day_change_sink else None,
         pantry_args=pantry_sink[-1] if pantry_sink else None,
+        diary_args=diary_sink[-1] if diary_sink else None,
+        edit_args=edit_sink[-1] if edit_sink else None,
+        water_args=water_sink[-1] if water_sink else None,
+        shopping_args=shopping_sink[-1] if shopping_sink else None,
         alias_to_candidate=alias_map,
         input_tokens=agent_result.input_tokens,
         output_tokens=agent_result.output_tokens,

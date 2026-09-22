@@ -75,6 +75,9 @@ def _to_out(entry: FoodLog) -> LogFoodOut:
         weighed_as=entry.weighed_as,
         entered_grams=float(entry.entered_grams) if entry.entered_grams is not None else None,
         entry_source=entry.entry_source,
+        # Una entrada estimada por el chat no tiene alimento del catálogo: su nombre es lo
+        # único que la identifica.
+        food_name=entry.custom_name,
         kcal=float(entry.kcal),
         protein_g=float(entry.protein_g),
         fat_g=float(entry.fat_g),
@@ -315,7 +318,9 @@ async def get_day_log(
     for entry in entries:
         item = _to_out(entry)
         item.recipe_name = recipe_names.get(entry.recipe_id) if entry.recipe_id else None
-        item.food_name = food_names.get(entry.food_id) if entry.food_id else None
+        item.food_name = (
+            food_names.get(entry.food_id) if entry.food_id else entry.custom_name
+        )
         out.append(item)
     return LogDayOut(date=date, food=out, totals=totals)
 
