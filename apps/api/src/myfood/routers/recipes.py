@@ -82,6 +82,9 @@ class RecipeOut(BaseModel):
     ingredients: list[RecipeIngredientOut]
     totals: NutritionTotals
     totals_per_serving: NutritionTotals
+    # De dónde salió la receta. Las fuentes del recetario piden que se las cite, así que
+    # tiene que llegar a la pantalla: guardarla y no enseñarla no cumple nada.
+    attribution: str | None = None
 
 
 class RecipeSummaryOut(BaseModel):
@@ -179,6 +182,7 @@ async def _to_out(session: AsyncSession, recipe: Recipe) -> RecipeOut:
         ingredients=ingredients_out,
         totals=NutritionTotals(**totals),
         totals_per_serving=NutritionTotals(**per_serving),
+        attribution=recipe.attribution,
     )
 
 
@@ -255,6 +259,11 @@ class CatalogPageOut(BaseModel):
 
 CATALOG_PAGE_SIZE = 24
 
+# 190 de las 790 recetas del recetario vienen de TheMealDB sin cocina, porque la fuente no la
+# trae. Inventarles una sería mentir, pero dejarlas sin etiqueta las volvía inalcanzables: el
+# filtro de cocina no las enseñaba nunca. Con este valor se pueden pedir igual que las demás.
+SIN_COCINA = "Sin especificar"
+
 
 @router.get("/catalog")
 async def list_catalog(
@@ -277,7 +286,9 @@ async def list_catalog(
     if q and q.strip():
         filters.append("r.name ILIKE :q")
         params["q"] = f"%{q.strip()}%"
-    if cuisine:
+    if cuisine == SIN_COCINA:
+        filters.append("r.cuisine IS NULL")
+    elif cuisine:
         filters.append("r.cuisine = :cuisine")
         params["cuisine"] = cuisine
     if category:
@@ -347,9 +358,17 @@ async def list_catalog(
             for r in rows
         ],
         total=total or 0,
-        cuisines=sorted({r.cuisine for r in facets if r.cuisine}),
+        cuisines=_cuisine_facets(facets),
         categories=sorted({r.category for r in facets if r.category}),
     )
+
+
+def _cuisine_facets(facets) -> list[str]:
+    """Las cocinas, con «Sin especificar» al final si hay recetas que no la traen."""
+    cuisines = sorted({r.cuisine for r in facets if r.cuisine})
+    if any(r.cuisine is None for r in facets):
+        cuisines.append(SIN_COCINA)
+    return cuisines
 
 
 @router.post("/{recipe_id}/copy", status_code=201)

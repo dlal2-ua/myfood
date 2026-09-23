@@ -97,6 +97,24 @@ async def test_the_catalog_can_be_filtered(registered_client, superuser_conn, te
     assert por_kcal["items"] == []
 
 
+async def test_recipes_without_a_cuisine_are_still_reachable(
+    registered_client, superuser_conn, test_food
+):
+    """190 de las 790 recetas importadas no traen cocina porque la fuente no la da. Sin una
+    entrada propia en el filtro no había forma de llegar a ellas: la lista de cocinas no las
+    nombraba y cualquier filtro las dejaba fuera."""
+    client, _ = registered_client
+    await _catalog_recipe(superuser_conn, test_food, name="Arepa", cuisine=None)
+    await _catalog_recipe(superuser_conn, test_food, name="Pad Thai", cuisine="Tailandesa")
+
+    page = (await client.get("/api/recipes/catalog")).json()
+    assert page["cuisines"] == ["Tailandesa", "Sin especificar"]
+
+    sin_cocina = (await client.get("/api/recipes/catalog?cuisine=Sin especificar")).json()
+    assert [r["name"] for r in sin_cocina["items"]] == ["Arepa"]
+    assert sin_cocina["total"] == 1
+
+
 async def test_a_catalog_recipe_can_be_read_but_not_edited(
     registered_client, superuser_conn, test_food
 ):
@@ -111,6 +129,18 @@ async def test_a_catalog_recipe_can_be_read_but_not_edited(
     edited = await client.patch(f"/api/recipes/{recipe_id}", json={"name": "Mía"})
     assert edited.status_code == 404
     assert (await client.delete(f"/api/recipes/{recipe_id}")).status_code == 404
+
+
+async def test_a_catalog_recipe_says_where_it_came_from(
+    registered_client, superuser_conn, test_food
+):
+    """Las fuentes del recetario piden que se las cite. Se guardaba en la base de datos pero
+    no salía por el API, así que no había forma de enseñarlo y la condición no se cumplía."""
+    client, _ = registered_client
+    recipe_id = await _catalog_recipe(superuser_conn, test_food, name="Paella")
+
+    detalle = (await client.get(f"/api/recipes/{recipe_id}")).json()
+    assert detalle["attribution"] == "TheMealDB"
 
 
 async def test_a_catalog_recipe_can_be_saved_as_mine(registered_client, superuser_conn, test_food):

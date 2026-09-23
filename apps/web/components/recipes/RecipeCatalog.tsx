@@ -209,6 +209,12 @@ function RecipeSheet({
             Guárdala para poder cambiar las raciones o los ingredientes, y para usarla en tu
             plan de dieta.
           </p>
+
+          {recipe.attribution && (
+            <p className="text-center text-xs text-[var(--color-muted)]">
+              {recipe.attribution}
+            </p>
+          )}
         </div>
       )}
     </BottomSheet>

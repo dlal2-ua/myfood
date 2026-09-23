@@ -579,6 +579,8 @@ export interface Recipe {
   ingredients: RecipeIngredient[];
   totals: RecipeNutritionTotals;
   totals_per_serving: RecipeNutritionTotals;
+  /** De dónde viene la receta. Las fuentes del recetario piden que se las cite. */
+  attribution?: string | null;
 }
 
 export interface RecipeSummary {
