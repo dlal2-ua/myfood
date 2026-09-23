@@ -47,6 +47,92 @@ class RawRecipe:
     ingredients: list[RawIngredient] = field(default_factory=list)
 
 
+# TheMealDB escribe la cocina en inglés y sin criterio fijo: unas veces el gentilicio
+# («Spanish») y otras el país («France»). Se traduce al gentilicio femenino porque en la
+# pantalla acompaña a la palabra «cocina»: «cocina española», «cocina tailandesa».
+AREA_ES = {
+    "Algerian": "Argelina",
+    "American": "Estadounidense",
+    "Argentina": "Argentina",
+    "Argentine": "Argentina",
+    "Australian": "Australiana",
+    "British": "Británica",
+    "Canadian": "Canadiense",
+    "Chinese": "China",
+    "Croatian": "Croata",
+    "Dutch": "Holandesa",
+    "Egyptian": "Egipcia",
+    "Filipino": "Filipina",
+    "France": "Francesa",
+    "French": "Francesa",
+    "Greek": "Griega",
+    "India": "India",
+    "Indian": "India",
+    "Irish": "Irlandesa",
+    "Italian": "Italiana",
+    "Jamaican": "Jamaicana",
+    "Japanese": "Japonesa",
+    "Kenyan": "Keniana",
+    "Malaysian": "Malasia",
+    "Mexican": "Mexicana",
+    "Moroccan": "Marroquí",
+    "Netherlands": "Holandesa",
+    "Norway": "Noruega",
+    "Norwegian": "Noruega",
+    "Polish": "Polaca",
+    "Portuguese": "Portuguesa",
+    "Russian": "Rusa",
+    "Saudi Arabian": "Saudí",
+    "Slovak": "Eslovaca",
+    "Slovakia": "Eslovaca",
+    "Spanish": "Española",
+    "Syrian": "Siria",
+    "Thai": "Tailandesa",
+    "Tunisian": "Tunecina",
+    "Turkish": "Turca",
+    "Ukrainian": "Ucraniana",
+    "United States": "Estadounidense",
+    "Uruguayan": "Uruguaya",
+    "Venezuela": "Venezolana",
+    "Venezuelan": "Venezolana",
+    "Vietnamese": "Vietnamita",
+}
+
+# El vocabulario de categorías está cerrado y no cambia, así que se traduce con una tabla y no
+# gastando tokens: son catorce palabras que salen en los filtros de la pantalla.
+CATEGORY_ES = {
+    "Beef": "Ternera",
+    "Breakfast": "Desayuno",
+    "Chicken": "Pollo",
+    "Dessert": "Postre",
+    "Goat": "Cabrito",
+    "Lamb": "Cordero",
+    "Miscellaneous": "Varios",
+    "Pasta": "Pasta",
+    "Pork": "Cerdo",
+    "Seafood": "Pescado y marisco",
+    "Side": "Guarnición",
+    "Starter": "Entrante",
+    "Vegan": "Vegana",
+    "Vegetarian": "Vegetariana",
+}
+
+# Lo que la tabla no conocía la última vez que se importó. Se deja a la vista en vez de
+# traducirlo a medias: un nombre en inglés en los filtros se ve, y una traducción inventada no.
+SIN_TRADUCIR: set[str] = set()
+
+
+def _translate(value: str | None, table: dict[str, str]) -> str | None:
+    """El término en español, o el original apuntado para que se note que falta."""
+    if not value:
+        return None
+    spanish = table.get(value)
+    if spanish is None:
+        SIN_TRADUCIR.add(value)
+        return value
+    return spanish
+
+
 def _clean(value: str | None) -> str:
     return (value or "").strip()
 
@@ -73,8 +159,8 @@ def parse_meal(meal: dict) -> RawRecipe | None:
     return RawRecipe(
         source_id=source_id,
         name=name,
-        category=_clean(meal.get("strCategory")) or None,
-        cuisine=_clean(meal.get("strArea")) or None,
+        category=_translate(_clean(meal.get("strCategory")), CATEGORY_ES),
+        cuisine=_translate(_clean(meal.get("strArea")), AREA_ES),
         instructions=instructions,
         image_url=_clean(meal.get("strMealThumb")) or None,
         ingredients=ingredients,

@@ -32,6 +32,40 @@ Total genérico cargado tras USDA+CIQUAL+BEDCA: **10.600** — supera el
 criterio de aceptación de la Fase 1 (≥8.000 alimentos genéricos). Total de
 marca (OFF): **11.190** — supera el criterio de ≥10.000 productos de marca.
 
+## Recetario compartido (TheMealDB)
+
+Pipeline aparte del de alimentos: trae PLATOS, no nutrientes. De la API se
+toman ingredientes, cantidades, pasos y foto; las calorías las calcula
+MyFood sumando los `food_nutrients` de los ingredientes que empareja con su
+propio catálogo (R9). Nada de lo que devuelve la API se usa como número.
+
+```bash
+uv run python -m etl.import_themealdb --dry-run    # ensayo, sin escribir ni traducir
+uv run python -m etl.import_themealdb --skip-steps # todo menos los pasos (lo caro)
+uv run python -m etl.import_themealdb --repair     # rehace lo ya importado, casi gratis
+uv run python -m etl.import_themealdb              # completo
+```
+
+| Fuente | Alcance | Estado |
+|---|---|---|
+| TheMealDB | 790 recetas (el catálogo entero, contado letra a letra) | ✅ |
+
+La traducción al español se hace con Claude y es la parte cara: la primera
+importación costó **1.011.112 tokens de salida**. Por eso todo lo traducido
+se guarda en `data/cache/themealdb.json` según sale, y las recetas se
+escriben en la base de datos de ocho en ocho, no al final: una importación
+cortada no vuelve a pagar lo que ya estaba hecho.
+
+`--repair` aprovecha eso al máximo — lee de la base de datos las
+traducciones de la importación anterior, las mete en la caché y solo pide lo
+que falte. Es lo que hay que usar para arreglar emparejados o taxonomías sin
+volver a gastar un millón de tokens.
+
+Las cocinas y las categorías NO se traducen con IA: son vocabulario cerrado
+y están en tablas (`AREA_ES`, `CATEGORY_ES` en `sources/themealdb.py`). Lo
+que no esté en la tabla se deja en inglés y se avisa por pantalla, que se ve;
+una traducción inventada, no.
+
 ### Open Food Facts España: de 31 a 11.190 productos de marca
 
 Investigación en dos fases, documentada aquí porque el camino hasta llegar
