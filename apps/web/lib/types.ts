@@ -659,9 +659,7 @@ export interface GamificationSummary {
   newly_earned: string[];
 }
 
-/** `divider` no es un mensaje: marca dónde empezó una conversación nueva, para que el
- * modelo no arrastre lo anterior. */
-export type ChatRole = "user" | "assistant" | "divider";
+export type ChatRole = "user" | "assistant";
 export type ChatSource = "text" | "voice";
 
 export interface ChatHistoryItem {
@@ -670,6 +668,16 @@ export interface ChatHistoryItem {
   content: string;
   source: ChatSource;
   created_at: string;
+}
+
+/** Un hilo del chat (migración 0023). Antes el historial era una lista plana y «conversación
+ * nueva» marcaba un corte con un mensaje especial que la base de datos rechazaba. */
+export interface ChatConversationSummary {
+  id: string;
+  /** Las primeras palabras del primer mensaje; `null` mientras el hilo está vacío. */
+  title: string | null;
+  created_at: string;
+  last_message_at: string;
 }
 
 // Mismo shape que AiProposalPayload (día completo de un plan existente).

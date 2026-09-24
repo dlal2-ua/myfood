@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import (
     BodyMeasurement,
+    ChatConversation,
     ChatMessage,
     Consent,
     DietPlan,
@@ -237,6 +238,7 @@ async def _build_export(session: AsyncSession, user_id: UUID, user: User) -> dic
         "favorite_foods": await rows(UserFavoriteFood),
         "tdee_estimates": await rows(TdeeEstimate),
         "notification_rules": await rows(NotificationRule),
+        "chat_conversations": await rows(ChatConversation),
         "chat_messages": await rows(ChatMessage),
         "consents": await rows(Consent),
     }

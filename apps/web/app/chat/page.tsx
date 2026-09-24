@@ -1,16 +1,19 @@
 "use client";
 
-import { RefreshCw, Trash2 } from "lucide-react";
+import { History, Mic, Plus, Square, Trash2, X } from "lucide-react";
+import Link from "next/link";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { DiaryProposalCard } from "@/components/chat/DiaryProposalCard";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import type {
+  ChatConversationSummary,
   ChatHistoryItem,
   ChatMessageResponse,
   ChatProposal,
   FoodDetail,
 } from "@/lib/types";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Skeleton } from "@/components/ui/states";
 import {
   AiWaiting,
@@ -23,6 +26,21 @@ import {
 const bubbleBase = "max-w-[85%] rounded-2xl px-4 py-2 text-sm";
 const userBubble = `${bubbleBase} self-end bg-[var(--color-primary)] text-[var(--color-on-primary)]`;
 const assistantBubble = `${bubbleBase} self-start border border-[var(--color-border)]`;
+
+/** Se corta sola: 15 MB de audio se alcanzan sin darse cuenta y Whisper tarda más cuanto más
+ * larga es la nota. Dos minutos son de sobra para contar lo que se ha comido. */
+const MAX_RECORDING_SECONDS = 120;
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function conversationLabel(c: ChatConversationSummary): string {
+  if (c.title) return c.title;
+  return "Conversación vacía";
+}
 
 export default function ChatPage() {
   const [history, setHistory] = useState<ChatHistoryItem[]>([]);
@@ -39,29 +57,73 @@ export default function ChatPage() {
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showDiaryLink, setShowDiaryLink] = useState(false);
+  const [conversations, setConversations] = useState<ChatConversationSummary[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const elapsed = useElapsedSeconds(sending);
   const { quota, reload: reloadQuota } = useAiQuota("chat");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const cancelledRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  async function loadHistory() {
+  // El backend ya devuelve del más antiguo al más reciente, ordenado por `seq` y no por
+  // fecha: antes los dos mensajes de un turno compartían `created_at` al microsegundo, el
+  // orden empataba y al darle la vuelta aquí la respuesta salía encima de la pregunta.
+  const loadHistory = useCallback(async (id?: string | null) => {
+    const target = id ?? conversationId;
+    const query = target ? `&conversation_id=${target}` : "";
     try {
-      const items = await apiFetch<ChatHistoryItem[]>("/api/chat/history?limit=100");
-      // El backend devuelve más reciente primero (sección 7.9); la
-      // conversación se lee de arriba a abajo.
-      setHistory([...items].reverse());
+      setHistory(await apiFetch<ChatHistoryItem[]>(`/api/chat/history?limit=100${query}`));
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoadingHistory(false);
     }
-  }
+  }, [conversationId]);
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const items = await apiFetch<ChatConversationSummary[]>("/api/chat/conversations");
+      setConversations(items);
+      // Sin hilo elegido, el activo es el más reciente — el mismo que usa el backend cuando
+      // no se le pasa ninguno, así que la vista y lo que se escribe no pueden desalinearse.
+      setConversationId((current) => current ?? items[0]?.id ?? null);
+    } catch {
+      // El selector es un extra: si falla, el chat sigue funcionando sobre el hilo activo.
+    }
+  }, []);
 
   useEffect(() => {
     void loadHistory();
+    void loadConversations();
+    // Solo al montar: después se recarga a mano al cambiar de hilo o al enviar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // El aviso caduca solo, como el del shell: antes «Empezamos de cero.» se quedaba para
+  // siempre debajo de los botones.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => {
+      setNotice(null);
+      setShowDiaryLink(false);
+    }, 4000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
+    if (!recording) return;
+    const timer = window.setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [recording]);
+
+  useEffect(() => {
+    if (recording && recordingSeconds >= MAX_RECORDING_SECONDS) stopRecording();
+  }, [recording, recordingSeconds]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -98,6 +160,7 @@ export default function ChatPage() {
     // desaparecía del cuadro de texto y no aparecía en la conversación hasta que el modelo
     // contestaba, así que durante la espera no había ni rastro de lo escrito.
     setPendingMessage(pending ?? null);
+    if (conversationId) body.set("conversation_id", conversationId);
     try {
       const res = await apiFetch<ChatMessageResponse>("/api/chat/message", {
         method: "POST",
@@ -106,6 +169,8 @@ export default function ChatPage() {
       setProposal(res.proposal);
       if (res.proposal) await resolveFoodNames(res.proposal);
       await loadHistory();
+      // El título del hilo lo pone el primer mensaje: hasta ahora la lista lo mostraba vacío.
+      void loadConversations();
     } catch (err) {
       if (err instanceof ApiError && err.code === "AI_CONSENT_REQUIRED") {
         setNeedsConsent(true);
@@ -133,16 +198,53 @@ export default function ChatPage() {
     }
   }
 
-  /** Empieza de cero sin borrar nada: deja un corte, y a partir de ahí Claude no arrastra
-   * lo anterior. El historial sigue estando para consultarlo. */
+  /** Empieza un hilo nuevo sin borrar nada: el anterior sigue en el selector. */
   async function onNewConversation() {
     setBusy(true);
     setError(null);
     try {
-      await apiFetch("/api/chat/reset", { method: "POST" });
+      const created = await apiFetch<ChatConversationSummary>("/api/chat/conversations", {
+        method: "POST",
+      });
+      setConversationId(created.id);
+      setHistory([]);
       setProposal(null);
+      setPickerOpen(false);
       setNotice("Empezamos de cero.");
-      await loadHistory();
+      await loadConversations();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onPickConversation(id: string) {
+    setPickerOpen(false);
+    if (id === conversationId) return;
+    setConversationId(id);
+    setProposal(null);
+    setLoadingHistory(true);
+    await loadHistory(id);
+  }
+
+  async function onDeleteConversation(id: string) {
+    if (!window.confirm("Se borrará esta conversación y sus mensajes. Lo que ya apuntaste en tu diario no se toca. ¿Seguimos?")) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/chat/conversations/${id}`, { method: "DELETE" });
+      const remaining = conversations.filter((c) => c.id !== id);
+      setConversations(remaining);
+      if (id === conversationId) {
+        const next = remaining[0]?.id ?? null;
+        setConversationId(next);
+        setHistory([]);
+        setProposal(null);
+        if (next) await loadHistory(next);
+      }
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -160,7 +262,10 @@ export default function ChatPage() {
     try {
       await apiFetch("/api/chat/history", { method: "DELETE" });
       setHistory([]);
+      setConversations([]);
+      setConversationId(null);
       setProposal(null);
+      setPickerOpen(false);
       setNotice("Historial borrado.");
     } catch (err) {
       setError(errorMessage(err));
@@ -208,19 +313,29 @@ export default function ChatPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream, { mimeType });
       chunksRef.current = [];
+      cancelledRef.current = false;
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
+        if (cancelledRef.current) {
+          chunksRef.current = [];
+          return;
+        }
         const blob = new Blob(chunksRef.current, { type: mimeType });
         const body = new FormData();
         body.set("audio", blob, "nota.webm");
-        void send(body);
+        // Con `pending` se ve la burbuja de la nota mientras Whisper transcribe: sin ella la
+        // pantalla solo mostraba «Pensando…» y parecía que no se había enviado nada.
+        void send(body, "Nota de voz enviada…");
       };
       mediaRecorderRef.current = recorder;
       recorder.start();
+      setRecordingSeconds(0);
       setRecording(true);
+      // Si antes falló (permiso denegado y luego concedido), el aviso debe desaparecer.
+      setMicUnsupported(false);
     } catch {
       setMicUnsupported(true);
     }
@@ -229,6 +344,13 @@ export default function ChatPage() {
   function stopRecording() {
     mediaRecorderRef.current?.stop();
     setRecording(false);
+  }
+
+  function cancelRecording() {
+    cancelledRef.current = true;
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
+    setRecordingSeconds(0);
   }
 
   async function decideProposal(decision: "approve" | "reject") {
@@ -240,7 +362,10 @@ export default function ChatPage() {
         method: "POST",
       });
       setProposal(null);
-      if (decision === "approve") setNotice("Apuntado en tu diario.");
+      if (decision === "approve") {
+        setNotice("Apuntado en tu diario.");
+        setShowDiaryLink(true);
+      }
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -262,15 +387,26 @@ export default function ChatPage() {
           <button
             type="button"
             onClick={() => void onNewConversation()}
-            disabled={sending || busy}
+            disabled={sending || busy || loadingHistory}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--color-primary)] px-3 text-xs font-semibold text-[var(--color-on-primary)] hover:bg-[var(--color-primary-hover)] disabled:opacity-60"
+          >
+            <Plus size={14} aria-hidden="true" /> Conversación nueva
+          </button>
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            disabled={sending || busy || conversations.length === 0}
             className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--color-border-strong)] px-3 text-xs font-semibold disabled:opacity-60"
           >
-            <RefreshCw size={13} aria-hidden="true" /> Conversación nueva
+            <History size={13} aria-hidden="true" /> Anteriores
+            {conversations.length > 1 && (
+              <span className="text-[var(--color-muted)]">({conversations.length})</span>
+            )}
           </button>
           <button
             type="button"
             onClick={() => void onDeleteHistory()}
-            disabled={sending || busy || history.length === 0}
+            disabled={sending || busy || conversations.length === 0}
             className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--color-border-strong)] px-3 text-xs font-semibold text-[var(--color-muted)] disabled:opacity-60"
           >
             <Trash2 size={13} aria-hidden="true" /> Borrar el historial
@@ -278,6 +414,14 @@ export default function ChatPage() {
           {notice && (
             <span role="status" className="self-center text-xs font-semibold text-[var(--color-primary)]">
               {notice}
+              {showDiaryLink && (
+                <>
+                  {" "}
+                  <Link href="/log" className="underline">
+                    Ver el diario
+                  </Link>
+                </>
+              )}
             </span>
           )}
         </div>
@@ -298,27 +442,18 @@ export default function ChatPage() {
           </p>
         )}
         <div className="flex flex-col gap-2">
-          {history.map((m) =>
-            m.role === "divider" ? (
-              <p
-                key={m.id}
-                className="my-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-muted)]"
-              >
-                <span aria-hidden="true" className="h-px flex-1 bg-[var(--color-border)]" />
-                Conversación nueva
-                <span aria-hidden="true" className="h-px flex-1 bg-[var(--color-border)]" />
-              </p>
-            ) : (
+          {history.map((m) => (
             <div key={m.id} className={m.role === "user" ? userBubble : assistantBubble}>
               {m.source === "voice" && (
-                <span className="mr-1 text-xs opacity-70" title="Enviado por voz">
-                  🎤
-                </span>
+                <Mic
+                  size={12}
+                  aria-label="Enviado por voz"
+                  className="mr-1 inline-block align-[-1px] opacity-70"
+                />
               )}
               {m.content}
             </div>
-            ),
-          )}
+          ))}
           {pendingMessage && (
             <div className={`${userBubble} opacity-70`}>{pendingMessage}</div>
           )}
@@ -422,18 +557,43 @@ export default function ChatPage() {
             }
           }}
         />
+        {recording && (
+          <button
+            type="button"
+            onClick={cancelRecording}
+            aria-label="Descartar la nota de voz"
+            title="Descartar"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-[var(--color-border-strong)] text-[var(--color-muted)]"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void (recording ? stopRecording() : startRecording())}
-          disabled={sending}
-          className={`rounded-lg border px-3 py-2 text-sm disabled:opacity-60 ${
+          disabled={sending || (!recording && quota?.remaining === 0)}
+          aria-label={recording ? "Enviar la nota de voz" : "Grabar una nota de voz"}
+          aria-pressed={recording}
+          title={recording ? "Enviar la nota de voz" : "Grabar nota de voz"}
+          className={`relative inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-[var(--radius-control)] border px-3 text-sm font-semibold transition-colors disabled:opacity-60 ${
             recording
-              ? "border-red-400 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950"
-              : "border-[var(--color-border-strong)]"
+              ? "border-transparent bg-red-600 text-white"
+              : "border-[var(--color-border-strong)] bg-[var(--color-surface)] text-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]"
           }`}
-          title={recording ? "Detener grabación" : "Grabar nota de voz"}
         >
-          {recording ? "⏹" : "🎤"}
+          {recording ? (
+            <>
+              {/* El anillo late mientras graba: es la señal de que el micro está abierto. */}
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 rounded-[var(--radius-control)] bg-red-500/40 motion-safe:animate-[myfood-pulse_1.4s_ease-in-out_infinite]"
+              />
+              <Square size={16} aria-hidden="true" className="relative fill-current" />
+              <span className="relative tabular-nums">{formatDuration(recordingSeconds)}</span>
+            </>
+          ) : (
+            <Mic size={18} aria-hidden="true" />
+          )}
         </button>
         <button
           type="submit"
@@ -444,6 +604,48 @@ export default function ChatPage() {
           {sending ? "Enviando" : "Enviar"}
         </button>
       </form>
+
+      <BottomSheet
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Conversaciones"
+      >
+        <ul className="flex flex-col gap-1">
+          {conversations.map((c) => (
+            <li key={c.id} className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => void onPickConversation(c.id)}
+                aria-current={c.id === conversationId ? "true" : undefined}
+                className={`min-h-11 flex-1 rounded-[var(--radius-control)] px-3 py-2 text-left text-sm ${
+                  c.id === conversationId
+                    ? "bg-[var(--color-primary-soft)] font-semibold"
+                    : "hover:bg-[var(--color-surface-2)]"
+                }`}
+              >
+                <span className="block truncate">{conversationLabel(c)}</span>
+                <span className="block text-xs text-[var(--color-muted)]">
+                  {new Date(c.last_message_at).toLocaleDateString("es-ES", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void onDeleteConversation(c.id)}
+                disabled={busy}
+                aria-label={`Borrar la conversación «${conversationLabel(c)}»`}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-control)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+              >
+                <Trash2 size={16} aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </BottomSheet>
     </main>
   );
 }

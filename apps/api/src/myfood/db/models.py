@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Time,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -728,6 +729,26 @@ class HouseholdMember(Base):
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ChatConversation(Base):
+    """Un hilo del chat (migración 0023). Antes el historial era una lista plana por usuario y
+    «conversación nueva» intentaba marcar un corte con un `role='divider'` que la base de datos
+    rechazaba. Con una fila por conversación se puede empezar de cero, volver a un hilo anterior
+    y —lo que más ahorra— acotar el contexto que se le manda al modelo a la conversación en
+    curso."""
+
+    __tablename__ = "chat_conversations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_message_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class ChatMessage(Base):
     """Historial del chat conversacional (Fase 8, sección 6.10). La tabla y
     su política RLS ya existen desde las migraciones 0001/0002 (se
@@ -743,6 +764,9 @@ class ChatMessage(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False
+    )
     role: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(String, nullable=False)
     source: Mapped[str] = mapped_column(String, nullable=False, default="text")
@@ -750,6 +774,12 @@ class ChatMessage(Base):
         UUID(as_uuid=True), ForeignKey("ai_sessions.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # El orden del chat se lee SIEMPRE por aquí, nunca por `created_at`: los dos mensajes de un
+    # turno se guardan en la misma transacción y `now()` les da el mismo instante exacto, así
+    # que ordenar por fecha empataba y sacaba la respuesta encima de la pregunta (migración 0023).
+    seq: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("nextval('chat_messages_seq_seq')"), nullable=False
+    )
 
 
 class UserAchievement(Base):
