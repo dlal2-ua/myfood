@@ -85,6 +85,7 @@ async def run_agent(
     max_turns: int = 1,
     timeout_seconds: float = 30.0,
     mcp_tools: list[SdkMcpTool[Any]] | None = None,
+    images: list[tuple[str, str]] | None = None,
 ) -> AgentResult:
     """Llamada de un solo turno, sin herramientas nativas del CLI (Bash,
     Read, etc. — R1/R2: la IA nunca ejecuta código ni toca disco/red por su
@@ -100,6 +101,11 @@ async def run_agent(
     el SDK no añade `--model`, así que se acababa usando el modelo por defecto de la cuenta del
     token — que puede cambiar solo. Dejarlo vacío en el `.env` vuelve a ese comportamiento a
     propósito.
+
+    Con `images` —una lista de `(media_type, base64)`— el turno lleva bloques de imagen además
+    del texto. Eso obliga a mandarle al SDK un iterable de mensajes en vez de una cadena, que es
+    lo que hace que el CLI arranque con `--input-format stream-json` y acepte contenido que no
+    sea texto. Es la única vía: con un `prompt: str` no hay forma de adjuntar una imagen.
     """
     with tempfile.TemporaryDirectory(prefix="myfood-iafood-") as home_dir:
         mcp_servers: dict[str, Any] = {}
@@ -130,9 +136,28 @@ async def run_agent(
             env=_build_env(token, home_dir),
         )
 
+        async def _stream_with_images():
+            content: list[dict[str, Any]] = [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": data},
+                }
+                for media_type, data in (images or [])
+            ]
+            # La imagen antes del texto: es como mejor funciona, y así la pregunta se lee
+            # sabiendo ya qué se está mirando.
+            content.append({"type": "text", "text": prompt})
+            yield {
+                "type": "user",
+                "message": {"role": "user", "content": content},
+                "parent_tool_use_id": None,
+                "session_id": "myfood",
+            }
+
         async def _collect() -> AgentResult:
             result_message: ResultMessage | None = None
-            async for message in query(prompt=prompt, options=options):
+            turn = _stream_with_images() if images else prompt
+            async for message in query(prompt=turn, options=options):
                 if isinstance(message, ResultMessage):
                     result_message = message
             if result_message is None:

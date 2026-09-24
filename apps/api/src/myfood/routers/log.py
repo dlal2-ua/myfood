@@ -2,14 +2,16 @@ from datetime import date
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai.consent import require_ai_processing_consent
+from myfood.ai.flows.plate_photo import request_plate_photo
 from myfood.ai.flows.smart_log import request_smart_log
+from myfood.ai.limits import load_limits
 from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
 from myfood.ai.schemas import AiSessionOut, ai_session_to_out
 from myfood.db.models import Food, FoodLog, FoodNutrient, Profile, Recipe, RecipeIngredient
@@ -437,4 +439,44 @@ async def create_smart_log_request(
         ) from exc
 
     ai_session = await request_smart_log(session, user_id, text=body.text)
+    return ai_session_to_out(ai_session)
+
+
+@router.post("/photo", status_code=202)
+async def create_plate_photo_request(
+    image: UploadFile = File(...),
+    log_date: date = Form(...),
+    meal_type: MealType = Form(...),
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> AiSessionOut:
+    """Foto del plato → alimentos propuestos. Hermano de `/smart`: no guarda nada, el
+    resultado llega por `GET /ai/sessions/{id}` (mismo polling que el resto de iafood) y el
+    usuario revisa las cantidades y confirma con `POST /log/food` normal, uno a uno.
+
+    La foto se procesa (sin EXIF, a 1024 px) antes de tocar el disco y se borra en cuanto el
+    worker termina con ella: lo que se ha pedido es registrar una comida, no guardar una foto.
+    """
+    await require_ai_processing_consent(session, user_id)
+    limits = load_limits()
+    try:
+        await check_and_consume_quota(
+            user_id,
+            scope="plate_photo",
+            per_profile_limit=limits.plate_photo_per_profile_daily,
+        )
+    except QuotaExceeded as exc:
+        raise AppError(
+            exc.code, exc.message, status_code=429, details={"reset_at": reset_at_iso()}
+        ) from exc
+
+    image_bytes = await image.read()
+    ai_session = await request_plate_photo(
+        session,
+        user_id,
+        image_bytes=image_bytes,
+        content_type=image.content_type or "",
+        log_date=log_date.isoformat(),
+        meal_type=meal_type,
+    )
     return ai_session_to_out(ai_session)

@@ -31,7 +31,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 _redis = redis.from_url(get_settings().redis_url, decode_responses=True)
 
 # Ámbitos de cuota que se cuentan por persona en el panel (los mismos que consume el código).
-AI_SCOPES = ("smart_log", "chat", "diet_plan", "supplement_suggestion", "receipt_scan")
+AI_SCOPES = (
+    "smart_log", "chat", "diet_plan", "supplement_suggestion", "receipt_scan", "plate_photo",
+)  # fmt: skip
 
 
 # --------------------------------------------------------------------------- ajustes

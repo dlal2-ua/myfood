@@ -194,6 +194,68 @@ def build_resolve_food_items_tool(sink: list[dict]) -> SdkMcpTool[Any]:
     return _resolve_food_items
 
 
+
+DESCRIBE_PLATE_TOOL_NAME = "describe_plate"
+
+# La fase de visión del registro por foto. El modelo DESCRIBE lo que ve; no calcula nada. Por
+# eso no hay ningún campo de gramos ni de calorías aquí: `tipo_cantidad` + `cantidad` + `tamano`
+# es lo que `domain/quantity_text.py` convierte después en un gramaje, exactamente igual que
+# con lo que escribe el usuario a mano (R1).
+DESCRIBE_PLATE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["alimentos"],
+    "properties": {
+        "alimentos": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+                "type": "object",
+                "required": ["nombre", "cantidad", "tipo_cantidad"],
+                "properties": {
+                    "nombre": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "description": "En español y como lo diría alguien: «tortilla de patatas».",
+                    },
+                    "cantidad": {"type": "number", "minimum": 0.1, "maximum": 20},
+                    "tipo_cantidad": {"type": "string", "enum": list(TIPOS_DE_CANTIDAD)},
+                    "tamano": {"type": "string", "enum": ["pequeno", "mediano", "grande"]},
+                    "origen": {"type": "string", "enum": list(ORIGENES)},
+                    "confianza": {"type": "string", "enum": ["alta", "media", "baja"]},
+                    "pista_referencia": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "description": (
+                            "Qué has usado para estimar el tamaño: el plato, un cubierto, "
+                            "una mano, un vaso… Si no hay nada, dilo."
+                        ),
+                    },
+                },
+            },
+        },
+        "nota": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Algo que el usuario deba saber para juzgar la estimación.",
+        },
+    },
+}
+
+
+def build_describe_plate_tool(sink: list[dict]) -> SdkMcpTool[Any]:
+    """Fase de visión del registro por foto: qué hay en el plato y en qué cantidad."""
+
+    @tool(
+        DESCRIBE_PLATE_TOOL_NAME,
+        "Describe los alimentos que se ven en la foto de un plato y en qué cantidad.",
+        DESCRIBE_PLATE_SCHEMA,
+    )
+    async def _describe_plate(args: dict[str, Any]) -> dict[str, Any]:
+        sink.append(args)
+        return {"content": [{"type": "text", "text": "Plato descrito."}]}
+
+    return _describe_plate
+
 SUGGEST_SUPPLEMENTS_TOOL_NAME = "suggest_supplements"
 
 

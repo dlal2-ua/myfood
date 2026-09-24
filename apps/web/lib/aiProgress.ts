@@ -12,6 +12,8 @@ export const TYPICAL_SECONDS = {
   smart_log: 12,
   /** Un turno de chat: unos 5 s sin herramientas, más si tiene que consultar tu día. */
   chat: 10,
+  /** Foto del plato: son DOS llamadas al modelo, mirar la foto y cuadrarla con el catálogo. */
+  plate_photo: 22,
 } as const;
 
 export type AiTask = keyof typeof TYPICAL_SECONDS;
