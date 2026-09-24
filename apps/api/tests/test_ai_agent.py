@@ -215,3 +215,31 @@ async def test_run_agent_wraps_timeout(monkeypatch):
         await ai_agent.run_agent(
             token="x", prompt="p", system_prompt="s", timeout_seconds=0.01
         )
+
+
+# --- recuento de tokens ---------------------------------------------------------------------
+
+
+def test_los_tokens_de_entrada_cuentan_tambien_los_de_cache():
+    """`usage["input_tokens"]` del SDK cuenta solo lo que NO venía de caché, y el CLI cachea
+    casi todo el prompt: guardando solo ese número, una petición que procesó 13.000 tokens
+    quedaba registrada como 4."""
+    assert (
+        ai_agent._total_input_tokens(
+            {
+                "input_tokens": 4,
+                "cache_read_input_tokens": 12000,
+                "cache_creation_input_tokens": 900,
+            }
+        )
+        == 12904
+    )
+
+
+def test_sin_cache_el_recuento_no_cambia():
+    assert ai_agent._total_input_tokens({"input_tokens": 2800}) == 2800
+
+
+def test_sin_ningun_dato_de_uso_no_se_inventa_un_cero():
+    """`None` y `0` no son lo mismo: uno dice «no se sabe» y el otro «no consumió nada»."""
+    assert ai_agent._total_input_tokens({}) is None

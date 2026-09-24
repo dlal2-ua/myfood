@@ -53,8 +53,25 @@ class AiAgentError(Exception):
 @dataclass
 class AgentResult:
     text: str
+    # TODO lo que entró: `usage["input_tokens"]` del SDK cuenta solo lo que NO venía de caché,
+    # y el CLI cachea casi todo el prompt. Guardando solo ese número, `ai_sessions.input_tokens`
+    # salía a 4 en peticiones que de verdad procesaron miles de tokens, que es peor que no
+    # guardar nada: invita a sacar conclusiones falsas sobre lo que consume la aplicación.
     input_tokens: int | None
     output_tokens: int | None
+
+
+def _total_input_tokens(usage: dict[str, Any]) -> int | None:
+    """Los tokens de entrada de verdad, contando los que vinieron de la caché del prompt.
+
+    Se suman aunque se facturen a precios distintos (una lectura de caché cuesta la décima
+    parte) porque esto no es una factura: es cuánto se procesó, que es lo que hace falta para
+    dimensionar el consumo de un flujo."""
+    keys = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+    values = [usage.get(key) for key in keys]
+    if all(value is None for value in values):
+        return None
+    return sum(int(value or 0) for value in values)
 
 
 def _build_env(token: str, home_dir: str) -> dict[str, str]:
@@ -173,7 +190,7 @@ async def run_agent(
                 # de cierre — no es un error, el llamador mira el sink de la
                 # herramienta, no este texto, para saber si hubo respuesta.
                 text=result_message.result or "",
-                input_tokens=usage.get("input_tokens"),
+                input_tokens=_total_input_tokens(usage),
                 output_tokens=usage.get("output_tokens"),
             )
 
