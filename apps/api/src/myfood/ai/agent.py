@@ -33,6 +33,8 @@ from claude_agent_sdk import (
     query,
 )
 
+from myfood.config import get_settings
+
 _ALLOWED_ENV_PASSTHROUGH = ("PATH",)
 _MCP_SERVER_NAME = "myfood"
 
@@ -92,6 +94,12 @@ async def run_agent(
     `allowed_tools` (mismo patrón que el ejemplo del propio SDK), nunca vía
     un callback de permisos. Ninguna herramienta nativa queda disponible
     aunque `mcp_tools` esté vacío.
+
+    Sin `model`, se usa el de `IAFOOD_MODEL`. Ese ajuste llevaba desde el principio sin que lo
+    leyera nadie: `run_agent` lo aceptaba pero ningún punto de llamada lo pasaba, y con `None`
+    el SDK no añade `--model`, así que se acababa usando el modelo por defecto de la cuenta del
+    token — que puede cambiar solo. Dejarlo vacío en el `.env` vuelve a ese comportamiento a
+    propósito.
     """
     with tempfile.TemporaryDirectory(prefix="myfood-iafood-") as home_dir:
         mcp_servers: dict[str, Any] = {}
@@ -116,7 +124,7 @@ async def run_agent(
             strict_mcp_config=True,
             mcp_servers=mcp_servers,
             cwd=home_dir,
-            model=model,
+            model=model or get_settings().iafood_model or None,
             max_turns=max_turns,
             system_prompt=system_prompt,
             env=_build_env(token, home_dir),

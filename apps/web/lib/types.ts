@@ -529,16 +529,42 @@ export interface AiProposal {
   status: AiProposalStatus;
 }
 
+/** En qué unidad contó la cantidad el modelo. Decide los gramos tanto como acertar el
+ * alimento: una «porción» de tortilla son 250 g y un «trozo» de queso, 40. */
+export type QuantityKind =
+  | "porcion" | "racion" | "plato" | "bol" | "taza" | "vaso" | "cucharada" | "cucharadita"
+  | "trozo" | "rebanada" | "loncha" | "filete" | "unidad" | "punado" | "lata" | "gramos";
+
+/** Casero o de paquete: es lo que más mueve las calorías de un mismo plato. */
+export type FoodOrigin = "casero" | "envasado" | "restaurante" | "desconocido";
+
+export interface SmartLogAlternative {
+  food_id: string;
+  name_es: string;
+}
+
 export interface SmartLogItem {
   food_id: string;
   name_es: string;
   grams: number;
   approx_quantity_text: string;
+  tipo_cantidad?: QuantityKind;
+  tamano?: "pequeno" | "mediano" | "grande";
+  origen?: FoodOrigin;
+  confianza?: "alta" | "media" | "baja";
+  /** Por qué ese alimento y no otro, en una frase. */
+  motivo?: string;
+  /** Otros que encajaban: cambiar de uno a otro es un toque. */
+  alternativas?: SmartLogAlternative[];
 }
 
 export interface SmartLogResult {
   items: SmartLogItem[];
   warning: string | null;
+  /** Una pregunta del modelo cuando algo de verdad ambiguo cambia mucho el gramaje. */
+  pregunta?: string | null;
+  /** Lo que se mencionó y no existe en el catálogo. Antes desaparecía sin decir nada. */
+  no_encontrados?: string[];
 }
 
 export interface ReceiptScanItem extends SmartLogItem {

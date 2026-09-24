@@ -7,7 +7,9 @@ para anotar dos huevos había que saber que pesan unos 60 g cada uno; las apps d
 Los gramos de cada ración los pone el servidor, nunca la pantalla (R1). Se reutilizan las
 mismas tablas que ya usa `domain/quantity_text.py` para interpretar el texto libre de Smart
 Log: si un huevo pesa 60 g al interpretar «dos huevos», tiene que pesar 60 g también aquí, o
-el mismo alimento daría calorías distintas según por dónde se registre.
+el mismo alimento daría calorías distintas según por dónde se registre. Por eso el peso de una
+medida se pide a `quantity_text.measure_grams` en vez de mirar `MEASURES` directamente: ahí es
+donde vive la corrección por densidad (una taza de cereales no pesa lo que una taza de guiso).
 """
 
 from __future__ import annotations
@@ -17,9 +19,8 @@ from dataclasses import dataclass
 
 from myfood.domain import food_groups as fg
 from myfood.domain.quantity_text import (
-    MEASURES,
-    OIL_MEASURES,
     UNIT_GRAMS_BY_GROUP,
+    measure_grams,
 )
 
 
@@ -89,12 +90,6 @@ def _serving_label(raw: str | None) -> str | None:
     return label
 
 
-def _measure_grams(measure: str, group: str | None) -> float:
-    if group == fg.OIL_FAT and measure in OIL_MEASURES:
-        return OIL_MEASURES[measure]
-    return MEASURES[measure]
-
-
 def build_portions(
     *,
     name_es: str | None,
@@ -132,7 +127,7 @@ def build_portions(
             Portion(
                 key=measure,
                 label=_MEASURE_LABELS.get(measure, measure),
-                grams=round(_measure_grams(measure, group), 1),
+                grams=round(measure_grams(measure, group), 1),
             )
         )
 

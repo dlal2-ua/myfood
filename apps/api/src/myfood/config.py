@@ -43,7 +43,10 @@ class Settings(BaseSettings):
     vapid_subject: str = "mailto:dev@example.com"
 
     iafood_enabled: bool = True
-    iafood_model: str = "claude-sonnet-4-6"
+    # Modelo que se le pasa al CLI del Agent SDK en TODOS los flujos de iafood. Vacío significa
+    # «el que tenga por defecto la cuenta del token», que es lo que pasaba antes sin querer:
+    # este ajuste existía pero no lo leía nadie, así que el modelo podía cambiar solo.
+    iafood_model: str = "claude-sonnet-5"
     # Límites de uso (10.1/24.5) — fichero mutable vía /admin/ai/limits,
     # mismo patrón que `coach.json` en openGym. No es la credencial (esa
     # vive cifrada en `ai_credentials`, nunca en disco).

@@ -1,4 +1,8 @@
-from myfood.domain.quantity_text import DEFAULT_SERVING_GRAMS, resolve_grams
+from myfood.domain.quantity_text import (
+    DEFAULT_SERVING_GRAMS,
+    compose_quantity_text,
+    resolve_grams,
+)
 
 
 def test_explicit_grams_wins_over_serving_size():
@@ -19,13 +23,25 @@ def test_spanish_number_words_multiply_serving_size():
 
 
 def test_unrecognized_text_defaults_to_one_unit():
-    assert resolve_grams("una ración generosa", serving_size_g=80) == 80.0
+    assert resolve_grams("lo de siempre", serving_size_g=80) == 80.0
+    assert resolve_grams("un poco", serving_size_g=80) == 80.0
+
+
+def test_la_racion_del_envase_manda_sobre_la_del_grupo():
+    """Si la etiqueta dice que una ración son 80 g, eso es «una ración» para ESE producto."""
+    assert resolve_grams("una ración", serving_size_g=80) == 80.0
     assert resolve_grams("ración habitual", serving_size_g=80) == 80.0
+    assert resolve_grams("dos raciones", serving_size_g=80) == 160.0
+    # Y el tamaño relativo sigue aplicándose encima.
+    assert resolve_grams("una ración generosa", serving_size_g=80) == 112.0
 
 
-def test_missing_serving_size_falls_back_to_default():
-    assert resolve_grams("una ración", serving_size_g=None) == DEFAULT_SERVING_GRAMS
-    assert resolve_grams("dos raciones", serving_size_g=None) == DEFAULT_SERVING_GRAMS * 2
+def test_missing_serving_size_falls_back_to_the_group_portion():
+    """Sin ración de envase y sin nombre no hay por dónde clasificar: una ración cualquiera
+    ronda los 150 g, no los 100 g de una unidad suelta."""
+    assert resolve_grams("una ración", serving_size_g=None) == 150.0
+    assert resolve_grams("dos raciones", serving_size_g=None) == 300.0
+    assert resolve_grams("dos", serving_size_g=None) == DEFAULT_SERVING_GRAMS * 2
 
 
 def test_word_boundary_does_not_match_substrings():
@@ -103,3 +119,95 @@ def test_half_a_unit():
 
 def test_an_unknown_food_still_falls_back_to_the_default_portion():
     assert resolve_grams("dos", None, food_name="Xyzzy") == DEFAULT_SERVING_GRAMS * 2
+
+
+# --- porción / ración / trozo: dependen del alimento, no son gramos fijos ------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "food", "expected"),
+    [
+        # El ejemplo literal del usuario: antes los tres caían al fallback de 100 g por unidad.
+        ("una porción", "Tortilla española de patatas", 250.0),
+        ("una porción", "Ensaladilla rusa", 250.0),
+        ("4 trozos", "Pan, de trigo blanco", 160.0),
+        ("una ración", "Lentejas guisadas", 200.0),
+        ("un trozo", "Queso manchego curado", 40.0),
+        ("una ración", "Merluza a la plancha", 150.0),
+        ("media porción", "Tarta de queso", 40.0),
+    ],
+)
+def test_una_porcion_pesa_lo_que_pesa_una_porcion_de_ESE_alimento(text, food, expected):
+    assert resolve_grams(text, None, food_name=food) == expected
+
+
+def test_una_porcion_de_un_alimento_desconocido_no_se_queda_en_cien_gramos():
+    """100 g era menos de la mitad de cualquier ración real: es el valor que hacía que las
+    calorías del día no cuadrasen al registrar platos caseros."""
+    assert resolve_grams("una porción", None, food_name="Xyzzy") == 150.0
+
+
+@pytest.mark.parametrize(
+    ("text", "food", "expected"),
+    [
+        ("dos rebanadas", "Pan de molde blanco", 60.0),
+        ("un filete", "Pechuga de pollo cruda", 150.0),
+        ("tres lonchas", "Jamón cocido", 60.0),
+        ("una pieza", "Manzana", 130.0),
+    ],
+)
+def test_las_unidades_con_nombre_pesan_lo_mismo_que_en_el_desplegable(text, food, expected):
+    """«dos rebanadas» tiene que dar lo mismo que elegir «rebanada» en el desplegable: si no,
+    el mismo pan pesa distinto según por dónde se registre."""
+    assert resolve_grams(text, None, food_name=food) == expected
+
+
+# --- densidad: una taza de cereales no pesa lo que una taza de guiso ------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "food", "expected"),
+    [
+        ("un bol", "Cereales de desayuno con miel", 50.0),
+        ("una taza", "Copos de avena", 40.0),
+        ("un bol", "Lentejas guisadas", 350.0),
+        ("una taza", "Almendras crudas", 120.0),
+    ],
+)
+def test_las_medidas_de_volumen_tienen_en_cuenta_lo_hueco_que_es_el_alimento(text, food, expected):
+    """Sin esto, «un bol de cereales» salían 350 g — unas 1.300 kcal."""
+    assert resolve_grams(text, None, food_name=food) == expected
+
+
+# --- tamaño relativo ------------------------------------------------------------------------
+
+
+def test_el_tamano_multiplica_lo_que_digan_las_tablas():
+    normal = resolve_grams("un plato", None, food_name="Macarrones cocidos")
+    assert resolve_grams("un plato grande", None, food_name="Macarrones cocidos") == round(
+        normal * 1.4, 1
+    )
+    assert resolve_grams("un plato pequeño", None, food_name="Macarrones cocidos") == round(
+        normal * 0.7, 1
+    )
+
+
+# --- lo que dijo el usuario + lo que entendió el modelo -------------------------------------
+
+
+def test_el_tipo_de_cantidad_del_modelo_se_junta_con_lo_que_dijo_el_usuario():
+    """El modelo devuelve «dos» y, aparte, que son rebanadas. Sin juntarlos, «dos» a secas caía
+    al peso de una unidad genérica."""
+    assert compose_quantity_text("dos", "rebanada", None) == "dos rebanada"
+    assert resolve_grams(
+        compose_quantity_text("dos", "rebanada", None), None, food_name="Pan de molde"
+    ) == 60.0
+
+
+def test_el_tamano_mediano_no_ensucia_el_texto():
+    assert compose_quantity_text("un plato", "plato", "mediano") == "un plato plato"
+    assert compose_quantity_text("un plato", "plato", "grande") == "un plato plato grande"
+
+
+def test_gramos_no_se_repite_como_tipo():
+    assert compose_quantity_text("200 g", "gramos", None) == "200 g"

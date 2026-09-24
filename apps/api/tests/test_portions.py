@@ -119,3 +119,18 @@ def test_una_etiqueta_que_dice_algo_se_respeta():
 def test_una_racion_de_cien_gramos_con_etiqueta_util_si_se_ofrece():
     portions = build_portions(name_es="Pizza", serving_size_g=100, serving_label="media pizza")
     assert by_key(portions, "serving").label == "media pizza"
+
+
+def test_una_taza_de_cereales_pesa_lo_mismo_por_las_dos_vias():
+    """Mismo pacto que con el huevo: el desplegable y el texto libre comparten tabla, así que
+    la corrección por densidad tiene que verse en los dos."""
+    taza = by_key(build_portions(name_es="Copos de avena"), "taza")
+    assert taza.grams == resolve_grams("una taza", None, food_name="Copos de avena")
+    assert taza.grams == 40.0
+
+
+def test_una_cucharada_de_aceite_sigue_pesando_lo_mismo_por_las_dos_vias():
+    cucharada = by_key(build_portions(name_es="Aceite de oliva virgen extra"), "cucharada")
+    assert cucharada.grams == resolve_grams(
+        "una cucharada", None, food_name="Aceite de oliva virgen extra"
+    )

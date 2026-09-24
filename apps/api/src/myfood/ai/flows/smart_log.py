@@ -23,12 +23,13 @@ from myfood.ai import client as ai_client
 from myfood.ai.agent import AiAgentError
 from myfood.ai.flows.food_resolution import (
     build_candidates_payload,
+    filter_restricted,
     resolve_food_mentions,
     search_candidates_for_text,
 )
 from myfood.ai.prompts import (
     SMART_LOG_PROMPT_VERSION,
-    SMART_LOG_SYSTEM_V1,
+    SMART_LOG_SYSTEM_V2,
     build_smart_log_user_prompt,
 )
 from myfood.ai.queue import enqueue_smart_log_job
@@ -52,6 +53,9 @@ async def request_smart_log(session: AsyncSession, user_id: UUID, *, text: str) 
         )
 
     hits = await search_candidates_for_text(text)
+    # Lo que el usuario no puede comer no entra siquiera como candidato (R4): el chat ya lo
+    # filtraba y este flujo no, así que se le podían proponer alimentos con un alérgeno suyo.
+    hits = await filter_restricted(session, user_id, hits)
     if not hits:
         raise AppError(
             "NO_CANDIDATE_FOODS",
@@ -101,11 +105,11 @@ async def process_smart_log_job(ai_session_id: str) -> None:
             return
 
         try:
-            items_out, agent_result = await resolve_food_mentions(
+            items_out, agent_result, extras = await resolve_food_mentions(
                 session,
                 token=token,
                 prompt=build_smart_log_user_prompt(text, candidates),
-                system_prompt=SMART_LOG_SYSTEM_V1,
+                system_prompt=SMART_LOG_SYSTEM_V2,
                 alias_to_food_id=alias_to_food_id,
                 timeout_seconds=_AGENT_TIMEOUT_SECONDS,
             )
@@ -119,6 +123,13 @@ async def process_smart_log_job(ai_session_id: str) -> None:
         ai_session.response_payload = {
             "items": items_out,
             "warning": None if items_out else "NO_MATCH",
+            # Una sola pregunta del modelo cuando algo que cambia mucho el gramaje está de
+            # verdad ambiguo. La propuesta se manda igual: el usuario la ve mientras decide.
+            "pregunta": extras["pregunta"],
+            # Lo que se mencionó y no existe en el catálogo. Antes se descartaba en silencio
+            # (`food_resolution` hacía `continue`) y el día salía con menos calorías de las
+            # que se habían comido, sin ninguna pista de por qué.
+            "no_encontrados": extras["no_encontrados"],
         }
         ai_session.input_tokens = agent_result.input_tokens
         ai_session.output_tokens = agent_result.output_tokens

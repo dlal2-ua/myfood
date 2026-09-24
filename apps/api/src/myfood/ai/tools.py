@@ -95,6 +95,17 @@ RESOLVE_FOOD_ITEMS_TOOL_NAME = "resolve_food_items"
 # que el LLM haya calculado (R1). `domain/quantity_text.py` es quien lo
 # convierte a un gramaje de partida, siempre editable por el usuario antes
 # de confirmar (sección 10.8).
+#
+# El resto de campos son descripción, no cálculo: el modelo dice QUÉ tipo de cantidad ha
+# entendido y si el plato le parece casero, y esas dos cosas cambian mucho el gramaje y las
+# calorías (una tortilla casera no es la de Hacendado). Los gramos los sigue poniendo el
+# backend a partir de ellos.
+TIPOS_DE_CANTIDAD = (
+    "porcion", "racion", "plato", "bol", "taza", "vaso", "cucharada", "cucharadita",
+    "trozo", "rebanada", "loncha", "filete", "unidad", "punado", "lata", "gramos",
+)  # fmt: skip
+ORIGENES = ("casero", "envasado", "restaurante", "desconocido")
+
 RESOLVE_FOOD_ITEMS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "required": ["items"],
@@ -107,8 +118,59 @@ RESOLVE_FOOD_ITEMS_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "alias": {"type": "string"},
                     "approx_quantity_text": {"type": "string", "maxLength": 100},
+                    "tipo_cantidad": {
+                        "type": "string",
+                        "enum": list(TIPOS_DE_CANTIDAD),
+                        "description": "En qué unidad está contada la cantidad.",
+                    },
+                    "tamano": {
+                        "type": "string",
+                        "enum": ["pequeno", "mediano", "grande"],
+                        "description": "Respecto a una ración normal de ese alimento.",
+                    },
+                    "origen": {
+                        "type": "string",
+                        "enum": list(ORIGENES),
+                        "description": (
+                            "Si el plato es casero, de envase de supermercado o de "
+                            "restaurante. Cambia bastante las calorías."
+                        ),
+                    },
+                    "confianza": {"type": "string", "enum": ["alta", "media", "baja"]},
+                    "motivo": {
+                        "type": "string",
+                        "maxLength": 160,
+                        "description": "Por qué has elegido ESE alimento, en una frase.",
+                    },
+                    "alternativas": {
+                        "type": "array",
+                        "maxItems": 2,
+                        "items": {"type": "string"},
+                        "description": (
+                            "Otros alias que encajarían, para que el usuario cambie de un "
+                            "toque si te has equivocado."
+                        ),
+                    },
                 },
             },
+        },
+        "pregunta": {
+            "type": "string",
+            "maxLength": 200,
+            "description": (
+                "Una sola pregunta al usuario si algo importante para acertar la cantidad "
+                "está de verdad ambiguo. Déjala vacía si no hace falta."
+            ),
+        },
+        "no_encontrados": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {"type": "string", "maxLength": 80},
+            "description": (
+                "Alimentos que el usuario ha mencionado y que NO están en candidates. "
+                "Dilos en vez de callártelos: antes desaparecían sin que se enterase nadie "
+                "y las calorías del día salían de menos."
+            ),
         },
     },
 }
