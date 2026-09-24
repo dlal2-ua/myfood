@@ -26,6 +26,10 @@ DEFAULT_CHAT_MESSAGES_PER_PROFILE_DAILY = 50
 # catálogo), así que gasta más que un registro por texto, pero es el registro más rápido
 # que hay y se usa comida a comida.
 DEFAULT_PLATE_PHOTO_PER_PROFILE_DAILY = 10
+# Buscar en internet lo que no está en el catálogo. Cuesta entre dos y tres veces más
+# tokens que una petición normal y añade 5-15 s, así que solo compensa como respaldo:
+# el interruptor está aquí para poder apagarlo sin tocar código.
+DEFAULT_WEB_SEARCH_FALLBACK = True
 
 
 class IafoodLimits(BaseModel):
@@ -38,6 +42,7 @@ class IafoodLimits(BaseModel):
     plate_photo_per_profile_daily: int = Field(
         default=DEFAULT_PLATE_PHOTO_PER_PROFILE_DAILY, ge=1, le=1000
     )
+    web_search_fallback: bool = DEFAULT_WEB_SEARCH_FALLBACK
 
 
 def _config_path() -> Path:

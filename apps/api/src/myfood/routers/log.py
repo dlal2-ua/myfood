@@ -417,6 +417,11 @@ async def copy_day(
 
 class SmartLogIn(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
+    # Dónde acabaría lo que se apunte. Hace falta para la propuesta del respaldo web, que
+    # se aprueba entera: sin esto se apuntaría en «hoy, comida» aunque el usuario estuviera
+    # registrando la cena de ayer.
+    log_date: date | None = None
+    meal_type: MealType | None = None
 
 
 @router.post("/smart", status_code=202)
@@ -438,7 +443,13 @@ async def create_smart_log_request(
             exc.code, exc.message, status_code=429, details={"reset_at": reset_at_iso()}
         ) from exc
 
-    ai_session = await request_smart_log(session, user_id, text=body.text)
+    ai_session = await request_smart_log(
+        session,
+        user_id,
+        text=body.text,
+        log_date=(body.log_date or date.today()).isoformat(),
+        meal_type=body.meal_type or "lunch",
+    )
     return ai_session_to_out(ai_session)
 
 

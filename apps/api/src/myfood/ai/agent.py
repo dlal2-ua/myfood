@@ -86,6 +86,7 @@ async def run_agent(
     timeout_seconds: float = 30.0,
     mcp_tools: list[SdkMcpTool[Any]] | None = None,
     images: list[tuple[str, str]] | None = None,
+    extra_tools: list[str] | None = None,
 ) -> AgentResult:
     """Llamada de un solo turno, sin herramientas nativas del CLI (Bash,
     Read, etc. — R1/R2: la IA nunca ejecuta código ni toca disco/red por su
@@ -124,8 +125,8 @@ async def run_agent(
             allowed_tools = [f"mcp__{_MCP_SERVER_NAME}__{t.name}" for t in mcp_tools]
 
         options = ClaudeAgentOptions(
-            tools=[],
-            allowed_tools=allowed_tools,
+            tools=list(extra_tools or []),
+            allowed_tools=[*allowed_tools, *(extra_tools or [])],
             permission_mode="dontAsk",
             strict_mcp_config=True,
             mcp_servers=mcp_servers,

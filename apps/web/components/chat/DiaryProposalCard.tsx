@@ -16,6 +16,15 @@ function niceDate(iso: string): string {
   return `el ${day.getDate()} de ${MONTHS[day.getMonth()]}`;
 }
 
+/** Solo el dominio: la URL entera no cabe y lo que importa es de quién es el dato. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "fuente";
+  }
+}
+
 function n(value: number): string {
   return String(Math.round(value * 10) / 10).replace(".", ",");
 }
@@ -71,6 +80,17 @@ export function DiaryProposalCard({
                 </span>
               )}
             </span>
+            {item.source_url && (
+              <a
+                href={item.source_url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-[11px] text-[var(--color-muted)] underline"
+                title={item.source_url}
+              >
+                {hostOf(item.source_url)}
+              </a>
+            )}
             <span className="text-xs text-[var(--color-muted)]">{n(item.grams)} g</span>
             <span className="w-16 text-right text-sm font-bold">{Math.round(item.kcal)} kcal</span>
           </li>

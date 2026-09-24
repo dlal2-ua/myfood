@@ -15,6 +15,7 @@ todavía" — aquí, como en el resto de iafood, la respuesta llega vía
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +28,7 @@ from myfood.ai.flows.food_resolution import (
     resolve_food_mentions,
     search_candidates_for_text,
 )
+from myfood.ai.flows.web_estimate import estimate_missing_foods
 from myfood.ai.prompts import (
     SMART_LOG_PROMPT_VERSION,
     SMART_LOG_SYSTEM_V2,
@@ -40,7 +42,9 @@ from myfood.errors import AppError
 _AGENT_TIMEOUT_SECONDS = 30.0
 
 
-async def request_smart_log(session: AsyncSession, user_id: UUID, *, text: str) -> AiSession:
+async def request_smart_log(
+    session: AsyncSession, user_id: UUID, *, text: str, log_date: str, meal_type: str
+) -> AiSession:
     """Corre en el proceso `api`. El RAG (Meilisearch) y la creación de la
     sesión son deterministas y locales; la llamada real al proveedor queda
     para el worker (regla 19)."""
@@ -71,6 +75,8 @@ async def request_smart_log(session: AsyncSession, user_id: UUID, *, text: str) 
         request_payload={
             "prompt_version": SMART_LOG_PROMPT_VERSION,
             "text": text,
+            "log_date": log_date,
+            "meal_type": meal_type,
             "candidates": candidates_out,
             "alias_to_food_id": alias_to_food_id,
         },
@@ -119,6 +125,20 @@ async def process_smart_log_job(ai_session_id: str) -> None:
             await session.commit()
             return
 
+        # Lo que el catálogo no tenía: se busca en internet, si el administrador lo
+        # permite. Es un segundo turno aparte a propósito, no una herramienta más del
+        # primero: así solo paga el coste de la búsqueda la minoría de peticiones que de
+        # verdad lo necesita.
+        proposal, web_result = await estimate_missing_foods(
+            session,
+            token=token,
+            user_id=ai_session.user_id,
+            ai_session=ai_session,
+            missing=extras["no_encontrados"],
+            log_date=request_payload.get("log_date") or date.today().isoformat(),
+            meal_type=request_payload.get("meal_type") or "lunch",
+        )
+
         ai_session.status = "succeeded"
         ai_session.response_payload = {
             "items": items_out,
@@ -130,7 +150,15 @@ async def process_smart_log_job(ai_session_id: str) -> None:
             # (`food_resolution` hacía `continue`) y el día salía con menos calorías de las
             # que se habían comido, sin ninguna pista de por qué.
             "no_encontrados": extras["no_encontrados"],
+            # Propuesta de diario con lo que se ha estimado buscando en internet, si ha
+            # salido algo: se aprueba entera con `POST /ai/proposals/{id}/approve`, igual
+            # que la del chat.
+            "proposal": proposal,
         }
-        ai_session.input_tokens = agent_result.input_tokens
-        ai_session.output_tokens = agent_result.output_tokens
+        ai_session.input_tokens = (agent_result.input_tokens or 0) + (
+            (web_result.input_tokens or 0) if web_result else 0
+        )
+        ai_session.output_tokens = (agent_result.output_tokens or 0) + (
+            (web_result.output_tokens or 0) if web_result else 0
+        )
         await session.commit()

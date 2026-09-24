@@ -565,6 +565,8 @@ export interface SmartLogResult {
   pregunta?: string | null;
   /** Lo que se mencionó y no existe en el catálogo. Antes desaparecía sin decir nada. */
   no_encontrados?: string[];
+  /** Propuesta con lo que se ha estimado buscando en internet, si el respaldo está activo. */
+  proposal?: { ai_proposal_id: string; payload: ChatDiaryPayload } | null;
 }
 
 export interface ReceiptScanItem extends SmartLogItem {
@@ -746,6 +748,8 @@ export interface DiaryProposalItem {
   /** `null` cuando el ingrediente no está en el catálogo y los valores los puso el modelo. */
   food_id: string | null;
   estimated: boolean;
+  /** De dónde salió el número cuando vino de una búsqueda web. */
+  source_url?: string | null;
 }
 
 export interface DiaryProposalEdit {
