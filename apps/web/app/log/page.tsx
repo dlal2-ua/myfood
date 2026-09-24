@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Sparkles } from "lucide-react";
 import { DayPager } from "@/components/DayPager";
 import { localDateIso } from "@/lib/dates";
@@ -28,12 +29,44 @@ import {
   type LogDay,
   type LogFoodEntry,
   type MealType,
+  type FoodOrigin,
+  type QuantityKind,
+  type SmartLogAlternative,
   type SmartLogItem,
+  type SmartLogResult,
 } from "@/lib/types";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
   "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
+
+const ORIGIN_LABELS: Record<FoodOrigin, string> = {
+  casero: "casero",
+  envasado: "de paquete",
+  restaurante: "de restaurante",
+  desconocido: "origen sin determinar",
+};
+
+const QUANTITY_LABELS: Partial<Record<QuantityKind, string>> = {
+  porcion: "porción",
+  racion: "ración",
+  punado: "puñado",
+  cucharadita: "cucharadita",
+};
+
+/** «1 porción grande» — lo que el modelo entendió, para poder juzgar el gramaje de un vistazo
+ * en vez de aceptar un número a ciegas. */
+function describeInterpretation(item: SmartLogItem): string | null {
+  if (!item.tipo_cantidad) return null;
+  const unit = QUANTITY_LABELS[item.tipo_cantidad] ?? item.tipo_cantidad;
+  const size =
+    item.tamano && item.tamano !== "mediano"
+      ? item.tamano === "grande"
+        ? " grande"
+        : " pequeña"
+      : "";
+  return `${unit}${size}`;
+}
 
 const SMART_LOG_MAX_POLL_ATTEMPTS = 30; // 30 × 2s = 60s
 const SMART_LOG_POLL_INTERVAL_MS = 2000;
@@ -94,6 +127,8 @@ export default function LogPage() {
   const [smartRequesting, setSmartRequesting] = useState(false);
   const [smartError, setSmartError] = useState<string | null>(null);
   const [smartWarning, setSmartWarning] = useState<string | null>(null);
+  const [smartQuestion, setSmartQuestion] = useState<string | null>(null);
+  const [smartMissing, setSmartMissing] = useState<string[]>([]);
   const [smartReviewItems, setSmartReviewItems] = useState<SmartLogReviewItem[]>([]);
   const [smartConfirmingIndex, setSmartConfirmingIndex] = useState<number | null>(null);
   const smartPollCountRef = useRef(0);
@@ -348,10 +383,7 @@ export default function LogPage() {
           resolve();
           return;
         }
-        const payload = session.response_payload as {
-          items: SmartLogItem[];
-          warning: string | null;
-        } | null;
+        const payload = session.response_payload as SmartLogResult | null;
         const items = payload?.items ?? [];
         setSmartReviewItems(
           items.map((item) => ({
@@ -361,6 +393,8 @@ export default function LogPage() {
           })),
         );
         setSmartWarning(items.length === 0 ? (payload?.warning ?? "NO_MATCH") : null);
+        setSmartQuestion(payload?.pregunta ?? null);
+        setSmartMissing(payload?.no_encontrados ?? []);
         resolve();
       };
       void tick();
@@ -375,6 +409,8 @@ export default function LogPage() {
     setSmartRequesting(true);
     setSmartError(null);
     setSmartWarning(null);
+    setSmartQuestion(null);
+    setSmartMissing([]);
     setSmartReviewItems([]);
     try {
       if (smartConsent) {
@@ -408,6 +444,25 @@ export default function LogPage() {
 
   function discardSmartReviewItem(index: number) {
     setSmartReviewItems((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  /** Cambia el alimento por una de las alternativas que el modelo consideró, sin volver a
+   * escribir la frase ni gastar otra petición. Los gramos se conservan: la cantidad la dijo el
+   * usuario, no depende de qué alimento sea. */
+  function swapSmartReviewItem(index: number, alternative: SmartLogAlternative) {
+    setSmartReviewItems((prev) =>
+      prev.map((item, i) => {
+        if (i !== index) return item;
+        const rest = (item.alternativas ?? []).filter((a) => a.food_id !== alternative.food_id);
+        return {
+          ...item,
+          food_id: alternative.food_id,
+          name_es: alternative.name_es,
+          motivo: undefined,
+          alternativas: [{ food_id: item.food_id, name_es: item.name_es }, ...rest].slice(0, 2),
+        };
+      }),
+    );
   }
 
   async function confirmSmartReviewItem(index: number) {
@@ -679,15 +734,17 @@ export default function LogPage() {
           <QuotaBadge quota={smartQuota} />
         </div>
         <p className="mb-3 text-sm text-neutral-500">
-          Escribe lo que has comido, p. ej. &quot;dos huevos fritos y una tostada con
-          aceite&quot;. Claude propone qué alimentos son (nunca gramos ni calorías) — tú
-          revisas y ajustas antes de confirmar.
+          Escribe lo que has comido como se lo contarías a alguien: &quot;hoy he almorzado
+          una porción de tortilla de patatas, otra de ensaladilla y 4 trozos de pan&quot;.
+          Claude entiende las cantidades de casa (porción, plato, trozo, vaso…) y si el plato
+          es casero o de paquete; los gramos y las calorías los pone el catálogo. Tú revisas y
+          ajustas antes de confirmar.
         </p>
         <form onSubmit={onSmartLogSubmit} className="flex flex-wrap items-end gap-3">
           <input
             type="text"
             required
-            placeholder="dos huevos fritos y una tostada..."
+            placeholder="una porción de tortilla de patatas y 4 trozos de pan..."
             className={`${inputClass} min-w-[16rem] flex-1`}
             value={smartText}
             onChange={(e) => setSmartText(e.target.value)}
@@ -731,6 +788,22 @@ export default function LogPage() {
             No se ha encontrado ningún alimento parecido en el catálogo para ese texto.
           </p>
         )}
+        {smartQuestion && (
+          <p className="mt-2 rounded-[var(--radius-control)] border border-amber-300 bg-amber-50 p-2 text-sm dark:border-amber-800 dark:bg-amber-950">
+            <span className="font-medium">Para afinar: </span>
+            {smartQuestion} Añádelo al texto y vuelve a interpretarlo, o ajusta los gramos a
+            mano aquí abajo.
+          </p>
+        )}
+        {smartMissing.length > 0 && (
+          <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+            No está en el catálogo: <span className="font-medium">{smartMissing.join(", ")}</span>.{" "}
+            <Link href="/chat" className="underline">
+              Díselo al chat
+            </Link>{" "}
+            — ese sí sabe estimar un plato que no tenemos fichado.
+          </p>
+        )}
 
         {smartReviewItems.length > 0 && (
           <div className="mt-4 flex flex-col gap-3">
@@ -739,9 +812,45 @@ export default function LogPage() {
                 key={`${item.food_id}-${index}`}
                 className="flex flex-wrap items-end gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3"
               >
-                <div className="min-w-[10rem]">
+                <div className="min-w-[12rem] flex-1">
                   <p className="text-sm font-medium">{item.name_es}</p>
-                  <p className="text-xs text-neutral-500">&quot;{item.approx_quantity_text}&quot;</p>
+                  <p className="text-xs text-neutral-500">
+                    &quot;{item.approx_quantity_text}&quot;
+                    {describeInterpretation(item) && <> · {describeInterpretation(item)}</>}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    {item.origen && item.origen !== "desconocido" && (
+                      <span className="rounded-full bg-[var(--color-primary-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-primary)]">
+                        {ORIGIN_LABELS[item.origen]}
+                      </span>
+                    )}
+                    {item.confianza === "baja" && (
+                      <span
+                        className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                        title="Revisa este con más cuidado"
+                      >
+                        poco seguro
+                      </span>
+                    )}
+                  </div>
+                  {item.motivo && (
+                    <p className="mt-1 text-xs text-neutral-500">{item.motivo}</p>
+                  )}
+                  {(item.alternativas?.length ?? 0) > 0 && (
+                    <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-neutral-500">
+                      ¿No era ese?
+                      {item.alternativas?.map((alt) => (
+                        <button
+                          key={alt.food_id}
+                          type="button"
+                          onClick={() => swapSmartReviewItem(index, alt)}
+                          className="rounded-full border border-[var(--color-border-strong)] px-2 py-0.5 font-medium hover:bg-[var(--color-surface-2)]"
+                        >
+                          {alt.name_es}
+                        </button>
+                      ))}
+                    </p>
+                  )}
                 </div>
                 <label className="flex flex-col gap-1 text-sm">
                   Comida

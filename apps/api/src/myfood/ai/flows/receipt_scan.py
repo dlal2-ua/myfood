@@ -155,7 +155,7 @@ async def _process(session: AsyncSession, ai_session: AiSession, image_path: Pat
         candidates_out, alias_to_food_id = build_candidates_payload(hits)
 
         try:
-            items_out, agent_result = await resolve_food_mentions(
+            items_out, agent_result, _extras = await resolve_food_mentions(
                 session,
                 token=token,
                 prompt=build_receipt_scan_line_prompt(line, candidates_out),

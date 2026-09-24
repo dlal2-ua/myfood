@@ -155,7 +155,12 @@ async def test_no_tool_call_still_succeeds_with_no_match_warning(
 
     ai_session = await _reload(running_smart_log_session)
     assert ai_session.status == "succeeded"
-    assert ai_session.response_payload == {"items": [], "warning": "NO_MATCH"}
+    assert ai_session.response_payload == {
+        "items": [],
+        "warning": "NO_MATCH",
+        "pregunta": None,
+        "no_encontrados": [],
+    }
 
 
 async def test_agent_error_marks_session_failed(
@@ -251,6 +256,66 @@ async def test_request_creates_running_session_and_enqueues_job(
     assert ai_session.kind == "smart_log"
     payload = ai_session.request_payload
     assert payload["text"] == "un huevo"
-    assert payload["candidates"] == [{"id": "c1", "name": "Huevo", "category": None}]
+    # El candidato lleva más contexto que antes: sin `es_generico` ni `marca` el modelo no
+    # podía distinguir un plato casero de uno de supermercado, que es lo que más mueve las kcal.
+    assert payload["candidates"] == [{"id": "c1", "name": "Huevo", "es_generico": False}]
     assert payload["alias_to_food_id"] == {"c1": "11111111-1111-1111-1111-111111111111"}
     assert enqueued == [str(ai_session.id)]
+
+
+# --- RAG: genéricos y restricciones ---------------------------------------------------------
+
+
+async def test_el_rag_pide_tambien_generico_para_cada_mencion(monkeypatch):
+    """Por relevancia, «tortilla de patatas» devuelve cuatro marcas de supermercado antes que el
+    genérico. Si el usuario dice que la suya es casera, el modelo necesita tener el genérico
+    delante para poder elegirlo."""
+    consultas = []
+
+    async def _fake_search_foods(query, kind, limit, offset):
+        consultas.append((query, kind))
+        return [{"id": str(uuid.uuid4()), "name_es": query, "category": None}], 1
+
+    monkeypatch.setattr(food_resolution, "search_foods", _fake_search_foods)
+    await food_resolution.search_candidates_for_text("tortilla de patatas")
+
+    assert (None in [kind for _, kind in consultas]) and ("generic" in [k for _, k in consultas])
+
+
+async def test_el_rag_no_propone_alimentos_con_un_alergeno_del_usuario(
+    two_users, one_real_food, superuser_conn
+):
+    """El chat ya filtraba las restricciones y este flujo no: se le podían proponer alimentos
+    con un alérgeno declarado y lo único que lo frenaba era que el usuario lo viera."""
+    user_id, _ = two_users
+    otro_id = str(uuid.uuid4())
+    await superuser_conn.execute(
+        text(
+            "INSERT INTO food_allergens (food_id, allergen_code, origin) "
+            "VALUES (:f, 'huevos', 'declared')"
+        ),
+        {"f": one_real_food},
+    )
+    await superuser_conn.execute(
+        text(
+            "INSERT INTO user_restrictions (user_id, kind, allergen_code) "
+            "VALUES (:u, 'allergen', 'huevos')"
+        ),
+        {"u": str(user_id)},
+    )
+    await superuser_conn.commit()
+
+    hits = [
+        {"id": one_real_food, "name_es": "Huevo frito (test)"},
+        {"id": otro_id, "name_es": "Algo que no está en el catálogo"},
+    ]
+    async with AdminSessionLocal() as session:
+        filtrados = await food_resolution.filter_restricted(session, user_id, hits)
+
+    # Fuera el alérgeno; el id desconocido sobrevive (de eso se encarga la resolución, no esto).
+    assert [h["id"] for h in filtrados] == [otro_id]
+
+    await superuser_conn.execute(
+        text("DELETE FROM user_restrictions WHERE user_id = :u"), {"u": str(user_id)}
+    )
+    await superuser_conn.commit()

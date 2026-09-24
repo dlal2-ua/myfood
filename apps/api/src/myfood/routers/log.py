@@ -414,7 +414,7 @@ async def copy_day(
 
 
 class SmartLogIn(BaseModel):
-    text: str = Field(min_length=1, max_length=500)
+    text: str = Field(min_length=1, max_length=1000)
 
 
 @router.post("/smart", status_code=202)
