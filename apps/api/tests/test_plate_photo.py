@@ -5,7 +5,6 @@ se borra, que la visión no puede colar gramos, y que la segunda fase pasa por e
 que el registro por texto. Que el modelo *vea* de verdad se comprueba en vivo, no en un test.
 """
 
-import uuid
 from io import BytesIO
 
 import pytest
