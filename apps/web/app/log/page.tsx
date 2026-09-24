@@ -808,7 +808,8 @@ export default function LogPage() {
             mano aquí abajo.
           </p>
         )}
-        {smartMissing.length > 0 && (
+        {/* Si el respaldo web ya lo ha resuelto, mandar al chat sobra: ya está propuesto. */}
+        {smartMissing.length > 0 && !smartProposal && (
           <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
             No está en el catálogo: <span className="font-medium">{smartMissing.join(", ")}</span>.{" "}
             <Link href="/chat" className="underline">

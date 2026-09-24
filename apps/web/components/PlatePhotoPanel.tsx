@@ -284,7 +284,8 @@ export function PlatePhotoPanel({
           {question} Ajusta los gramos a mano aquí abajo si hace falta.
         </p>
       )}
-      {missing.length > 0 && (
+      {/* Si el respaldo web ya lo ha resuelto, mandar al chat sobra: ya está propuesto. */}
+      {missing.length > 0 && !webProposal && (
         <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
           No está en el catálogo: <span className="font-medium">{missing.join(", ")}</span>.{" "}
           <Link href="/chat" className="underline">
