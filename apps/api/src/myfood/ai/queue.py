@@ -17,6 +17,7 @@ DIET_PLAN_QUEUE_KEY = "iafood:jobs:diet_plan"
 SMART_LOG_QUEUE_KEY = "iafood:jobs:smart_log"
 RECIPE_IMPORT_QUEUE_KEY = "iafood:jobs:recipe_import"
 RECEIPT_SCAN_QUEUE_KEY = "iafood:jobs:receipt_scan"
+PLATE_PHOTO_QUEUE_KEY = "iafood:jobs:plate_photo"
 CHAT_QUEUE_KEY = "iafood:jobs:chat"
 SUPPLEMENT_QUEUE_KEY = "iafood:jobs:supplement_suggestion"
 
@@ -77,6 +78,14 @@ async def enqueue_recipe_import_job(ai_session_id: str) -> None:
 
 async def dequeue_recipe_import_job(timeout_seconds: int = 5) -> str | None:
     return await dequeue_job(RECIPE_IMPORT_QUEUE_KEY, timeout_seconds)
+
+
+async def enqueue_plate_photo_job(ai_session_id: str) -> None:
+    await enqueue_job(PLATE_PHOTO_QUEUE_KEY, ai_session_id)
+
+
+async def dequeue_plate_photo_job(timeout_seconds: int = 5) -> str | None:
+    return await dequeue_job(PLATE_PHOTO_QUEUE_KEY, timeout_seconds)
 
 
 async def enqueue_receipt_scan_job(ai_session_id: str) -> None:

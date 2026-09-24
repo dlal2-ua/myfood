@@ -22,6 +22,10 @@ DEFAULT_MAX_TOKENS_PER_CALL = 8000
 # completa de dietas a propósito: es una cuota de conversación (preguntas,
 # ida y vuelta), un patrón de uso muy distinto a generar un plan entero.
 DEFAULT_CHAT_MESSAGES_PER_PROFILE_DAILY = 50
+# Cuota propia de la foto del plato: cada una son dos llamadas al modelo (visión y
+# catálogo), así que gasta más que un registro por texto, pero es el registro más rápido
+# que hay y se usa comida a comida.
+DEFAULT_PLATE_PHOTO_PER_PROFILE_DAILY = 10
 
 
 class IafoodLimits(BaseModel):
@@ -30,6 +34,9 @@ class IafoodLimits(BaseModel):
     max_tokens_per_call: int = Field(default=DEFAULT_MAX_TOKENS_PER_CALL, ge=256, le=200000)
     chat_messages_per_profile_daily: int = Field(
         default=DEFAULT_CHAT_MESSAGES_PER_PROFILE_DAILY, ge=1, le=2000
+    )
+    plate_photo_per_profile_daily: int = Field(
+        default=DEFAULT_PLATE_PHOTO_PER_PROFILE_DAILY, ge=1, le=1000
     )
 
 

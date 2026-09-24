@@ -50,7 +50,9 @@ class QuotaOut(BaseModel):
 
 @router.get("/quota")
 async def get_quota(
-    scope: Literal["smart_log", "chat", "diet_plan", "supplement_suggestion"] = "smart_log",
+    scope: Literal[
+        "smart_log", "chat", "diet_plan", "supplement_suggestion", "plate_photo"
+    ] = "smart_log",
     user_id: UUID = Depends(get_current_user_id),
 ) -> QuotaOut:
     """Cuánta cuota de iafood le queda hoy al usuario en ese ámbito, sin gastarla.
@@ -64,6 +66,10 @@ async def get_quota(
             scope="chat",
             per_profile_limit=limits.chat_messages_per_profile_daily,
             enforce_instance=False,
+        )
+    elif scope == "plate_photo":
+        status = await quota_status(
+            user_id, scope="plate_photo", per_profile_limit=limits.plate_photo_per_profile_daily
         )
     else:
         status = await quota_status(user_id, scope=scope)

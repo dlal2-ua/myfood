@@ -29,44 +29,16 @@ import {
   type LogDay,
   type LogFoodEntry,
   type MealType,
-  type FoodOrigin,
-  type QuantityKind,
   type SmartLogAlternative,
   type SmartLogItem,
   type SmartLogResult,
 } from "@/lib/types";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
+import { PlatePhotoPanel } from "@/components/PlatePhotoPanel";
+import { describeInterpretation, ORIGIN_LABELS } from "@/lib/smartLog";
 
 const inputClass =
   "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
-
-const ORIGIN_LABELS: Record<FoodOrigin, string> = {
-  casero: "casero",
-  envasado: "de paquete",
-  restaurante: "de restaurante",
-  desconocido: "origen sin determinar",
-};
-
-const QUANTITY_LABELS: Partial<Record<QuantityKind, string>> = {
-  porcion: "porción",
-  racion: "ración",
-  punado: "puñado",
-  cucharadita: "cucharadita",
-};
-
-/** «1 porción grande» — lo que el modelo entendió, para poder juzgar el gramaje de un vistazo
- * en vez de aceptar un número a ciegas. */
-function describeInterpretation(item: SmartLogItem): string | null {
-  if (!item.tipo_cantidad) return null;
-  const unit = QUANTITY_LABELS[item.tipo_cantidad] ?? item.tipo_cantidad;
-  const size =
-    item.tamano && item.tamano !== "mediano"
-      ? item.tamano === "grande"
-        ? " grande"
-        : " pequeña"
-      : "";
-  return `${unit}${size}`;
-}
 
 const SMART_LOG_MAX_POLL_ATTEMPTS = 30; // 30 × 2s = 60s
 const SMART_LOG_POLL_INTERVAL_MS = 2000;
@@ -727,6 +699,15 @@ export default function LogPage() {
           <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">{queuedNote}</p>
         )}
       </section>
+
+      {userId && (
+        <PlatePhotoPanel
+          userId={userId}
+          logDate={logDate}
+          mealType={mealType}
+          onAdded={() => void loadDay(logDate)}
+        />
+      )}
 
       <section id="natural" className="scroll-mt-20 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

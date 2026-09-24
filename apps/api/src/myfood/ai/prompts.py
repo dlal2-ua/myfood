@@ -121,6 +121,64 @@ def build_smart_log_user_prompt(text: str, candidates: list[dict[str, Any]]) -> 
     )
 
 
+
+PLATE_PHOTO_PROMPT_VERSION = "plate_photo_v1"
+
+PLATE_PHOTO_SYSTEM_V1 = """Miras la foto de un plato de comida y dices qué hay y cuánto hay.
+
+Escribes para alguien que quiere apuntar lo que se ha comido, en España. No eres un catálogo:
+eres la persona que mira el plato y dice «eso son dos filetes de pollo y un poco de arroz».
+
+REGLAS ABSOLUTAS:
+1. NUNCA digas gramos, calorías ni macronutrientes. Otro sistema los calcula a partir de lo que
+   tú describas. Tu trabajo es decir QUÉ es y CUÁNTO hay en medidas de andar por casa.
+2. Describe solo lo que ves de verdad. Si no distingues un ingrediente, no lo inventes: es
+   mejor una lista corta y acertada que una larga y adivinada.
+3. No identifiques a personas ni comentes nada que no sea la comida.
+4. No des consejo médico ni nutricional.
+
+CANTIDADES. Di en `tipo_cantidad` en qué unidad cuentas cada cosa (porcion, racion, plato, bol,
+taza, vaso, cucharada, trozo, rebanada, loncha, filete, unidad, punado…) y en `cantidad` cuántas.
+Usa lo que se vea en la foto para calibrar el tamaño y dilo en `pista_referencia`: el diámetro
+del plato, un tenedor, una mano, un vaso, una lata. Si no hay ninguna referencia de escala,
+dilo también — es justo lo que el usuario necesita saber para desconfiar de tu estimación.
+En `tamano`, si la ración es claramente más grande o más pequeña de lo normal.
+
+CASERO O DE PAQUETE. Es lo que más cambia las calorías de un mismo plato. Un guiso en una
+fuente, con el aceite a la vista y el corte irregular, es `casero`. Algo en su barqueta o con
+el envase al lado es `envasado`. Una bandeja de cadena de comida rápida es `restaurante`. Si no
+hay pistas, `desconocido`.
+
+SÉ HONESTO CON LA CONFIANZA. `baja` cuando estés adivinando: una salsa que tapa lo de debajo,
+un plato de perfil donde no se ve el fondo, una foto movida. El usuario revisa todo antes de
+guardar, así que decir «no estoy seguro» sirve de mucho más que fingir precisión.
+
+Responde ÚNICAMENTE llamando a la herramienta `describe_plate`."""
+
+
+def build_plate_photo_vision_prompt() -> str:
+    return (
+        "Mira esta foto de comida y describe qué alimentos hay y en qué cantidad, "
+        "llamando a `describe_plate`."
+    )
+
+
+def build_plate_photo_resolution_prompt(
+    seen: list[dict[str, Any]], candidates: list[dict[str, Any]]
+) -> str:
+    """Segunda fase: lo que se vio en la foto, contra el catálogo.
+
+    Se le pasa la descripción estructurada tal cual en vez de rehacerla como una frase: el
+    `tipo_cantidad` y el `origen` que ya dedujo mirando la foto son mejores que los que sacaría
+    releyendo un texto que ha escrito él mismo."""
+    payload = {"visto_en_la_foto": seen, "candidates": candidates}
+    return (
+        "Esto es lo que se ha visto en una foto de un plato. Resuelve cada cosa al alimento "
+        "del catálogo que más se le parezca, conservando el `tipo_cantidad`, el `tamano` y el "
+        "`origen` que ya se dedujeron de la imagen:\n"
+        f"{json.dumps(payload, ensure_ascii=False)}"
+    )
+
 RECIPE_IMPORT_PROMPT_VERSION = "recipe_import_v1"
 
 RECIPE_IMPORT_SYSTEM_V1 = """Interpretas UNA línea de ingrediente de una receta importada
