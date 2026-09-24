@@ -41,7 +41,10 @@ import { describeInterpretation, ORIGIN_LABELS } from "@/lib/smartLog";
 const inputClass =
   "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
-const SMART_LOG_MAX_POLL_ATTEMPTS = 30; // 30 × 2s = 60s
+// 60 × 2s = 120s. Antes eran 60 s, que bastaban para una interpretación normal (~12 s)
+// pero no cuando algo no está en el catálogo y se busca en internet (+25 s, y hasta 70
+// si la web de turno va lenta).
+const SMART_LOG_MAX_POLL_ATTEMPTS = 60;
 const SMART_LOG_POLL_INTERVAL_MS = 2000;
 
 interface SmartLogReviewItem extends SmartLogItem {

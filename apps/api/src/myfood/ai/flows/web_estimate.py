@@ -13,6 +13,7 @@ el catálogo como si fuera un dato de fuente oficial: se queda en una propuesta 
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from uuid import UUID
 
@@ -27,7 +28,12 @@ from myfood.domain import diary_proposal
 from myfood.domain.quantity_text import compose_quantity_text, resolve_grams
 from myfood.errors import AppError
 
-_TIMEOUT_SECONDS = 40.0
+logger = logging.getLogger("myfood.ai.web_estimate")
+
+# Una búsqueda que lee un par de páginas ronda los 20 s medidos en vivo, pero depende de
+# lo que tarde la web de turno. Con 40 s se quedaba corto de vez en cuando y el respaldo
+# fallaba en silencio.
+_TIMEOUT_SECONDS = 70.0
 # Suficiente para buscar, leer un par de resultados y contestar. Más vueltas serían más coste
 # por un alimento que, para empezar, es el que menos falta hace clavar.
 _MAX_TURNS = 4
@@ -70,7 +76,11 @@ async def estimate_missing_foods(
             max_turns=_MAX_TURNS,
             timeout_seconds=_TIMEOUT_SECONDS,
         )
-    except AiAgentError:
+    except AiAgentError as exc:
+        # Que falle el respaldo no puede tumbar el registro, pero tampoco puede no dejar
+        # rastro: sin esta línea, una búsqueda que se cae es indistinguible de una que
+        # simplemente no encontró nada, y no hay por dónde empezar a mirar.
+        logger.warning("el respaldo web falló (%s): %s", exc.code, exc)
         return None, None
 
     raw_items = sink[-1].get("items", []) if sink else []
@@ -108,9 +118,10 @@ async def estimate_missing_foods(
             alias_to_candidate={},
             today=date.today(),
         )
-    except AppError:
+    except AppError as exc:
         # Valores no plausibles (`IMPLAUSIBLE_ESTIMATE`) o fecha mala: mejor no proponer nada
         # que meter un número imposible en el histórico.
+        logger.warning("el respaldo web devolvió algo que no se puede apuntar: %s", exc.code)
         return None, result
 
     proposal = AiProposal(
