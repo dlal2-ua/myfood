@@ -121,7 +121,10 @@ async def resolve_food_mentions(
     prompt: str,
     system_prompt: str,
     alias_to_food_id: dict[str, str],
-    max_turns: int = 2,
+    # 4 y no 2: el CLI corta con «Reached maximum number of turns» si el modelo gasta un
+    # turno antes de llamar a la herramienta, y con el registro por foto pasaba siempre. Subir
+    # el techo no cuesta tokens —el modelo para cuando termina—, solo evita fallos tontos.
+    max_turns: int = 4,
     timeout_seconds: float = 30.0,
 ) -> tuple[list[dict], AgentResult, dict]:
     """Llama al Agent SDK con `resolve_food_items` y resuelve cada alias
