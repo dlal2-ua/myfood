@@ -17,12 +17,21 @@ import pytest_asyncio
 from sqlalchemy import select, text
 
 from myfood.ai import client as ai_client
+from myfood.ai.agent import AiAgentError
 from myfood.ai.prompts import build_chat_user_prompt
 from myfood.chat import flow
 from myfood.chat.agent_loop import ChatTurnResult
 from myfood.chat.tools import build_chat_tools
 from myfood.chat.transcribe import TranscriptionUnavailable, transcribe
-from myfood.db.models import AiProposal, AiSession, BodyMeasurement, ChatMessage, DietPlan, Profile
+from myfood.db.models import (
+    AiProposal,
+    AiSession,
+    BodyMeasurement,
+    ChatConversation,
+    ChatMessage,
+    DietPlan,
+    Profile,
+)
 from myfood.db.session import AdminSessionLocal
 from myfood.domain.diet_engine import CandidateFood
 from myfood.errors import AppError
@@ -600,7 +609,14 @@ async def test_request_chat_message_transcribes_voice_in_memory_and_enqueues_onl
     assert received["audio"] == b"nota de voz falsa"
     assert ai_session.status == "running"
     assert ai_session.kind == "chat_edit"
-    assert ai_session.request_payload == {"source": "voice", "text": "dos huevos fritos"}
+    assert ai_session.request_payload["source"] == "voice"
+    assert ai_session.request_payload["text"] == "dos huevos fritos"
+    # El turno se cuelga de una conversación, que se crea sola si el usuario no tenía ninguna.
+    async with AdminSessionLocal() as session:
+        conversation = await session.get(
+            ChatConversation, uuid.UUID(ai_session.request_payload["conversation_id"])
+        )
+    assert conversation is not None and conversation.user_id == user_id
     assert enqueued == [str(ai_session.id)]
     # Guarda contra reintroducir el paso del audio por Redis.
     assert not hasattr(queue_module, "store_chat_audio")
@@ -821,43 +837,122 @@ async def test_send_chat_message_rejects_unsupported_audio_type(registered_clien
         await session.commit()
 
 
+async def _seed_conversation(user_id, messages, *, title=None, same_instant=False):
+    """Crea una conversación con sus mensajes. Con `same_instant=True` los inserta en una sola
+    transacción, que es como los guarda un turno real: `now()` es el de la transacción, así que
+    todos comparten `created_at` al microsegundo."""
+    async with AdminSessionLocal() as session:
+        conversation = ChatConversation(user_id=user_id, title=title)
+        session.add(conversation)
+        await session.flush()
+        for role, content in messages:
+            session.add(
+                ChatMessage(
+                    user_id=user_id,
+                    conversation_id=conversation.id,
+                    role=role,
+                    content=content,
+                    source="text",
+                )
+            )
+            if not same_instant:
+                await session.commit()
+        await session.commit()
+        return conversation.id
+
+
 async def test_chat_history_round_trip(registered_client):
     """GET/DELETE /chat/history operan sobre `chat_messages` directamente
     — se insertan a mano (vía ORM) en vez de pasar por todo el pipeline del
     chat, que ya está cubierto por los tests de `process_chat_job`."""
-    from datetime import UTC, datetime, timedelta
-
     client, user_id = registered_client
-    now = datetime.now(UTC)
-    async with AdminSessionLocal() as session:
-        session.add(
-            ChatMessage(
-                user_id=user_id, role="user", content="hola", source="text", created_at=now
-            )
-        )
-        session.add(
-            ChatMessage(
-                user_id=user_id,
-                role="assistant",
-                content="¡Hola!",
-                source="text",
-                created_at=now + timedelta(seconds=1),
-            )
-        )
-        await session.commit()
+    await _seed_conversation(user_id, [("user", "hola"), ("assistant", "¡Hola!")])
 
     resp = await client.get("/api/chat/history")
     assert resp.status_code == 200
     history = resp.json()
     assert len(history) == 2
-    # Más reciente primero (sección 7.9).
-    assert history[0]["content"] == "¡Hola!"
-    assert history[1]["content"] == "hola"
+    # Del más antiguo al más reciente: una conversación se lee de arriba abajo.
+    assert history[0]["content"] == "hola"
+    assert history[1]["content"] == "¡Hola!"
 
     resp = await client.delete("/api/chat/history")
     assert resp.status_code == 204
     resp = await client.get("/api/chat/history")
     assert resp.json() == []
+
+
+async def test_chat_history_orders_by_seq_when_the_timestamps_tie(registered_client):
+    """El bug que sacaba la respuesta ENCIMA de la pregunta.
+
+    Los dos mensajes de un turno se guardan en la misma transacción, así que `now()` les da el
+    mismo instante exacto. Ordenar por `created_at` empataba y el par salía invertido. El test
+    anterior lo esquivaba inyectando fechas distintas a mano."""
+    client, user_id = registered_client
+    await _seed_conversation(
+        user_id, [("user", "¿cuántas kcal llevo?"), ("assistant", "Vas por 1.200.")],
+        same_instant=True,
+    )
+
+    history = (await client.get("/api/chat/history")).json()
+    assert [m["role"] for m in history] == ["user", "assistant"]
+    # Y de verdad empataban: si no, el test no estaría probando nada.
+    assert history[0]["created_at"] == history[1]["created_at"]
+
+
+async def test_new_conversation_starts_empty_and_keeps_the_previous_one(registered_client):
+    """«Conversación nueva» devolvía 500: insertaba un mensaje `role='divider'` contra un CHECK
+    que solo admitía 'user' y 'assistant'. Ninguna migración lo amplió y ningún test lo tocaba."""
+    client, user_id = registered_client
+    first = await _seed_conversation(user_id, [("user", "lo de antes")], title="lo de antes")
+
+    resp = await client.post("/api/chat/conversations")
+    assert resp.status_code == 201
+    created = resp.json()
+    assert created["id"] != str(first)
+
+    # El hilo nuevo nace vacío y es el activo.
+    assert (await client.get("/api/chat/history")).json() == []
+    # El anterior sigue entero.
+    previous = (await client.get(f"/api/chat/history?conversation_id={first}")).json()
+    assert [m["content"] for m in previous] == ["lo de antes"]
+
+    listed = (await client.get("/api/chat/conversations")).json()
+    assert [c["id"] for c in listed] == [created["id"], str(first)]
+    assert listed[1]["title"] == "lo de antes"
+
+
+async def test_reset_is_still_an_alias_for_a_new_conversation(registered_client):
+    client, _ = registered_client
+    resp = await client.post("/api/chat/reset")
+    assert resp.status_code == 201
+    assert resp.json()["title"] is None
+
+
+async def test_conversation_of_another_user_is_not_readable(registered_client, two_users):
+    client, _ = registered_client
+    other_id, _ = two_users
+    other = await _seed_conversation(other_id, [("user", "lo mío")])
+
+    # Ni se lee su historial...
+    assert (await client.get(f"/api/chat/history?conversation_id={other}")).json() == []
+    # ...ni se puede borrar.
+    assert (await client.delete(f"/api/chat/conversations/{other}")).status_code == 404
+
+
+async def test_deleting_a_conversation_removes_its_messages(registered_client):
+    client, user_id = registered_client
+    conversation = await _seed_conversation(user_id, [("user", "bórrame")])
+
+    assert (await client.delete(f"/api/chat/conversations/{conversation}")).status_code == 204
+    assert (await client.get("/api/chat/conversations")).json() == []
+    async with AdminSessionLocal() as session:
+        remaining = (
+            await session.scalars(
+                select(ChatMessage).where(ChatMessage.user_id == user_id)
+            )
+        ).all()
+    assert remaining == []
 
 
 # --- historial de conversación (encontrado en la primera prueba real) ---------
@@ -885,8 +980,11 @@ def test_prompt_truncates_very_long_history_items():
 async def test_process_chat_job_passes_recent_history_but_not_the_current_message(
     two_users, configured_credential, monkeypatch
 ):
-    from datetime import UTC, datetime, timedelta
+    """El contexto es el de ESTA conversación, en orden y sin el mensaje actual.
 
+    Lo de otro hilo no entra: es justo lo que el botón de «conversación nueva» promete. Y el
+    orden lo pone `seq`: ordenando por fecha, los pares de turnos anteriores llegaban al modelo
+    con su propia respuesta ANTES de la pregunta que la provocó."""
     user_id, _ = two_users
     captured = {}
 
@@ -898,20 +996,23 @@ async def test_process_chat_job_passes_recent_history_but_not_the_current_messag
     monkeypatch.setattr(flow, "run_chat_turn", _capturing_turn)
     monkeypatch.setattr(flow, "push_chat_result", _fake_push({}))
 
-    now = datetime.now(UTC)
+    # Otro hilo del mismo usuario: no debe colarse en el contexto.
+    await _seed_conversation(user_id, [("user", "de la conversación de ayer")])
+    conversation_id = await _seed_conversation(
+        user_id,
+        [("user", "cámbiame la cena"), ("assistant", "¿cuál salmón?")],
+        same_instant=True,
+    )
+
     async with AdminSessionLocal() as session:
-        session.add_all(
-            [
-                # Demasiado viejo (fuera de la ventana de contexto): no debe pasar.
-                ChatMessage(user_id=user_id, role="user", content="de ayer", source="text",
-                            created_at=now - timedelta(hours=30)),
-                ChatMessage(user_id=user_id, role="user", content="cámbiame la cena",
-                            source="text", created_at=now - timedelta(minutes=5)),
-                ChatMessage(user_id=user_id, role="assistant", content="¿cuál salmón?",
-                            source="text", created_at=now - timedelta(minutes=4)),
-            ]
+        ai_session = _running_ai_session(
+            user_id,
+            {
+                "source": "text",
+                "text": "el de lata",
+                "conversation_id": str(conversation_id),
+            },
         )
-        ai_session = _running_ai_session(user_id, {"source": "text", "text": "el de lata"})
         session.add(ai_session)
         await session.commit()
         await session.refresh(ai_session)
@@ -924,6 +1025,71 @@ async def test_process_chat_job_passes_recent_history_but_not_the_current_messag
         ("user", "cámbiame la cena"),
         ("assistant", "¿cuál salmón?"),
     ]
+
+
+async def test_process_chat_job_leaves_the_answer_below_the_question(
+    two_users, configured_credential, monkeypatch
+):
+    """Regresión del orden: los dos mensajes del turno se guardan con el mismo `now()`, así que
+    solo `seq` los desempata. El test de más arriba se apoyaba en la estabilidad del sort."""
+    user_id, _ = two_users
+    monkeypatch.setattr(flow, "run_chat_turn", _fake_turn())
+    monkeypatch.setattr(flow, "push_chat_result", _fake_push({}))
+
+    async with AdminSessionLocal() as session:
+        ai_session = _running_ai_session(user_id, {"source": "text", "text": "hola"})
+        session.add(ai_session)
+        await session.commit()
+        await session.refresh(ai_session)
+        session_id = ai_session.id
+
+    await flow.process_chat_job(str(session_id))
+
+    async with AdminSessionLocal() as session:
+        messages = (
+            await session.scalars(
+                select(ChatMessage)
+                .where(ChatMessage.user_id == user_id)
+                .order_by(ChatMessage.seq)
+            )
+        ).all()
+    assert [m.role for m in messages] == ["user", "assistant"]
+    assert messages[0].seq < messages[1].seq
+    # Y la conversación se tituló sola con el primer mensaje.
+    async with AdminSessionLocal() as session:
+        conversation = await session.get(ChatConversation, messages[0].conversation_id)
+    assert conversation.title == "hola"
+
+
+async def test_process_chat_job_keeps_the_user_message_when_the_model_fails(
+    two_users, configured_credential, monkeypatch
+):
+    """El 504 le dice al usuario que su mensaje ya está guardado. Antes no era verdad: todo el
+    turno iba en una transacción y un fallo del modelo se lo llevaba por delante."""
+    user_id, _ = two_users
+
+    async def _failing_turn(session, user_id, token, user_text, history=()):
+        raise AiAgentError("se cayó el proveedor", code="AI_TIMEOUT")
+
+    monkeypatch.setattr(flow, "run_chat_turn", _failing_turn)
+    monkeypatch.setattr(flow, "push_chat_result", _fake_push({}))
+
+    async with AdminSessionLocal() as session:
+        ai_session = _running_ai_session(user_id, {"source": "text", "text": "apúntame un café"})
+        session.add(ai_session)
+        await session.commit()
+        await session.refresh(ai_session)
+        session_id = ai_session.id
+
+    await flow.process_chat_job(str(session_id))
+
+    async with AdminSessionLocal() as session:
+        messages = (
+            await session.scalars(
+                select(ChatMessage).where(ChatMessage.user_id == user_id)
+            )
+        ).all()
+    assert [(m.role, m.content) for m in messages] == [("user", "apúntame un café")]
 
 
 # --- read_plan_day devuelve alias reutilizables ---------------------------------

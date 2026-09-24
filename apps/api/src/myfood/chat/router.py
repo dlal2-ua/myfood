@@ -15,8 +15,9 @@ from myfood.ai.consent import require_ai_processing_consent
 from myfood.ai.limits import load_limits
 from myfood.ai.queue import wait_for_chat_result
 from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
-from myfood.chat.flow import DIVIDER_ROLE, request_chat_message
-from myfood.db.models import ChatMessage
+from myfood.chat.conversations import active_conversation, create_conversation
+from myfood.chat.flow import request_chat_message
+from myfood.db.models import ChatConversation, ChatMessage
 from myfood.deps import get_current_user_id, get_db
 from myfood.errors import AppError
 
@@ -67,6 +68,7 @@ class ChatMessageOut(BaseModel):
 async def send_chat_message(
     text: str | None = Form(default=None),
     audio: UploadFile | None = File(default=None),
+    conversation_id: UUID | None = Form(default=None),
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> ChatMessageOut:
@@ -97,7 +99,9 @@ async def send_chat_message(
             exc.code, exc.message, status_code=429, details={"reset_at": reset_at_iso()}
         ) from exc
 
-    ai_session = await request_chat_message(session, user_id, text=text, audio_bytes=audio_bytes)
+    ai_session = await request_chat_message(
+        session, user_id, text=text, audio_bytes=audio_bytes, conversation_id=conversation_id
+    )
 
     result = await wait_for_chat_result(str(ai_session.id), timeout_seconds=_WAIT_TIMEOUT_SECONDS)
     if result is None:
@@ -138,16 +142,102 @@ class ChatHistoryItem(BaseModel):
     created_at: str
 
 
+class ChatConversationOut(BaseModel):
+    id: UUID
+    title: str | None
+    created_at: str
+    last_message_at: str
+
+
+def _conversation_out(conversation: ChatConversation) -> ChatConversationOut:
+    return ChatConversationOut(
+        id=conversation.id,
+        title=conversation.title,
+        created_at=conversation.created_at.isoformat(),
+        last_message_at=conversation.last_message_at.isoformat(),
+    )
+
+
+@router.get("/conversations")
+async def list_conversations(
+    limit: int = 30,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> list[ChatConversationOut]:
+    rows = await session.scalars(
+        select(ChatConversation)
+        .where(ChatConversation.user_id == user_id)
+        .order_by(ChatConversation.last_message_at.desc())
+        .limit(min(max(limit, 1), 100))
+    )
+    return [_conversation_out(c) for c in rows]
+
+
+@router.post("/conversations", status_code=201)
+async def create_new_conversation(
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> ChatConversationOut:
+    """Empieza un hilo nuevo sin borrar nada.
+
+    La anterior sigue en la lista y se puede volver a ella. Se separa a propósito de
+    `DELETE /history`, que sí borra: querer empezar de cero y querer que no quede rastro son
+    dos cosas distintas (sección 7.9)."""
+    return _conversation_out(await create_conversation(session, user_id))
+
+
+@router.post("/reset", status_code=201)
+async def start_new_conversation(
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> ChatConversationOut:
+    """Alias histórico de `POST /conversations`, que es como se llamaba cuando el corte se
+    marcaba con un mensaje especial en vez de con una fila propia."""
+    return _conversation_out(await create_conversation(session, user_id))
+
+
+@router.delete("/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(
+    conversation_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    result = await session.execute(
+        delete(ChatConversation).where(
+            ChatConversation.id == conversation_id, ChatConversation.user_id == user_id
+        )
+    )
+    if result.rowcount == 0:
+        raise AppError("CONVERSATION_NOT_FOUND", "Esa conversación ya no existe.", status_code=404)
+    await session.commit()
+
+
 @router.get("/history")
 async def get_chat_history(
     limit: int = 50,
+    conversation_id: UUID | None = None,
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> list[ChatHistoryItem]:
+    """De más antiguo a más reciente, que es como se lee una conversación.
+
+    El orden lo pone `seq` y no `created_at`: los dos mensajes de un turno se guardan con el
+    mismo instante y ordenar por fecha sacaba la respuesta encima de la pregunta (migración
+    0023). Cuando hay más mensajes que `limit` se recortan los MÁS ANTIGUOS, así que la
+    consulta baja por `seq` y el resultado se le da la vuelta al final.
+    """
+    if conversation_id is None:
+        conversation = await active_conversation(session, user_id)
+        if conversation is None:
+            return []
+        conversation_id = conversation.id
     rows = await session.scalars(
         select(ChatMessage)
-        .where(ChatMessage.user_id == user_id)
-        .order_by(ChatMessage.created_at.desc())
+        .where(
+            ChatMessage.user_id == user_id,
+            ChatMessage.conversation_id == conversation_id,
+        )
+        .order_by(ChatMessage.seq.desc())
         .limit(min(max(limit, 1), 200))
     )
     return [
@@ -158,7 +248,7 @@ async def get_chat_history(
             source=m.source,
             created_at=m.created_at.isoformat(),
         )
-        for m in rows
+        for m in reversed(rows.all())
     ]
 
 
@@ -169,29 +259,10 @@ async def delete_chat_history(
 ) -> None:
     """No toca `food_log` ni cambios ya aplicados (sección 7.9) — solo
     borra el propio historial de la conversación."""
+    await session.execute(
+        delete(ChatConversation).where(ChatConversation.user_id == user_id)
+    )
+    # Mensajes de antes de la migración 0023 no puede haber (se les asignó conversación), pero
+    # borrar también por `user_id` deja la tabla limpia si algo quedase huérfano.
     await session.execute(delete(ChatMessage).where(ChatMessage.user_id == user_id))
     await session.commit()
-
-
-@router.post("/reset", status_code=201)
-async def start_new_conversation(
-    user_id: UUID = Depends(get_current_user_id),
-    session: AsyncSession = Depends(get_db),
-) -> ChatHistoryItem:
-    """Empieza una conversación nueva sin borrar nada.
-
-    Deja una marca en el historial; `chat/flow.py::_recent_history` no lee más atrás de la
-    última, así que el modelo deja de arrastrar el contexto anterior. Se separa a propósito
-    de `DELETE /history`, que sí borra: querer empezar de cero y querer que no quede rastro
-    son dos cosas distintas."""
-    marker = ChatMessage(user_id=user_id, role=DIVIDER_ROLE, content="", source="text")
-    session.add(marker)
-    await session.commit()
-    await session.refresh(marker)
-    return ChatHistoryItem(
-        id=marker.id,
-        role=marker.role,
-        content=marker.content,
-        source=marker.source,
-        created_at=marker.created_at.isoformat(),
-    )

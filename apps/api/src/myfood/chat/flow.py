@@ -25,10 +25,10 @@ proveedor externo) hasta agotar ese timeout.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import date
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,10 +37,12 @@ from myfood.ai.agent import AiAgentError
 from myfood.ai.queue import enqueue_chat_job, push_chat_result
 from myfood.ai.validator import validate_day_totals, validate_structure
 from myfood.chat.agent_loop import ChatTurnResult, run_chat_turn
+from myfood.chat.conversations import resolve_conversation, title_from_message
 from myfood.chat.transcribe import TranscriptionUnavailable, transcribe
 from myfood.db.models import (
     AiProposal,
     AiSession,
+    ChatConversation,
     ChatMessage,
     DietPlan,
     Food,
@@ -53,17 +55,21 @@ from myfood.domain.targets import resolve_targets
 from myfood.errors import AppError
 
 _MAX_AUDIO_BYTES = 15 * 1024 * 1024
-# Marca de «conversación nueva»: no es un mensaje, es un corte. El modelo no lee más atrás
-# de la última, así que se puede empezar de cero sin borrar nada.
-DIVIDER_ROLE = "divider"
 # Contexto de conversación que se le da al modelo: sin él cada mensaje es una
-# conversación nueva (no recuerda sus propias preguntas aclaratorias).
+# conversación nueva (no recuerda sus propias preguntas aclaratorias). El corte por antigüedad
+# que había antes (6 h) desapareció con la migración 0023: ahora el límite lo pone la propia
+# conversación, así que retomar un hilo de ayer conserva su contexto y cambiar de hilo lo corta
+# de golpe — que es lo que se esperaba del botón de «conversación nueva».
 _HISTORY_MAX_MESSAGES = 10
-_HISTORY_MAX_AGE = timedelta(hours=6)
 
 
 async def request_chat_message(
-    session: AsyncSession, user_id: UUID, *, text: str | None, audio_bytes: bytes | None
+    session: AsyncSession,
+    user_id: UUID,
+    *,
+    text: str | None,
+    audio_bytes: bytes | None,
+    conversation_id: UUID | None = None,
 ) -> AiSession:
     """Corre en el proceso `api` (regla 19) — nunca llama al proveedor de IA
     (Claude); solo transcribe la nota de voz con el Whisper local, prepara todo
@@ -107,11 +113,17 @@ async def request_chat_message(
             "EMPTY_MESSAGE", "Escribe un mensaje o adjunta una nota de voz.", status_code=422
         )
 
+    conversation = await resolve_conversation(session, user_id, conversation_id)
+
     ai_session = AiSession(
         user_id=user_id,
         kind="chat_edit",
         status="running",
-        request_payload={"source": source, "text": text},
+        request_payload={
+            "source": source,
+            "text": text,
+            "conversation_id": str(conversation.id),
+        },
     )
     session.add(ai_session)
     await session.commit()
@@ -121,26 +133,25 @@ async def request_chat_message(
     return ai_session
 
 
-async def _recent_history(session: AsyncSession, user_id: UUID) -> list[tuple[str, str]]:
+async def _recent_history(
+    session: AsyncSession, conversation_id: UUID
+) -> list[tuple[str, str]]:
+    """Los últimos mensajes de ESTA conversación, del más antiguo al más reciente.
+
+    Se ordena por `seq` y no por `created_at`: los dos mensajes de un turno se guardan con el
+    mismo instante (`now()` es el de la transacción) y ordenar por fecha le colaba al modelo su
+    propia respuesta ANTES de la pregunta que la provocó, en cada par de turnos anteriores
+    (migración 0023). Degradaba la calidad del chat en silencio.
+    """
     rows = (
         await session.scalars(
             select(ChatMessage)
-            .where(
-                ChatMessage.user_id == user_id,
-                ChatMessage.created_at >= datetime.now(UTC) - _HISTORY_MAX_AGE,
-            )
-            .order_by(ChatMessage.created_at.desc())
+            .where(ChatMessage.conversation_id == conversation_id)
+            .order_by(ChatMessage.seq.desc())
             .limit(_HISTORY_MAX_MESSAGES)
         )
     ).all()
-    # `rows` viene del más reciente al más antiguo: en cuanto aparece un corte, lo de antes
-    # pertenece a la conversación anterior y no se le pasa al modelo.
-    recent: list[ChatMessage] = []
-    for message in rows:
-        if message.role == DIVIDER_ROLE:
-            break
-        recent.append(message)
-    return [(m.role, m.content) for m in reversed(recent)]
+    return [(m.role, m.content) for m in reversed(rows)]
 
 
 async def _build_day_change_proposal(
@@ -365,19 +376,37 @@ async def process_chat_job(ai_session_id: str) -> None:
         user_id = ai_session.user_id
         source = ai_session.request_payload["source"]
         message_text = ai_session.request_payload["text"]
+        # Los trabajos que ya estaban en la cola cuando se desplegó la migración 0023 no
+        # traen conversación: se les asigna la activa en vez de perderlos.
+        raw_conversation_id = ai_session.request_payload.get("conversation_id")
+        conversation = (
+            await session.get(ChatConversation, uuid.UUID(raw_conversation_id))
+            if raw_conversation_id
+            else None
+        )
+        if conversation is None or conversation.user_id != user_id:
+            conversation = await resolve_conversation(session, user_id, None)
+        conversation_id = conversation.id
 
         # Antes de guardar el mensaje actual, para que no aparezca dos veces.
-        history = await _recent_history(session, user_id)
+        history = await _recent_history(session, conversation_id)
         session.add(
             ChatMessage(
                 user_id=user_id,
+                conversation_id=conversation_id,
                 role="user",
                 content=message_text,
                 source=source,
                 ai_session_id=ai_session.id,
             )
         )
-        await session.flush()
+        if not conversation.title:
+            conversation.title = title_from_message(message_text)
+        # `commit` y no `flush`: el turno tarda entre 5 y 20 segundos y hasta aquí todo iba en
+        # una sola transacción, así que si el modelo fallaba o expiraba el mensaje del usuario
+        # se perdía —justo cuando el 504 le dice que «tu mensaje ya está guardado»—. Además le
+        # da su propio `now()`, distinto del de la respuesta.
+        await session.commit()
 
         token = await ai_client.get_decrypted_token(session)
         if token is None:
@@ -433,12 +462,14 @@ async def process_chat_job(ai_session_id: str) -> None:
         session.add(
             ChatMessage(
                 user_id=user_id,
+                conversation_id=conversation_id,
                 role="assistant",
                 content=assistant_text,
                 source="text",
                 ai_session_id=ai_session.id,
             )
         )
+        conversation.last_message_at = func.now()
         ai_session.status = "succeeded"
         ai_session.response_payload = {"message": assistant_text}
         ai_session.input_tokens = turn.input_tokens

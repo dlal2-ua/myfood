@@ -160,8 +160,11 @@ async def test_the_json_export_includes_plan_contents_restrictions_fasting_and_m
     plan = await _seed_everything(client, test_food, diet_candidates)
     await superuser_conn.execute(
         text(
-            "INSERT INTO chat_messages (user_id, role, content, source) "
-            "VALUES (:u, 'user', 'hola', 'text')"
+            "WITH c AS ("
+            "  INSERT INTO chat_conversations (user_id, title) VALUES (:u, 'hola') RETURNING id"
+            ") "
+            "INSERT INTO chat_messages (user_id, conversation_id, role, content, source) "
+            "SELECT :u, c.id, 'user', 'hola', 'text' FROM c"
         ),
         {"u": str(user_id)},
     )
@@ -178,6 +181,8 @@ async def test_the_json_export_includes_plan_contents_restrictions_fasting_and_m
     assert len(body["fasting_windows"]) == 1
     assert body["supplement_stock"][0]["doses_remaining"] == 30
     assert [m["content"] for m in body["chat_messages"]] == ["hola"]
+    # La exportación lleva también los hilos, no solo los mensajes sueltos (migración 0023).
+    assert [c["title"] for c in body["chat_conversations"]] == ["hola"]
 
 
 async def test_the_zip_export_has_the_json_and_a_csv_per_table_with_rows(
