@@ -23,7 +23,9 @@ import {
   useElapsedSeconds,
 } from "@/components/ui/AiWaiting";
 
-const MAX_POLL_ATTEMPTS = 40; // 40 × 2s = 80s: son dos llamadas al modelo, no una
+// 60 × 2s = 120s: son dos llamadas al modelo, y una tercera si algo del plato no está en
+// el catálogo y se busca en internet.
+const MAX_POLL_ATTEMPTS = 60;
 const POLL_INTERVAL_MS = 2000;
 const MAX_BYTES = 10 * 1024 * 1024;
 
