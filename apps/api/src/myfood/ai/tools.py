@@ -256,6 +256,60 @@ def build_describe_plate_tool(sink: list[dict]) -> SdkMcpTool[Any]:
 
     return _describe_plate
 
+
+ESTIMATE_FOODS_TOOL_NAME = "estimate_foods"
+
+# Respaldo cuando el catálogo no tiene el alimento. Aquí SÍ hay valores nutricionales, y es la
+# excepción que ya existía para el chat: lo que no está en el catálogo entra con los números
+# que pone el modelo y queda marcado como estimación (`entry_source='ai_estimate'`), nunca
+# mezclado con el dato oficial. `fuente` es obligatoria en la práctica: si un número no viene
+# del ETL, que se vea de dónde viene (R9).
+ESTIMATE_FOODS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["items"],
+    "properties": {
+        "items": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+                "type": "object",
+                "required": ["nombre", "cantidad_texto", "kcal_100g"],
+                "properties": {
+                    "nombre": {"type": "string", "maxLength": 80},
+                    "cantidad_texto": {"type": "string", "maxLength": 100},
+                    "tipo_cantidad": {"type": "string", "enum": list(TIPOS_DE_CANTIDAD)},
+                    "tamano": {"type": "string", "enum": ["pequeno", "mediano", "grande"]},
+                    "kcal_100g": {"type": "number", "minimum": 0, "maximum": 900},
+                    "protein_100g": {"type": "number", "minimum": 0, "maximum": 100},
+                    "fat_100g": {"type": "number", "minimum": 0, "maximum": 100},
+                    "carbs_100g": {"type": "number", "minimum": 0, "maximum": 100},
+                    "fuente": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "La URL de donde has sacado los valores.",
+                    },
+                },
+            },
+        },
+    },
+}
+
+
+def build_estimate_foods_tool(sink: list[dict]) -> SdkMcpTool[Any]:
+    """Valores por 100 g de un alimento que no está en el catálogo, con su fuente."""
+
+    @tool(
+        ESTIMATE_FOODS_TOOL_NAME,
+        "Devuelve los valores nutricionales por 100 g de alimentos que no están en el "
+        "catálogo, citando de dónde salen.",
+        ESTIMATE_FOODS_SCHEMA,
+    )
+    async def _estimate_foods(args: dict[str, Any]) -> dict[str, Any]:
+        sink.append(args)
+        return {"content": [{"type": "text", "text": "Estimación recibida."}]}
+
+    return _estimate_foods
+
 SUGGEST_SUPPLEMENTS_TOOL_NAME = "suggest_supplements"
 
 

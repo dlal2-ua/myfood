@@ -38,6 +38,7 @@ from myfood.ai.flows.food_resolution import (
     resolve_food_mentions,
     search_candidates_for_text,
 )
+from myfood.ai.flows.web_estimate import estimate_missing_foods
 from myfood.ai.prompts import (
     PLATE_PHOTO_PROMPT_VERSION,
     PLATE_PHOTO_SYSTEM_V1,
@@ -167,7 +168,9 @@ async def _process(session: AsyncSession, ai_session: AiSession, image_path: Pat
             system_prompt=PLATE_PHOTO_SYSTEM_V1,
             mcp_tools=[tools.build_describe_plate_tool(sink)],
             images=[("image/jpeg", image_b64)],
-            max_turns=2,
+            # Tres no son de sobra: con 2 el CLI corta con «Reached maximum number of turns»
+            # antes de que la llamada a la herramienta llegue a cerrarse (visto en vivo).
+            max_turns=4,
             timeout_seconds=_VISION_TIMEOUT_SECONDS,
         )
     except AiAgentError as exc:
@@ -230,12 +233,26 @@ async def _process(session: AsyncSession, ai_session: AiSession, image_path: Pat
     input_tokens += resolution_result.input_tokens or 0
     output_tokens += resolution_result.output_tokens or 0
 
+    proposal, web_result = await estimate_missing_foods(
+        session,
+        token=token,
+        user_id=ai_session.user_id,
+        ai_session=ai_session,
+        missing=extras["no_encontrados"],
+        log_date=ai_session.request_payload["log_date"],
+        meal_type=ai_session.request_payload["meal_type"],
+    )
+    if web_result is not None:
+        input_tokens += web_result.input_tokens or 0
+        output_tokens += web_result.output_tokens or 0
+
     ai_session.status = "succeeded"
     ai_session.response_payload = {
         "items": items_out,
         "warning": None if items_out else "NO_MATCH",
         "pregunta": extras["pregunta"],
         "no_encontrados": extras["no_encontrados"],
+        "proposal": proposal,
         # Lo que la fase de visión creyó ver, tal cual. Se guarda porque es lo único que
         # explica una propuesta rara, y sin ello no hay forma de saber si falló el ojo o la
         # búsqueda en el catálogo.

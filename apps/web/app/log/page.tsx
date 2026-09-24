@@ -34,6 +34,7 @@ import {
   type SmartLogResult,
 } from "@/lib/types";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
+import { DiaryProposalCard } from "@/components/chat/DiaryProposalCard";
 import { PlatePhotoPanel } from "@/components/PlatePhotoPanel";
 import { describeInterpretation, ORIGIN_LABELS } from "@/lib/smartLog";
 
@@ -101,6 +102,8 @@ export default function LogPage() {
   const [smartWarning, setSmartWarning] = useState<string | null>(null);
   const [smartQuestion, setSmartQuestion] = useState<string | null>(null);
   const [smartMissing, setSmartMissing] = useState<string[]>([]);
+  const [smartProposal, setSmartProposal] = useState<SmartLogResult["proposal"]>(null);
+  const [smartDeciding, setSmartDeciding] = useState(false);
   const [smartReviewItems, setSmartReviewItems] = useState<SmartLogReviewItem[]>([]);
   const [smartConfirmingIndex, setSmartConfirmingIndex] = useState<number | null>(null);
   const smartPollCountRef = useRef(0);
@@ -367,6 +370,7 @@ export default function LogPage() {
         setSmartWarning(items.length === 0 ? (payload?.warning ?? "NO_MATCH") : null);
         setSmartQuestion(payload?.pregunta ?? null);
         setSmartMissing(payload?.no_encontrados ?? []);
+        setSmartProposal(payload?.proposal ?? null);
         resolve();
       };
       void tick();
@@ -383,6 +387,7 @@ export default function LogPage() {
     setSmartWarning(null);
     setSmartQuestion(null);
     setSmartMissing([]);
+    setSmartProposal(null);
     setSmartReviewItems([]);
     try {
       if (smartConsent) {
@@ -393,7 +398,11 @@ export default function LogPage() {
       }
       const session = await apiFetch<AiSession>("/api/log/smart", {
         method: "POST",
-        body: JSON.stringify({ text: smartText.trim() }),
+        body: JSON.stringify({
+          text: smartText.trim(),
+          log_date: logDate,
+          meal_type: mealType,
+        }),
       });
       await pollSmartLogSession(session.id);
     } catch (err) {
@@ -405,6 +414,26 @@ export default function LogPage() {
     } finally {
       setSmartRequesting(false);
       reloadSmartQuota();
+    }
+  }
+
+  /** La propuesta del respaldo web se acepta entera, como la del chat: son valores estimados
+   * que no vienen del catálogo, así que se enseñan juntos con su fuente y se confirman de una
+   * vez en vez de línea a línea. */
+  async function decideSmartProposal(decision: "approve" | "reject") {
+    const proposal = smartProposal;
+    if (!proposal) return;
+    setSmartDeciding(true);
+    try {
+      await apiFetch(`/api/ai/proposals/${proposal.ai_proposal_id}/${decision}`, {
+        method: "POST",
+      });
+      setSmartProposal(null);
+      if (decision === "approve") await loadDay(logDate);
+    } catch (err) {
+      setSmartError(errorMessage(err));
+    } finally {
+      setSmartDeciding(false);
     }
   }
 
@@ -784,6 +813,20 @@ export default function LogPage() {
             </Link>{" "}
             — ese sí sabe estimar un plato que no tenemos fichado.
           </p>
+        )}
+
+        {smartProposal && (
+          <div className="mt-4">
+            <p className="mb-2 text-sm text-neutral-600 dark:text-neutral-400">
+              Esto no estaba en el catálogo, así que se ha buscado en internet. Los valores son
+              una estimación y se apuntan marcados como tal:
+            </p>
+            <DiaryProposalCard
+              payload={smartProposal.payload}
+              deciding={smartDeciding}
+              onDecide={(decision) => void decideSmartProposal(decision)}
+            />
+          </div>
         )}
 
         {smartReviewItems.length > 0 && (

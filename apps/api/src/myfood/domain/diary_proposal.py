@@ -54,6 +54,9 @@ class ProposedItem:
     # `None` cuando el alimento no está en el catálogo y los valores los puso el modelo.
     food_id: str | None
     estimated: bool
+    # De dónde salió el número cuando vino de una búsqueda web. Se enseña al usuario: si un
+    # dato no viene del ETL, que se vea de dónde viene (R9).
+    source_url: str | None = None
 
 
 def _round(value: float, digits: int = 1) -> float:
@@ -148,6 +151,7 @@ def _from_estimate(entry: dict) -> ProposedItem:
         carbs_g=_scaled(macro("carbs_100g"), grams),
         food_id=None,
         estimated=True,
+        source_url=str(entry.get("source_url") or "") or None,
     )
 
 

@@ -160,6 +160,7 @@ async def test_no_tool_call_still_succeeds_with_no_match_warning(
         "warning": "NO_MATCH",
         "pregunta": None,
         "no_encontrados": [],
+        "proposal": None,
     }
 
 
@@ -211,7 +212,10 @@ async def test_request_raises_ai_not_configured_without_credential(two_users):
         await session.execute(text("DELETE FROM ai_credentials"))
         await session.commit()
         with pytest.raises(AppError) as exc_info:
-            await flow.request_smart_log(session, user_id, text="dos huevos")
+            await flow.request_smart_log(
+                session, user_id, text="dos huevos", log_date="2026-09-24",
+                meal_type="lunch"
+            )
         assert exc_info.value.code == "AI_NOT_CONFIGURED"
 
 
@@ -227,7 +231,10 @@ async def test_request_raises_no_candidate_foods_when_search_finds_nothing(
 
     async with AdminSessionLocal() as session:
         with pytest.raises(AppError) as exc_info:
-            await flow.request_smart_log(session, user_id, text="algo muy raro")
+            await flow.request_smart_log(
+                session, user_id, text="algo muy raro", log_date="2026-09-24",
+                meal_type="lunch"
+            )
     assert exc_info.value.code == "NO_CANDIDATE_FOODS"
 
 
@@ -250,7 +257,9 @@ async def test_request_creates_running_session_and_enqueues_job(
     monkeypatch.setattr(flow, "enqueue_smart_log_job", _fake_enqueue)
 
     async with AdminSessionLocal() as session:
-        ai_session = await flow.request_smart_log(session, user_id, text="un huevo")
+        ai_session = await flow.request_smart_log(
+            session, user_id, text="un huevo", log_date="2026-09-24", meal_type="lunch"
+        )
 
     assert ai_session.status == "running"
     assert ai_session.kind == "smart_log"

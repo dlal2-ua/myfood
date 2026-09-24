@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import { submitOrQueue } from "@/lib/offlineQueue";
+import { DiaryProposalCard } from "@/components/chat/DiaryProposalCard";
 import { describeInterpretation, ORIGIN_LABELS } from "@/lib/smartLog";
 import {
   MEAL_TYPE_LABELS,
@@ -52,6 +53,8 @@ export function PlatePhotoPanel({
   const [missing, setMissing] = useState<string[]>([]);
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [confirmingIndex, setConfirmingIndex] = useState<number | null>(null);
+  const [webProposal, setWebProposal] = useState<SmartLogResult["proposal"]>(null);
+  const [webDeciding, setWebDeciding] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollCountRef = useRef(0);
   const elapsed = useElapsedSeconds(analysing);
@@ -97,6 +100,7 @@ export function PlatePhotoPanel({
         setWarning(found.length === 0 ? (payload?.warning ?? "NO_MATCH") : null);
         setQuestion(payload?.pregunta ?? null);
         setMissing(payload?.no_encontrados ?? []);
+        setWebProposal(payload?.proposal ?? null);
         resolve();
       };
       void tick();
@@ -116,6 +120,7 @@ export function PlatePhotoPanel({
     setWarning(null);
     setQuestion(null);
     setMissing([]);
+    setWebProposal(null);
     setItems([]);
     try {
       if (consent) {
@@ -144,6 +149,26 @@ export function PlatePhotoPanel({
       reloadQuota();
       // Para poder volver a elegir la MISMA foto si algo falló.
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  /** La propuesta del respaldo web se acepta entera, como la del chat: son valores estimados
+   * que no vienen del catálogo, así que se enseñan juntos con su fuente y se confirman de una
+   * vez en vez de línea a línea. */
+  async function decideWebProposal(decision: "approve" | "reject") {
+    const proposal = webProposal;
+    if (!proposal) return;
+    setWebDeciding(true);
+    try {
+      await apiFetch(`/api/ai/proposals/${proposal.ai_proposal_id}/${decision}`, {
+        method: "POST",
+      });
+      setWebProposal(null);
+      if (decision === "approve") onAdded();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setWebDeciding(false);
     }
   }
 
@@ -265,6 +290,20 @@ export function PlatePhotoPanel({
           </Link>{" "}
           — ese sí sabe estimar un plato que no tenemos fichado.
         </p>
+      )}
+
+      {webProposal && (
+        <div className="mt-4">
+          <p className="mb-2 text-sm text-neutral-600 dark:text-neutral-400">
+            Esto no estaba en el catálogo, así que se ha buscado en internet. Los valores son
+            una estimación y se apuntan marcados como tal:
+          </p>
+          <DiaryProposalCard
+            payload={webProposal.payload}
+            deciding={webDeciding}
+            onDecide={(decision) => void decideWebProposal(decision)}
+          />
+        </div>
       )}
 
       {items.length > 0 && (

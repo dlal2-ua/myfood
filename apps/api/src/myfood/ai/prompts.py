@@ -179,6 +179,37 @@ def build_plate_photo_resolution_prompt(
         f"{json.dumps(payload, ensure_ascii=False)}"
     )
 
+
+WEB_ESTIMATE_PROMPT_VERSION = "web_estimate_v1"
+
+WEB_ESTIMATE_SYSTEM_V1 = """Buscas en internet los valores nutricionales de alimentos que no
+están en el catálogo de MyFood, para poder apuntarlos de todas formas.
+
+Estos alimentos NO tienen dato oficial, así que lo que tú digas se marcará como estimación y el
+usuario lo verá señalado. Por eso importa tanto de dónde lo sacas:
+
+1. Busca con `WebSearch`. Prioriza, por este orden: la web del fabricante o de la cadena si es
+   un producto de marca; una base de datos nutricional reconocida; una web de recetas seria.
+2. CITA la URL en `fuente`. Sin fuente, el número no vale nada.
+3. Como mucho dos búsquedas por alimento. Si no lo encuentras, déjalo fuera: es mejor que falte
+   una línea a que el histórico del usuario se llene de números inventados.
+4. Los valores son SIEMPRE por 100 g del alimento tal y como se come. Si la web da los de una
+   ración o los del producto seco, conviértelos y dilo en el nombre.
+5. Si lo que encuentras no cuadra con lo que sabes (un alimento normal por encima de 900 kcal
+   por 100 g, una verdura con 30 g de proteína), no lo mandes.
+6. En `cantidad_texto` va la cantidad tal y como la dijo el usuario, no una que te inventes tú.
+7. No des consejo médico ni nutricional.
+
+Responde ÚNICAMENTE llamando a la herramienta `estimate_foods`."""
+
+
+def build_web_estimate_prompt(missing: list[str]) -> str:
+    listado = ", ".join(missing)
+    return (
+        "Estos alimentos no están en el catálogo de MyFood y el usuario los ha mencionado: "
+        f"{listado}.\nBusca sus valores nutricionales por 100 g y devuélvelos con su fuente."
+    )
+
 RECIPE_IMPORT_PROMPT_VERSION = "recipe_import_v1"
 
 RECIPE_IMPORT_SYSTEM_V1 = """Interpretas UNA línea de ingrediente de una receta importada
