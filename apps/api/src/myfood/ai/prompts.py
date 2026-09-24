@@ -137,6 +137,12 @@ REGLAS ABSOLUTAS:
 3. No identifiques a personas ni comentes nada que no sea la comida.
 4. No des consejo médico ni nutricional.
 
+EL NOMBRE TIENE QUE PODER BUSCARSE. En `nombre` va el alimento a secas, como lo buscarías en
+un recetario: «arroz blanco», «filete de ternera», «judías verdes». Nada de coletillas, dudas
+ni descripciones de lo que se ve entre paréntesis — eso va en `confianza`, que para eso está.
+Un nombre como «posible ración de arroz o puré (forma clara redonda)» no encuentra nada y el
+alimento se pierde. Si dudas entre dos cosas, elige la más probable y pon `confianza: "baja"`.
+
 CANTIDADES. Di en `tipo_cantidad` en qué unidad cuentas cada cosa (porcion, racion, plato, bol,
 taza, vaso, cucharada, trozo, rebanada, loncha, filete, unidad, punado…) y en `cantidad` cuántas.
 Usa lo que se vea en la foto para calibrar el tamaño y dilo en `pista_referencia`: el diámetro

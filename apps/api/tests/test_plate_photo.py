@@ -216,3 +216,69 @@ async def test_la_sesion_guarda_la_comida_y_el_dia_para_la_pantalla(
         assert ai_session.request_payload["meal_type"] == "dinner"
     finally:
         Path(ai_session.request_payload["image_path"]).unlink(missing_ok=True)
+
+
+async def test_las_coletillas_del_modelo_no_se_buscan(
+    two_users, configured_credential, monkeypatch
+):
+    """Meilisearch exige que TODOS los términos estén en el documento, así que «arroz blanco
+    (forma clara redonda)» no encuentra nada y el alimento se pierde. El prompt pide que no las
+    use; esto es la red por si las usa igualmente."""
+    user_id, _ = two_users
+    ai_session = await _request(user_id)
+    buscado = {}
+
+    async def _sees(**kwargs):
+        for tool_obj in kwargs.get("mcp_tools") or []:
+            await tool_obj.handler(
+                {
+                    "alimentos": [
+                        {"nombre": "arroz blanco (forma clara redonda)", "cantidad": 1,
+                         "tipo_cantidad": "porcion"}
+                    ]
+                }
+            )
+        return AgentResult(text="", input_tokens=1, output_tokens=1)
+
+    async def _capture(texto):
+        buscado["texto"] = texto
+        return []
+
+    monkeypatch.setattr(flow, "run_agent", _sees)
+    monkeypatch.setattr(flow, "search_candidates_for_text", _capture)
+    await flow.process_plate_photo_job(str(ai_session.id))
+
+    assert buscado["texto"] == "arroz blanco"
+
+
+async def test_sin_nada_en_el_catalogo_se_intenta_el_respaldo_web(
+    two_users, configured_credential, monkeypatch
+):
+    """Que el catálogo no tenga NADA de lo que hay en el plato es justo cuando más falta hace
+    el respaldo: antes se salía antes de llegar a buscarlo."""
+    user_id, _ = two_users
+    ai_session = await _request(user_id)
+    pedido = {}
+
+    async def _sees(**kwargs):
+        for tool_obj in kwargs.get("mcp_tools") or []:
+            await tool_obj.handler(
+                {"alimentos": [{"nombre": "pastel de cabracho", "cantidad": 1,
+                                "tipo_cantidad": "racion"}]}
+            )
+        return AgentResult(text="", input_tokens=1, output_tokens=1)
+
+    async def _nothing(_texto):
+        return []
+
+    async def _fake_fallback(session, **kwargs):
+        pedido.update(kwargs)
+        return None, None
+
+    monkeypatch.setattr(flow, "run_agent", _sees)
+    monkeypatch.setattr(flow, "search_candidates_for_text", _nothing)
+    monkeypatch.setattr(flow, "estimate_missing_foods", _fake_fallback)
+    await flow.process_plate_photo_job(str(ai_session.id))
+
+    assert pedido["missing"] == ["pastel de cabracho"]
+    assert pedido["meal_type"] == "lunch"
