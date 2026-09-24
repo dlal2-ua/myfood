@@ -215,7 +215,11 @@ DESCRIBE_PLATE_SCHEMA: dict[str, Any] = {
                     "nombre": {
                         "type": "string",
                         "maxLength": 80,
-                        "description": "En español y como lo diría alguien: «tortilla de patatas».",
+                        "description": (
+                            "El alimento a secas, en español y como se buscaría en un "
+                            "recetario: «tortilla de patatas», «arroz blanco». Sin "
+                            "coletillas ni paréntesis: con ellos no se encuentra nada."
+                        ),
                     },
                     "cantidad": {"type": "number", "minimum": 0.1, "maximum": 20},
                     "tipo_cantidad": {"type": "string", "enum": list(TIPOS_DE_CANTIDAD)},

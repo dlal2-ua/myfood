@@ -21,6 +21,7 @@ el ticket de la compra.
 from __future__ import annotations
 
 import base64
+import re
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -60,6 +61,11 @@ _SUPPORTED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 # unos 1.000 tokens visuales. Subirla al máximo que admite el modelo (2576 px) la lleva a 4.784,
 # casi cinco veces más, y para saber si eso es una tortilla no hace ninguna falta.
 _MAX_SIDE_PX = 1024
+# Lo que el modelo ponga entre paréntesis es una aclaración suya, no parte del nombre del
+# alimento, y Meilisearch exige que TODOS los términos estén en el documento: con la
+# coletilla dentro, «arroz blanco (forma clara)» no encuentra nada. El prompt ya pide que
+# no las use; esto es la red por si las usa igualmente.
+_PARENTHETICAL_RE = re.compile(r"\s*\([^)]*\)")
 # Subcarpeta de `image_storage_path` (sección 12) — mismo disco compartido entre `api` y
 # `worker` que las imágenes de alimentos y los tickets.
 _PLATES_DIR = Path(get_settings().image_storage_path) / "plates"
@@ -136,6 +142,11 @@ async def process_plate_photo_job(ai_session_id: str) -> None:
             image_path.unlink(missing_ok=True)
 
 
+def _clean_name(raw: object) -> str:
+    """El nombre tal y como se va a buscar, sin las aclaraciones del modelo."""
+    return _PARENTHETICAL_RE.sub("", str(raw or "")).strip()
+
+
 async def _process(session: AsyncSession, ai_session: AiSession, image_path: Path) -> None:
     token = await ai_client.get_decrypted_token(session)
     if token is None:
@@ -198,16 +209,32 @@ async def _process(session: AsyncSession, ai_session: AiSession, image_path: Pat
     # --- Fase 2: a qué alimentos del catálogo corresponden ---------------------------------
     # Se busca por el nombre de cada cosa vista, igual que el registro por texto busca por
     # cada mención. A partir de aquí el camino es exactamente el mismo.
-    search_text = ", ".join(str(food.get("nombre", "")) for food in seen if food.get("nombre"))
-    hits = await search_candidates_for_text(search_text)
+    names = [_clean_name(food.get("nombre")) for food in seen]
+    names = [name for name in names if name]
+    hits = await search_candidates_for_text(", ".join(names))
     hits = await filter_restricted(session, ai_session.user_id, hits)
     if not hits:
+        # Que el catálogo no tenga NADA de lo que hay en el plato es justo cuando más falta
+        # hace el respaldo: antes se salía por aquí sin llegar a buscarlo.
+        proposal, web_result = await estimate_missing_foods(
+            session,
+            token=token,
+            user_id=ai_session.user_id,
+            ai_session=ai_session,
+            missing=names[:5],
+            log_date=ai_session.request_payload["log_date"],
+            meal_type=ai_session.request_payload["meal_type"],
+        )
+        if web_result is not None:
+            input_tokens += web_result.input_tokens or 0
+            output_tokens += web_result.output_tokens or 0
         ai_session.status = "succeeded"
         ai_session.response_payload = {
             "items": [],
             "warning": "NO_MATCH",
             "pregunta": None,
-            "no_encontrados": [str(f.get("nombre")) for f in seen if f.get("nombre")][:5],
+            "no_encontrados": names[:5],
+            "proposal": proposal,
             "visto": seen,
         }
         ai_session.input_tokens = input_tokens
