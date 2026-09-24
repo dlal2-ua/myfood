@@ -179,8 +179,8 @@ async def _process(session: AsyncSession, ai_session: AiSession, image_path: Pat
             system_prompt=PLATE_PHOTO_SYSTEM_V1,
             mcp_tools=[tools.build_describe_plate_tool(sink)],
             images=[("image/jpeg", image_b64)],
-            # Tres no son de sobra: con 2 el CLI corta con «Reached maximum number of turns»
-            # antes de que la llamada a la herramienta llegue a cerrarse (visto en vivo).
+            # Con 2 el CLI corta con «Reached maximum number of turns» antes de que la
+            # llamada a la herramienta llegue a cerrarse (visto en vivo, en las dos fases).
             max_turns=4,
             timeout_seconds=_VISION_TIMEOUT_SECONDS,
         )
