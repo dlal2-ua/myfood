@@ -17,6 +17,7 @@ from __future__ import annotations
 import functools
 import random
 import re
+import unicodedata
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -266,6 +267,36 @@ def _adjust_grams(grams: float, original: float, alternative: float) -> float | 
     return max(5.0, round(adjusted / 5) * 5)
 
 
+# Palabras que no distinguen un alimento de otro: si dos nombres solo se diferencian en éstas,
+# son el mismo alimento escrito con más o menos detalle.
+_ALTERNATIVE_STOPWORDS = frozenset(
+    """de del la el los las y con sin al a en un una fresco fresca frescos frescas natural
+    naturales crudo cruda crudos crudas entero entera enteros enteras tipo variedad gr g kg
+    envasado envasada envasados envasadas""".split()
+)
+
+
+def _significant_words(name: str) -> frozenset[str]:
+    plain = unicodedata.normalize("NFD", name.lower())
+    plain = "".join(c for c in plain if unicodedata.category(c) != "Mn")
+    words = re.findall(r"[a-z]+", plain)
+    return frozenset(w for w in words if len(w) > 2 and w not in _ALTERNATIVE_STOPWORDS)
+
+
+def _is_the_same_food(a: frozenset[str], b: frozenset[str]) -> bool:
+    """Si las palabras de un nombre contienen todas las del otro, es el mismo alimento.
+
+    «Pechuga de pollo» y «Filete de pechuga de pollo» no son alternativas: son el mismo
+    alimento de otra marca. Y por cercanía nutricional son justo lo primero que sale, porque
+    lo más parecido a un producto envasado es el mismo producto envasado por otro. La regla es
+    de subconjunto y no de parecido: «Pavo, pechuga» comparte «pechuga» con «Pechuga de pollo»
+    y sí es una alternativa de verdad, así que no puede caer.
+    """
+    if not a or not b:
+        return False
+    return a <= b or b <= a
+
+
 async def find_alternatives(
     session: AsyncSession,
     food_id: UUID,
@@ -303,10 +334,15 @@ async def find_alternatives(
     original_kcal = float(original.kcal_100g)
     original_protein = float(original.protein_100g or 0)
     seen_names = {original.name_es.strip().lower()}
+    original_words = _significant_words(original.name_es)
+    seen_words = [original_words]
     alternatives: list[Alternative] = []
     for row in rows:
         name_key = row.name_es.strip().lower()
         if name_key in seen_names:
+            continue
+        words = _significant_words(row.name_es)
+        if any(_is_the_same_food(words, other) for other in seen_words):
             continue
         if keep_group and _group_of(row.name_es, row.category) != group:
             continue
@@ -322,6 +358,7 @@ async def find_alternatives(
             if not bounds.min_g * _ADJUST_SLACK[0] <= adjusted <= bounds.max_g * _ADJUST_SLACK[1]:
                 continue
         seen_names.add(name_key)
+        seen_words.append(words)
         alternatives.append(
             Alternative(
                 food_id=row.food_id,
