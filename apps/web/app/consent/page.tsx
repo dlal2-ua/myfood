@@ -23,7 +23,10 @@ export default function ConsentPage() {
         method: "POST",
         body: JSON.stringify({ kind: "health_data", version: "v1" }),
       });
-      router.push("/profile");
+      // Al asistente y no a «/profile»: es lo mismo que hace falta rellenar, pero en tres
+      // pantallas cortas, saltable, y acabando en unas calorías objetivo en vez de en un
+      // formulario de veinte campos.
+      router.push("/bienvenida");
       router.refresh();
     } catch (err) {
       setError(errorMessage(err));

@@ -58,7 +58,10 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
         return;
       }
       await clearUserCaches();
-      router.push("/");
+      // Quien acaba de registrarse va al consentimiento —que es lo que este formulario le
+      // promete— y de ahí al asistente; quien entra, a su día. Antes caía en «/» con los
+      // consentimientos pendientes y solo se le rebotaba a «/consent» al intentar moverse.
+      router.push(mode === "register" ? "/consent" : "/");
       router.refresh();
     } catch (err) {
       setError(errorMessage(err));
