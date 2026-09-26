@@ -13,6 +13,8 @@ from myfood.domain import food_groups as fg
 from myfood.domain.diet_engine import CandidateFood
 from myfood.domain.food_candidates import (
     PLAN_SOURCES,
+    _is_the_same_food,
+    _significant_words,
     find_alternatives,
     sample_day_pool,
     select_candidates,
@@ -87,10 +89,11 @@ async def catalog(superuser_conn):
         "magra": await _insert(
             conn, "Carne magra imposible (alt)", 40, 8, 0.5, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.05]
         ),
-        # USDA, ya traducido: desde la migración 0021 sí se ofrece como alternativa
+        # USDA, ya traducido: desde la migración 0021 sí se ofrece como alternativa. Otro
+        # alimento de verdad, no otro nombre del pavo: el filtro de duplicados lo tumbaría.
         "usda": await _insert(
             conn,
-            "Pavo, pechuga, asada (alt)",
+            "Lomo de cerdo (alt)",
             135,
             30,
             1.5,
@@ -101,7 +104,7 @@ async def catalog(superuser_conn):
         # Una fuente que NO arma planes: los alimentos de prueba nunca se ofrecen.
         "fuera_del_plan": await _insert(
             conn,
-            "Pavo de prueba (alt)",
+            "Conejo de prueba (alt)",
             136,
             30,
             1.5,
@@ -373,3 +376,63 @@ def test_the_day_pool_keeps_every_candidate_without_a_group_and_can_be_widened()
     pool = sample_day_pool(ungrouped + members, random.Random(1), per_group=12)
     assert {c.id for c in pool} >= {"g0", "g1", "g2"}
     assert sum(c.group == fg.MEAT for c in pool) == 12
+
+
+# --- una alternativa es otro alimento, no otra marca del mismo -------------------------------
+
+
+def test_un_nombre_que_contiene_al_otro_es_el_mismo_alimento():
+    """Por cercanía nutricional, lo primero que sale como «alternativa» a un producto envasado
+    es el mismo producto envasado por otro: «Pechuga De Pollo» proponía «Filete de pechuga de
+    pollo» y «Pechuga entera de pollo»."""
+    pollo = _significant_words("Pechuga De Pollo")
+    assert _is_the_same_food(pollo, _significant_words("Filete de pechuga de pollo"))
+    assert _is_the_same_food(pollo, _significant_words("Pechuga entera de pollo"))
+    assert _is_the_same_food(
+        _significant_words("Yogur natural"), _significant_words("Yogur natural desnatado")
+    )
+
+
+def test_una_alternativa_de_verdad_sobrevive_aunque_comparta_palabras():
+    """La regla es de subconjunto y no de parecido a propósito: «Pavo, pechuga» comparte
+    «pechuga» con «Pechuga de pollo» y es justo la alternativa que se busca."""
+    pollo = _significant_words("Pechuga De Pollo")
+    assert not _is_the_same_food(pollo, _significant_words("Pavo, pechuga"))
+    assert not _is_the_same_food(pollo, _significant_words("Merluza, cruda"))
+    assert not _is_the_same_food(_significant_words("Yogur natural"), _significant_words("Kéfir"))
+
+
+def test_las_palabras_que_no_distinguen_no_cuentan():
+    """«Fresco», «crudo» o «de» no diferencian un alimento de otro, y los acentos tampoco."""
+    assert _significant_words("Pollo, pechuga fresca cruda") == _significant_words("pechuga pollo")
+    assert _significant_words("Kéfir") == _significant_words("kefir")
+
+
+async def test_no_se_ofrecen_dos_marcas_del_mismo_producto(registered_client, superuser_conn):
+    """El filtro compara también contra las alternativas ya aceptadas: si no, dos marcas del
+    mismo producto pasaban las dos porque solo se miraban contra el original."""
+    conn = superuser_conn
+    ids = {
+        "original": await _insert(
+            conn, "Pechuga de pollo (dup)", 108, 22, 2, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0]
+        ),
+        "marca_a": await _insert(
+            conn, "Filete de pechuga de pollo (dup)", 108, 22, 2, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.01]
+        ),
+        "marca_b": await _insert(
+            conn, "Pechuga de pollo entera (dup)", 109, 22, 2, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.02]
+        ),
+        "pavo": await _insert(
+            conn, "Pavo, pechuga (dup)", 135, 30, 1.5, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.03]
+        ),
+    }
+    await conn.commit()
+    try:
+        _client, user_id = registered_client
+        async with AdminSessionLocal() as session:
+            found = await find_alternatives(session, ids["original"], 150.0, user_id, limit=10)
+        nombres = [a.name_es for a in found]
+        assert "Pavo, pechuga (dup)" in nombres
+        assert not any("pechuga de pollo" in n.lower() for n in nombres)
+    finally:
+        await _cleanup(conn, [str(i) for i in ids.values()])
