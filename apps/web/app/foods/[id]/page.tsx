@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import { AddToLogForm } from "@/components/AddToLogForm";
+import { SimilarFoods } from "@/components/foods/SimilarFoods";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { Favorite, FoodDetail } from "@/lib/types";
 import { Skeleton } from "@/components/ui/states";
@@ -215,6 +216,8 @@ export default function FoodDetailPage() {
       </p>
 
       <AddToLogForm food={food} />
+
+      <SimilarFoods foodId={food.id} grams={food.default_grams} />
     </main>
   );
 }

@@ -236,6 +236,22 @@ export interface MicronutrientsDay {
   nutrients: Micronutrient[];
 }
 
+/** Alternativa para cambiar un alimento por otro parecido. `grams` ya viene ajustado para
+ * conservar las calorías (o la proteína) de la cantidad original: sustituir 100 g por 100 g no
+ * conserva nada. */
+export interface SimilarFoodItem {
+  id: string;
+  name_es: string;
+  brand: string | null;
+  kcal_100g: number | null;
+  distance: number;
+  grams: number;
+}
+
+export interface SimilarFoodsResponse {
+  items: SimilarFoodItem[];
+}
+
 export interface Favorite {
   id: string;
   food_id: string;
@@ -378,6 +394,22 @@ export interface TodayDose {
   time_of_day: string;
   with_food: boolean;
   status: "taken" | "skipped" | "pending" | "overdue";
+}
+
+/** Una toma registrada. Hace falta su `id` para poder deshacerla: `/supplements/today` dice el
+ * estado de cada franja pero no qué fila borrar. */
+export interface SupplementLogEntry {
+  id: string;
+  supplement_id: string;
+  supplement_name: string;
+  log_date: string;
+  taken_at: string;
+  skipped: boolean;
+}
+
+export interface SupplementLogDay {
+  date: string;
+  entries: SupplementLogEntry[];
 }
 
 export interface SupplementsToday {

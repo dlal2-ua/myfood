@@ -6,7 +6,15 @@ import { apiFetch, errorMessage } from "@/lib/api";
 import Link from "next/link";
 import { SupplementSuggestions } from "@/components/SupplementSuggestions";
 import { UserImageUpload } from "@/components/UserImageUpload";
-import type { Supplement, SupplementList, SupplementsToday, TodayDose } from "@/lib/types";
+import { Undo2 } from "lucide-react";
+import type {
+  Supplement,
+  SupplementList,
+  SupplementLogDay,
+  SupplementLogEntry,
+  SupplementsToday,
+  TodayDose,
+} from "@/lib/types";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
 const inputClass =
@@ -63,12 +71,22 @@ const STATUS_LABELS: Record<TodayDose["status"], string> = {
 
 function TodayPanel({ reload }: { reload: () => void }) {
   const [today, setToday] = useState<SupplementsToday | null>(null);
+  const [entries, setEntries] = useState<SupplementLogEntry[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Dos peticiones porque son dos cosas distintas: `/today` dice qué toca según los horarios,
+  // y `/log` qué se ha registrado de verdad. Hace falta lo segundo para poder deshacer: un
+  // «tomada» pulsado por error no tenía vuelta atrás.
   const refresh = () =>
-    apiFetch<SupplementsToday>("/api/supplements/today")
-      .then(setToday)
+    Promise.all([
+      apiFetch<SupplementsToday>("/api/supplements/today"),
+      apiFetch<SupplementLogDay>(`/api/supplements/log?date=${todayIso()}`),
+    ])
+      .then(([hoy, registro]) => {
+        setToday(hoy);
+        setEntries(registro.entries);
+      })
       .catch((err) => setError(errorMessage(err)));
 
   useEffect(() => {
@@ -83,6 +101,21 @@ function TodayPanel({ reload }: { reload: () => void }) {
         method: "POST",
         body: JSON.stringify({ log_date: todayIso(), skipped }),
       });
+      await refresh();
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Deshace una toma: borra la fila y devuelve la dosis al stock (lo hace el servidor). */
+  async function undo(entryId: string, key: string) {
+    setBusy(key);
+    setError(null);
+    try {
+      await apiFetch(`/api/supplements/log/${entryId}`, { method: "DELETE" });
       await refresh();
       reload();
     } catch (err) {
@@ -118,7 +151,26 @@ function TodayPanel({ reload }: { reload: () => void }) {
                 {d.with_food && <span className="text-neutral-500"> · con comida</span>}
               </span>
               {done ? (
-                <span className="text-xs text-neutral-500">{STATUS_LABELS[d.status]}</span>
+                <span className="flex items-center gap-2">
+                  <span className="text-xs text-neutral-500">{STATUS_LABELS[d.status]}</span>
+                  {(() => {
+                    // La fila que se borraría: la última registrada hoy de ese suplemento.
+                    const entry = [...entries]
+                      .reverse()
+                      .find((e) => e.supplement_id === d.supplement_id);
+                    if (!entry) return null;
+                    return (
+                      <button
+                        type="button"
+                        disabled={busy === d.schedule_id}
+                        onClick={() => void undo(entry.id, d.schedule_id)}
+                        className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border-strong)] px-2 py-1 text-xs font-medium disabled:opacity-60"
+                      >
+                        <Undo2 size={12} aria-hidden="true" /> Deshacer
+                      </button>
+                    );
+                  })()}
+                </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <span

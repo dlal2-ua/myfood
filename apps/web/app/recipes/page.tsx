@@ -143,6 +143,24 @@ export default function RecipesPage() {
     }
   }
 
+  /** Añade un ingrediente a una receta ya creada.
+   *
+   * Faltaba: se podían editar los gramos de los que tenía y quitarlos, pero no meter uno
+   * nuevo — para eso había que borrar la receta y volver a crearla. El endpoint existía. */
+  async function onAddIngredient(food: FoodSearchItem) {
+    if (!selected) return;
+    setDetailError(null);
+    try {
+      await apiFetch(`/api/recipes/${selected.id}/ingredients`, {
+        method: "POST",
+        body: JSON.stringify({ food_id: food.id, grams: 100 }),
+      });
+      await loadDetail(selected.id);
+    } catch (err) {
+      setDetailError(errorMessage(err));
+    }
+  }
+
   function addPickedFoodToNewIngredients() {
     if (!pickedFood) return;
     setNewIngredients((prev) => [...prev, { food: pickedFood, grams: pickedGrams }]);
@@ -628,6 +646,13 @@ export default function RecipesPage() {
                     </li>
                   ))}
                 </ul>
+                <div className="mt-3">
+                  <p className="mb-1 text-sm font-medium">Añadir un ingrediente</p>
+                  <FoodSearchBox onSelect={(food) => void onAddIngredient(food)} />
+                  <p className="mt-1 text-xs text-neutral-500">
+                    Entra con 100 g; ajusta la cantidad en la lista de arriba.
+                  </p>
+                </div>
                 <div className="mt-4 flex gap-6 text-sm">
                   <div>
                     <p className="text-neutral-500">Total</p>
