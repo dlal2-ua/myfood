@@ -81,6 +81,8 @@ export const MEAL_TYPE_LABELS: Record<MealType, string> = {
 export interface FoodSearchItem {
   id: string;
   name_es: string;
+  /** Nombre para listas; `null` mientras el alimento no lo tenga (`etl/short_names.py`). */
+  name_short?: string | null;
   brand: string | null;
   kcal_100g: number | null;
   protein_100g: number | null;

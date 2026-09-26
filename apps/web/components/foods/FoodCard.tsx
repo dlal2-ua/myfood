@@ -1,3 +1,4 @@
+import { listName } from "@/lib/foodName";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { FoodImage } from "@/components/FoodImage";
@@ -52,7 +53,7 @@ export function FoodRow({ item, onAdd }: { item: FoodSearchItem; onAdd?: () => v
     >
       <FoodImage foodId={item.id} size={200} px={60} className="rounded-2xl" />
       <span className="min-w-0 flex-1">
-        <span className="line-clamp-2 text-[15px] font-bold leading-snug">{item.name_es}</span>
+        <span className="line-clamp-2 text-[15px] font-bold leading-snug">{listName(item)}</span>
         <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
           {item.supermarket && (
             <span className="rounded-full bg-[var(--color-primary-soft)] px-2 py-0.5 text-[11px] font-bold text-[var(--color-primary)]">
@@ -74,7 +75,7 @@ export function FoodRow({ item, onAdd }: { item: FoodSearchItem; onAdd?: () => v
     </Link>
       {onAdd && (
         <span className="absolute right-3 top-1/2 -translate-y-1/2">
-          <AddButton onAdd={onAdd} name={item.name_es} />
+          <AddButton onAdd={onAdd} name={listName(item)} />
         </span>
       )}
     </div>
@@ -91,7 +92,7 @@ export function FoodTile({ item, onAdd }: { item: FoodSearchItem; onAdd?: () => 
       className="flex w-40 shrink-0 flex-col gap-2 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-[var(--shadow-card)] transition-colors hover:border-[var(--color-primary)]"
     >
       <FoodImage foodId={item.id} size={200} px={64} className="rounded-2xl" />
-      <span className="line-clamp-2 min-h-[2.5rem] text-sm font-bold leading-snug">{item.name_es}</span>
+      <span className="line-clamp-2 min-h-[2.5rem] text-sm font-bold leading-snug">{listName(item)}</span>
       {(item.supermarket || brand) && (
         <span className="truncate text-xs text-[var(--color-muted)]">{item.supermarket ?? brand}</span>
       )}
@@ -104,7 +105,7 @@ export function FoodTile({ item, onAdd }: { item: FoodSearchItem; onAdd?: () => 
     </Link>
       {onAdd && (
         <span className="absolute bottom-2 right-2">
-          <AddButton onAdd={onAdd} name={item.name_es} />
+          <AddButton onAdd={onAdd} name={listName(item)} />
         </span>
       )}
     </div>

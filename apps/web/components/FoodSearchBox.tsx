@@ -1,5 +1,6 @@
 "use client";
 
+import { listName } from "@/lib/foodName";
 import { ScoreBadges } from "@/components/ScoreBadges";
 import { FoodImage } from "@/components/FoodImage";
 import { brandLabel } from "@/lib/foodDisplay";
@@ -54,7 +55,7 @@ export function FoodSearchBox({ onSelect }: { onSelect: (item: FoodSearchItem) =
                 <span className="flex items-center gap-3">
                   <FoodImage foodId={item.id} />
                   <span>
-                    {item.name_es}
+                    {listName(item)}
                     {item.supermarket && (
                       <span className="ml-2 rounded-full bg-[var(--color-primary-soft)] px-2 py-0.5 text-[11px] font-bold text-[var(--color-primary)]">
                         {item.supermarket}
