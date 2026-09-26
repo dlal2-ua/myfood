@@ -54,6 +54,17 @@ export function SavedMeals({
     void load();
   }, [load, reloadKey]);
 
+  // Sin comidas guardadas la sección no se pinta, para no dejar una caja vacía más en el
+  // diario. Pero al «+» sí se llega a propósito, y entonces no puede no llevar a ninguna
+  // parte: si se viene por el ancla, se explica cómo se guarda una.
+  const [buscado, setBuscado] = useState(false);
+  useEffect(() => {
+    const mirar = () => setBuscado(window.location.hash === "#guardadas");
+    mirar();
+    window.addEventListener("hashchange", mirar);
+    return () => window.removeEventListener("hashchange", mirar);
+  }, []);
+
   async function repeat(meal: SavedMeal) {
     setBusy(meal.id);
     setError(null);
@@ -89,13 +100,16 @@ export function SavedMeals({
     }
   }
 
-  if (meals !== null && meals.length === 0) return null;
+  const vacia = meals !== null && meals.length === 0;
+  if (vacia && !buscado) return null;
 
   return (
     <section id="guardadas" className={`scroll-mt-20 ${card} p-4`}>
       <h2 className="text-lg font-semibold">Lo de siempre</h2>
       <p className="mb-3 text-sm text-neutral-500">
-        Comidas que has guardado. Un toque y se apuntan enteras.
+        {vacia
+          ? "Todavía no has guardado ninguna. Apunta una comida como siempre y dale a «Guardar» en su cabecera: a partir de ahí la repites entera de un toque."
+          : "Comidas que has guardado. Un toque y se apuntan enteras."}
       </p>
       {error && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
       {meals === null ? (
