@@ -33,11 +33,16 @@ from myfood.domain.food_groups import (
     is_staple,
 )
 
-# Solo se arman planes con alimentos de fuentes con nombre en español: el catálogo de USDA y
-# CIQUAL trae los nombres en inglés y francés y un plan con «Beef, chuck, arm pot roast…» no lo
-# puede leer nadie. Siguen siendo buscables y registrables; solo quedan fuera del motor y de las
-# alternativas de un plan hasta que tengan nombre en español.
-PLAN_SOURCES = ("bedca", "off")
+# Solo se arman planes con alimentos de fuentes con nombre en español: un plan con «Beef,
+# chuck, arm pot roast…» no lo puede leer nadie.
+#
+# USDA y CIQUAL entraron aquí cuando se tradujeron sus 10.171 nombres (migración 0021). Hasta
+# entonces la lista eran BEDCA y OFF, y eso dejaba el motor trabajando con 429 genéricos frente
+# a 11.194 productos de supermercado: las alternativas a «pechuga de pollo» salían siendo otras
+# tres marcas de pechuga de pollo, porque por cercanía nutricional lo más parecido a un producto
+# de marca es el mismo producto de otra marca. Con los genéricos dentro, una alternativa vuelve
+# a ser otro alimento.
+PLAN_SOURCES = ("bedca", "off", "usda_foundation", "usda_sr", "ciqual")
 
 # Rango de kcal/100 g que tiene sentido para un alimento de cada grupo. Los aceites (~880) y los
 # frutos secos (~650) quedan fuera del rango general porque son grasa concentrada por naturaleza;

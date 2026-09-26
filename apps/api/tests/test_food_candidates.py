@@ -87,16 +87,27 @@ async def catalog(superuser_conn):
         "magra": await _insert(
             conn, "Carne magra imposible (alt)", 40, 8, 0.5, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.05]
         ),
-        # otra fuente: no se ofrece como alternativa de un alimento de BEDCA
+        # USDA, ya traducido: desde la migración 0021 sí se ofrece como alternativa
         "usda": await _insert(
             conn,
-            "Turkey breast (alt)",
+            "Pavo, pechuga, asada (alt)",
             135,
             30,
             1.5,
             0,
             source="usda_sr",
             vec=[0.5, 0.9, 0.1, 0, 0, 0.06],
+        ),
+        # Una fuente que NO arma planes: los alimentos de prueba nunca se ofrecen.
+        "fuera_del_plan": await _insert(
+            conn,
+            "Pavo de prueba (alt)",
+            136,
+            30,
+            1.5,
+            0,
+            source="test",
+            vec=[0.5, 0.9, 0.1, 0, 0, 0.065],
         ),
         "pavo_repetido": await _insert(
             conn, "Pavo, pechuga (alt)", 140, 29, 2, 0, vec=[0.5, 0.9, 0.1, 0, 0, 0.07]
@@ -157,12 +168,21 @@ async def test_an_alternative_that_would_need_an_absurd_amount_is_not_offered(
     assert catalog["magra"] not in found
 
 
-async def test_a_source_without_spanish_names_is_not_offered_for_a_plan_food(
+async def test_a_source_that_does_not_build_plans_is_not_offered_as_an_alternative(
     registered_client, catalog
 ):
     _client, user_id = registered_client
     found = {a.food_id for a in await _alternatives(user_id, catalog)}
-    assert catalog["usda"] not in found
+    assert catalog["fuera_del_plan"] not in found
+
+
+async def test_usda_is_offered_now_that_its_names_are_in_spanish(registered_client, catalog):
+    """Entró en `PLAN_SOURCES` al traducirse (migración 0021). Sin sus 10.171 genéricos, las
+    alternativas a un producto de marca eran otras tres marcas del mismo producto: por cercanía
+    nutricional, lo más parecido a una pechuga de pollo envasada es otra pechuga envasada."""
+    _client, user_id = registered_client
+    found = {a.food_id for a in await _alternatives(user_id, catalog)}
+    assert catalog["usda"] in found
 
 
 async def test_two_alternatives_with_the_same_name_are_not_both_offered(registered_client, catalog):
@@ -210,7 +230,9 @@ async def pool_foods(superuser_conn):
         "nueces": await _insert(conn, "Nueces (pool)", 654, 15, 65, 7),
         "galletas": await _insert(conn, "Galletas María (pool)", 430, 7, 10, 75),
         "zumo": await _insert(conn, "Zumo de naranja (pool)", 45, 0.7, 0.2, 10),
-        "usda": await _insert(conn, "Chicken breast (pool)", 165, 31, 3.6, 0, source="usda_sr"),
+        "usda": await _insert(
+            conn, "Pechuga de pollo, cruda (pool)", 165, 31, 3.6, 0, source="usda_sr"
+        ),
         "dato_malo": await _insert(conn, "Pollo con datos malos (pool)", 6, 55, 36, 0),
         "azucar_puro": await _insert(conn, "Arroz que es todo almidón (pool)", 400, 0, 0, 100),
     }
@@ -225,10 +247,12 @@ async def _pool(user_id):
 
 
 async def test_the_pool_uses_only_spanish_named_sources(registered_client, pool_foods):
+    """Las cinco fuentes del catálogo tienen ya el nombre en español; las de prueba y las altas
+    manuales del usuario no arman planes."""
     _client, user_id = registered_client
-    assert set(PLAN_SOURCES) == {"bedca", "off"}
+    assert set(PLAN_SOURCES) == {"bedca", "off", "usda_foundation", "usda_sr", "ciqual"}
     pool = await _pool(user_id)
-    assert str(pool_foods["usda"]) not in pool
+    assert str(pool_foods["usda"]) in pool
     assert str(pool_foods["pollo"]) in pool
 
 
