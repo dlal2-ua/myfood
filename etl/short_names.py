@@ -43,8 +43,16 @@ def _api_imports():
     return AiAgentError, run_agent, get_decrypted_token, AdminSessionLocal
 
 
-BATCH_SIZE = 40
-TIMEOUT_SECONDS = 120.0
+# Lotes de 25 y no de 40 como la traducción: aquí se va de los nombres más largos a los
+# más cortos, así que los primeros lotes son el peor caso y con 40 se pasaban de tiempo.
+BATCH_SIZE = 25
+# Holgado a propósito: un lote de 25 nombres largos tarda de 2 a 5 minutos, y más cuando
+# hay varios a la vez. Con 180 s se caía la mitad por tiempo, y un lote caído es cuota
+# gastada para nada.
+TIMEOUT_SECONDS = 420.0
+# En serie son 12.000 alimentos a un lote cada tres minutos: más de un día. Cada lote es
+# una llamada independiente —no comparten nada— así que van en paralelo.
+DEFAULT_WORKERS = 6
 # Lo que cabe en una línea de una lista en un móvil sin truncarse.
 MAX_SHORT_CHARS = 42
 # Por debajo de esto no hay nada que acortar.
@@ -151,7 +159,7 @@ def revert() -> int:
         return cur.rowcount
 
 
-async def shorten_all(limit: int | None, dry_run: bool) -> int:
+async def shorten_all(limit: int | None, dry_run: bool, workers: int = DEFAULT_WORKERS) -> int:
     AiAgentError, run_agent, get_decrypted_token, AdminSessionLocal = _api_imports()
 
     async with AdminSessionLocal() as session:
@@ -164,54 +172,64 @@ async def shorten_all(limit: int | None, dry_run: bool) -> int:
     if not rows:
         print("[acortar] no queda nada por acortar")
         return 0
-    print(f"[acortar] {len(rows)} alimentos pendientes, en lotes de {BATCH_SIZE}")
+    print(
+        f"[acortar] {len(rows)} alimentos pendientes, en lotes de {BATCH_SIZE} y {workers} a la vez"
+    )
 
-    done = failed = 0
+    lotes = [rows[i : i + BATCH_SIZE] for i in range(0, len(rows), BATCH_SIZE)]
+    progreso = {"done": 0, "failed": 0}
     started = time.monotonic()
-    for start in range(0, len(rows), BATCH_SIZE):
-        batch = rows[start : start + BATCH_SIZE]
+    semaforo = asyncio.Semaphore(workers)
+
+    async def procesar(numero: int, batch: list[tuple[str, str]]) -> None:
         names = [name for _id, name in batch]
-        try:
-            result = await run_agent(
-                token=token,
-                prompt=build_prompt(names),
-                system_prompt=SYSTEM_PROMPT,
-                timeout_seconds=TIMEOUT_SECONDS,
-            )
-        except AiAgentError as exc:
-            failed += len(batch)
-            print(f"[acortar] lote {start // BATCH_SIZE + 1}: falló ({exc})", flush=True)
-            continue
+        async with semaforo:
+            try:
+                result = await run_agent(
+                    token=token,
+                    prompt=build_prompt(names),
+                    system_prompt=SYSTEM_PROMPT,
+                    timeout_seconds=TIMEOUT_SECONDS,
+                )
+            except AiAgentError as exc:
+                progreso["failed"] += len(batch)
+                print(f"[acortar] lote {numero}: falló ({exc})", flush=True)
+                return
 
         shortened = parse_response(result.text, len(batch))
         if shortened is None:
-            failed += len(batch)
+            progreso["failed"] += len(batch)
             print(
-                f"[acortar] lote {start // BATCH_SIZE + 1}: respuesta descartada "
-                "(no cuadra con la entrada)",
+                f"[acortar] lote {numero}: respuesta descartada (no cuadra con la entrada)",
                 flush=True,
             )
-            continue
+            return
 
         if dry_run:
             for original, nuevo in zip(names, shortened, strict=True):
                 print(f"  {original}\n    -> {nuevo}")
         else:
-            save(
+            # `save` es psycopg2 sincrónico: se saca del bucle para no bloquearlo mientras
+            # los otros lotes esperan al modelo.
+            await asyncio.to_thread(
+                save,
                 [
                     (food_id, nuevo)
                     for (food_id, _original), nuevo in zip(batch, shortened, strict=True)
-                ]
+                ],
             )
-        done += len(batch)
+        progreso["done"] += len(batch)
         elapsed = time.monotonic() - started
-        ritmo = done / elapsed if elapsed else 0
-        quedan = (len(rows) - done) / ritmo / 60 if ritmo else 0
+        ritmo = progreso["done"] / elapsed if elapsed else 0
+        quedan = (len(rows) - progreso["done"]) / ritmo / 60 if ritmo else 0
         print(
-            f"[acortar] {done}/{len(rows)} · {failed} fallidos · quedan ~{quedan:.0f} min",
+            f"[acortar] {progreso['done']}/{len(rows)} · {progreso['failed']} fallidos · "
+            f"quedan ~{quedan:.0f} min",
             flush=True,
         )
 
+    await asyncio.gather(*(procesar(i + 1, b) for i, b in enumerate(lotes)))
+    done, failed = progreso["done"], progreso["failed"]
     print(f"[acortar] terminado: {done} acortados, {failed} sin acortar")
     if not dry_run and done:
         print("[acortar] ahora hay que reindexar: python -m etl.index")
@@ -223,12 +241,13 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None, help="cuántos alimentos como mucho")
     parser.add_argument("--dry-run", action="store_true", help="enseña los nombres sin guardar")
     parser.add_argument("--revert", action="store_true", help="borra todos los nombres cortos")
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="lotes a la vez")
     args = parser.parse_args()
 
     if args.revert:
         print(f"[acortar] {revert()} nombres cortos borrados")
         return 0
-    return asyncio.run(shorten_all(args.limit, args.dry_run))
+    return asyncio.run(shorten_all(args.limit, args.dry_run, max(1, args.workers)))
 
 
 if __name__ == "__main__":
