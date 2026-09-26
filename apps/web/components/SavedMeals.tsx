@@ -118,40 +118,44 @@ export function SavedMeals({
                   {meal.items.map((i) => i.name).join(", ")}
                 </p>
               </div>
-              <label className="sr-only" htmlFor={`comida-${meal.id}`}>
-                Comida en la que apuntar «{meal.name}»
-              </label>
-              <select
-                id={`comida-${meal.id}`}
-                className={`${input} text-sm`}
-                value={target[meal.id] ?? meal.meal_type ?? mealType}
-                onChange={(e) =>
-                  setTarget((prev) => ({ ...prev, [meal.id]: e.target.value as MealType }))
-                }
-              >
-                {MEAL_TYPES.map((mt) => (
-                  <option key={mt} value={mt}>
-                    {MEAL_TYPE_LABELS[mt]}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                disabled={busy === meal.id}
-                onClick={() => void repeat(meal)}
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-[var(--color-primary)] px-4 text-sm font-semibold text-[var(--color-on-primary)] hover:bg-[var(--color-primary-hover)] disabled:opacity-60"
-              >
-                <Repeat2 size={16} aria-hidden="true" /> Apuntar
-              </button>
-              <button
-                type="button"
-                disabled={busy === meal.id}
-                onClick={() => void remove(meal)}
-                aria-label={`Borrar «${meal.name}»`}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-control)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
-              >
-                <Trash2 size={16} aria-hidden="true" />
-              </button>
+              {/* El selector y los dos botones van juntos: sueltos, en un móvil la papelera se
+                  caía sola a una tercera línea. */}
+              <div className="flex w-full items-center gap-2">
+                <label className="sr-only" htmlFor={`comida-${meal.id}`}>
+                  Comida en la que apuntar «{meal.name}»
+                </label>
+                <select
+                  id={`comida-${meal.id}`}
+                  className={`${input} min-w-0 flex-1 text-sm`}
+                  value={target[meal.id] ?? meal.meal_type ?? mealType}
+                  onChange={(e) =>
+                    setTarget((prev) => ({ ...prev, [meal.id]: e.target.value as MealType }))
+                  }
+                >
+                  {MEAL_TYPES.map((mt) => (
+                    <option key={mt} value={mt}>
+                      {MEAL_TYPE_LABELS[mt]}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={busy === meal.id}
+                  onClick={() => void repeat(meal)}
+                  className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full bg-[var(--color-primary)] px-4 text-sm font-semibold text-[var(--color-on-primary)] hover:bg-[var(--color-primary-hover)] disabled:opacity-60"
+                >
+                  <Repeat2 size={16} aria-hidden="true" /> Apuntar
+                </button>
+                <button
+                  type="button"
+                  disabled={busy === meal.id}
+                  onClick={() => void remove(meal)}
+                  aria-label={`Borrar «${meal.name}»`}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-control)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              </div>
             </li>
           ))}
         </ul>
