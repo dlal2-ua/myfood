@@ -33,7 +33,9 @@ INDEX = os.environ.get("MEILI_INDEX", "foods")
 BATCH_SIZE = 1000
 
 INDEX_SETTINGS = {
-    "searchableAttributes": ["name_es", "brand", "name_en"],
+    # El nombre corto también se busca: alguien que escribe «pechuga de pollo» tiene que
+    # encontrar el alimento cuyo nombre de fuente es «Pollo, pechuga, con piel, crudo».
+    "searchableAttributes": ["name_es", "name_short", "brand", "name_en"],
     "filterableAttributes": [
         "kind",
         "category",
@@ -63,6 +65,7 @@ _SELECT_FOODS_SQL = """
 SELECT
     f.id::text AS id,
     f.name_es,
+    f.name_short,
     f.name_en,
     f.brand,
     f.kind,
@@ -127,6 +130,7 @@ def build_document(row: dict) -> dict:
         for key in (
             "id",
             "name_es",
+            "name_short",
             "name_en",
             "brand",
             "kind",

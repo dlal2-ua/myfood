@@ -258,3 +258,58 @@ async def test_the_day_log_includes_the_food_name(registered_client, test_food):
     )
     day = (await client.get("/api/log", params={"date": today})).json()
     assert day["food"][0]["food_name"] == "Pechuga de pollo de prueba"
+
+
+# --- la semana ------------------------------------------------------------------------------
+
+
+async def test_la_semana_va_de_lunes_a_domingo_y_suma_los_dias(registered_client, test_food):
+    """Un objetivo solo diario convierte cada día en un aprobado o un suspenso, que es justo
+    lo que R10 dice que no se haga."""
+    client, _ = registered_client
+    # 2026-09-23 es miércoles; su semana va del lunes 21 al domingo 27.
+    for day, grams in (("2026-09-21", 100), ("2026-09-23", 200)):
+        resp = await client.post(
+            "/api/log/food",
+            json={
+                "log_date": day,
+                "meal_type": "lunch",
+                "food_id": str(test_food),
+                "grams": grams,
+            },
+        )
+        assert resp.status_code == 201, resp.text
+
+    week = (await client.get("/api/log/week?date=2026-09-23")).json()
+    assert week["start"] == "2026-09-21"
+    assert week["end"] == "2026-09-27"
+    assert len(week["days"]) == 7
+    assert [d["date"] for d in week["days"]][0] == "2026-09-21"
+    con_comida = {d["date"]: d["kcal"] for d in week["days"] if d["kcal"] > 0}
+    assert set(con_comida) == {"2026-09-21", "2026-09-23"}
+    assert week["total_kcal"] == round(sum(con_comida.values()), 1)
+
+
+async def test_sin_perfil_la_semana_se_ve_igual_pero_sin_objetivo(registered_client, test_food):
+    """El total de la semana vale aunque no haya nada contra lo que compararlo."""
+    client, _ = registered_client
+    await client.post(
+        "/api/log/food",
+        json={
+            "log_date": "2026-09-23",
+            "meal_type": "lunch",
+            "food_id": str(test_food),
+            "grams": 100,
+        },
+    )
+    week = (await client.get("/api/log/week?date=2026-09-23")).json()
+    assert week["total_kcal"] > 0
+    assert week["target_kcal"] is None
+    assert week["remaining_kcal"] is None
+
+
+async def test_los_dias_que_no_han_llegado_se_distinguen(registered_client):
+    """No es lo mismo no haber comido que no haber llegado a ese día."""
+    client, _ = registered_client
+    week = (await client.get("/api/log/week?date=2099-01-06")).json()
+    assert all(d["is_past"] is False for d in week["days"])

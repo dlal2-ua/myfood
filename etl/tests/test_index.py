@@ -9,6 +9,7 @@ def _row(**over):
     row = {
         "id": "1",
         "name_es": "Pechuga de pollo",
+        "name_short": None,
         "name_en": None,
         "brand": None,
         "kind": "generic",
@@ -70,3 +71,16 @@ def test_filterable_attributes_cover_the_document_filter_fields():
 
 def test_result_totals_are_not_capped_at_one_thousand():
     assert index.INDEX_SETTINGS["pagination"]["maxTotalHits"] >= 25000
+
+
+def test_el_nombre_corto_va_al_indice_y_se_puede_buscar_por_el():
+    """Alguien que escribe «pechuga de pollo» tiene que encontrar el alimento cuyo nombre de
+    fuente es «Pollo, pechuga, con piel, crudo» (migración 0025)."""
+    doc = index.build_document(
+        _row(
+            name_es="Pollo, pechuga, con piel, crudo",
+            name_short="Pechuga de pollo con piel, cruda",
+        )
+    )
+    assert doc["name_short"] == "Pechuga de pollo con piel, cruda"
+    assert "name_short" in index.INDEX_SETTINGS["searchableAttributes"]
