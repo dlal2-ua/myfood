@@ -1,6 +1,6 @@
 "use client";
 
-import { Droplets, Plus, Timer } from "lucide-react";
+import { Camera, Droplets, MessageSquareText, Plus, Search, Timer } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useCurrentUserId } from "@/components/CurrentUser";
@@ -64,6 +64,59 @@ function MacroProgress({
  * macros, agua, suplementos pendientes, ayuno y el diario del día. Los objetivos son orientativos
  * y no se colorean como «bien» o «mal» (R10). El botón «+» de acciones rápidas vive en la barra
  * de la app, no aquí. */
+/** Lo que ve alguien que entra y todavía no tiene ni objetivos ni nada apuntado.
+ *
+ * Antes veía el marcador entero a cero —anillo a 0, «Objetivo —», los tres macros a 0 g— y una
+ * caja gris mandándole a rellenar el perfil; los botones de apuntar quedaban por debajo del
+ * pliegue, detrás del agua y los suplementos. Cinco de los ocho primeros usuarios se
+ * registraron y no apuntaron nunca nada. Un marcador vacío no es información: es ruido, así
+ * que aquí se sustituye por lo único que hay que hacer el primer día.
+ */
+function PrimerDia() {
+  const accesos = [
+    { href: "/log#foto", icon: Camera, label: "Foto del plato", hint: "La más rápida" },
+    { href: "/log#natural", icon: MessageSquareText, label: "Escribirlo", hint: "«dos huevos y una tostada»" },
+    { href: "/foods", icon: Search, label: "Buscarlo", hint: "En el catálogo" },
+  ];
+  return (
+    <section className="flex flex-col gap-4">
+      <div className={`${CARD} p-5`}>
+        <h2 className="text-xl font-extrabold tracking-tight">Apunta lo primero que comas</h2>
+        <p className="mt-1 text-sm text-[var(--color-muted)]">
+          No hace falta configurar nada para empezar. Elige cómo te resulte más cómodo:
+        </p>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          {accesos.map(({ href, icon: Icon, label, hint }) => (
+            <Link
+              key={href}
+              href={href}
+              className="flex min-h-[5.5rem] flex-col items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--color-border-strong)] p-3 text-center hover:bg-[var(--color-surface-2)]"
+            >
+              <Icon size={22} aria-hidden="true" className="text-[var(--color-primary)]" />
+              <span className="text-sm font-semibold">{label}</span>
+              <span className="text-xs text-[var(--color-muted)]">{hint}</span>
+            </Link>
+          ))}
+        </div>
+      </div>
+      <div className={`${CARD} flex flex-wrap items-center justify-between gap-3 p-4`}>
+        <p className="min-w-0 flex-1 text-sm">
+          <span className="font-semibold">¿Cuántas calorías te tocan?</span>{" "}
+          <span className="text-[var(--color-muted)]">
+            Cuatro datos y te lo calculo, con sus macros.
+          </span>
+        </p>
+        <Link
+          href="/bienvenida"
+          className="inline-flex min-h-11 items-center rounded-full bg-[var(--color-primary)] px-4 text-sm font-semibold text-[var(--color-on-primary)] hover:bg-[var(--color-primary-hover)]"
+        >
+          Calcularlo
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 export function TodayDashboard({ displayName }: { displayName: string }) {
   const userId = useCurrentUserId();
   const [data, setData] = useState<TodayData | null>(null);
@@ -151,6 +204,10 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
   const pendingDoses = (supplements?.doses ?? []).filter(
     (d) => d.status === "pending" || d.status === "overdue",
   );
+  // Sin objetivos Y sin nada apuntado: no hay marcador que enseñar todavía. Con una de las
+  // dos cosas sí lo hay — los totales del día valen aunque no haya objetivo contra el que
+  // compararlos.
+  const primerDia = !targets && log.food.length === 0;
   const longDate = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
   const today = longDate.charAt(0).toUpperCase() + longDate.slice(1);
 
@@ -161,13 +218,17 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
         <h1 className="text-3xl font-extrabold tracking-tight">Hola, {displayName}</h1>
       </div>
 
-      {!targets && (
-        <EmptyState
-          message="Completa tu perfil (sexo, fecha de nacimiento, altura) y registra tu peso para ver tus objetivos de hoy."
-          actionLabel="Completar perfil"
-          actionHref="/profile"
-        />
-      )}
+      {primerDia ? (
+        <PrimerDia />
+      ) : (
+        <>
+          {!targets && (
+            <EmptyState
+              message="Aún no tienes objetivos: dime qué quieres conseguir y los calculo en un minuto."
+              actionLabel="Calcular mis calorías"
+              actionHref="/bienvenida"
+            />
+          )}
 
       <section aria-label="Calorías y macros de hoy" className={`${CARD} p-5`}>
         <div className="flex items-center justify-between gap-4 sm:gap-8">
@@ -195,6 +256,8 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
           <MacroProgress label="Grasa" value={totals.fat_g} target={targets?.fat_g} color="var(--color-fat)" />
         </div>
       </section>
+        </>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         {water && (
