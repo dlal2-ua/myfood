@@ -43,8 +43,10 @@ def _api_imports():
     return AiAgentError, run_agent, get_decrypted_token, AdminSessionLocal
 
 
-BATCH_SIZE = 40
-TIMEOUT_SECONDS = 120.0
+# Lotes de 25 y no de 40 como la traducción: aquí se va de los nombres más largos a los
+# más cortos, así que los primeros lotes son el peor caso y con 40 se pasaban de tiempo.
+BATCH_SIZE = 25
+TIMEOUT_SECONDS = 180.0
 # Lo que cabe en una línea de una lista en un móvil sin truncarse.
 MAX_SHORT_CHARS = 42
 # Por debajo de esto no hay nada que acortar.
