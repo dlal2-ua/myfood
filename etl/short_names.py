@@ -93,10 +93,17 @@ def build_prompt(names: list[str]) -> str:
     return f"Acorta estos {len(names)} nombres de alimentos:\n{listado}"
 
 
-def parse_response(text: str, expected: int) -> list[str] | None:
-    """Devuelve la lista solo si cuadra. Un lote que no cuadra se descarta entero: emparejar
-    mal los nombres pondría a un alimento el nombre corto de otro, que es peor que dejarlo
-    largo."""
+def parse_response(text: str, expected: int) -> list[str | None] | None:
+    """Devuelve un nombre por cada uno que se pidió, o `None` entero si no se puede fiar.
+
+    La barrera que importa es el **número**: si no vienen tantos nombres como se pidieron, el
+    emparejamiento está roto y se descarta el lote entero, porque ponerle a un alimento el
+    nombre corto de otro es peor que dejarlo largo y en una lista nadie se daría cuenta.
+
+    Un nombre suelto que no sirve —vacío, que no es texto, o que no cabe en una línea— se
+    devuelve como `None` y se queda sin acortar. Eso no rompe el emparejamiento, así que no
+    hay razón para tirar los otros veinticuatro; en la siguiente pasada se vuelve a pedir.
+    """
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.split("```")[1]
@@ -111,16 +118,13 @@ def parse_response(text: str, expected: int) -> list[str] | None:
         return None
     if not isinstance(parsed, list) or len(parsed) != expected:
         return None
-    out = []
+    out: list[str | None] = []
     for item in parsed:
         if not isinstance(item, str) or not item.strip():
-            return None
+            out.append(None)
+            continue
         short = " ".join(item.split())
-        # Un «nombre corto» más largo que el original no es un nombre corto. Se descarta el
-        # lote entero por lo mismo que arriba: mejor sin acortar que mal emparejado.
-        if len(short) > MAX_SHORT_CHARS:
-            return None
-        out.append(short)
+        out.append(short if len(short) <= MAX_SHORT_CHARS else None)
     return out
 
 
@@ -205,20 +209,20 @@ async def shorten_all(limit: int | None, dry_run: bool, workers: int = DEFAULT_W
             )
             return
 
+        pares = [
+            (food_id, nuevo)
+            for (food_id, _original), nuevo in zip(batch, shortened, strict=True)
+            if nuevo is not None
+        ]
         if dry_run:
             for original, nuevo in zip(names, shortened, strict=True):
-                print(f"  {original}\n    -> {nuevo}")
-        else:
+                print(f"  {original}\n    -> {nuevo if nuevo else '(se queda como está)'}")
+        elif pares:
             # `save` es psycopg2 sincrónico: se saca del bucle para no bloquearlo mientras
             # los otros lotes esperan al modelo.
-            await asyncio.to_thread(
-                save,
-                [
-                    (food_id, nuevo)
-                    for (food_id, _original), nuevo in zip(batch, shortened, strict=True)
-                ],
-            )
-        progreso["done"] += len(batch)
+            await asyncio.to_thread(save, pares)
+        progreso["done"] += len(pares)
+        progreso["failed"] += len(batch) - len(pares)
         elapsed = time.monotonic() - started
         ritmo = progreso["done"] / elapsed if elapsed else 0
         quedan = (len(rows) - progreso["done"]) / ritmo / 60 if ritmo else 0
