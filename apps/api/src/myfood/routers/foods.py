@@ -39,6 +39,8 @@ _EAN_RE = re.compile(r"^\d{8,14}$")
 class FoodSearchItem(BaseModel):
     id: str
     name_es: str
+    # Para listas y diario: `None` mientras el alimento no lo tenga (`etl/short_names.py`).
+    name_short: str | None = None
     brand: str | None
     kcal_100g: float | None
     protein_100g: float | None
@@ -140,6 +142,7 @@ async def search(
         FoodSearchItem(
             id=hit["id"],
             name_es=hit["name_es"],
+            name_short=hit.get("name_short"),
             brand=hit.get("brand"),
             kcal_100g=hit.get("kcal_100g"),
             protein_100g=hit.get("protein_100g"),

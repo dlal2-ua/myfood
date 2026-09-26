@@ -183,7 +183,8 @@ async def resolve_food_mentions(
             )
             out = {
                 "food_id": food_id,
-                "name_es": food.name_es,
+                # Lo que verá el usuario en la lista de revisión.
+                "name_es": food.name_short or food.name_es,
                 "grams": grams,
                 "approx_quantity_text": item.get("approx_quantity_text", ""),
             }
@@ -216,5 +217,5 @@ async def _alternative_names(
     for food_id in food_ids[:2]:
         food = await session.get(Food, uuid.UUID(food_id))
         if food is not None:
-            out.append({"food_id": food_id, "name_es": food.name_es})
+            out.append({"food_id": food_id, "name_es": food.name_short or food.name_es})
     return out

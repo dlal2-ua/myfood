@@ -209,6 +209,26 @@ export interface LogFoodEntry {
   carbs_g: number;
 }
 
+/** La semana de lunes a domingo. Un objetivo diario convierte cada día en un aprobado o un
+ * suspenso, que es justo lo que R10 dice que no se haga; en una semana, un domingo alto se
+ * compensa con el lunes. */
+export interface WeekDay {
+  date: string;
+  kcal: number;
+  /** `false` en los días que todavía no han llegado. */
+  is_past: boolean;
+}
+
+export interface WeekLog {
+  start: string;
+  end: string;
+  days: WeekDay[];
+  total_kcal: number;
+  /** `null` mientras no haya perfil completo. */
+  target_kcal: number | null;
+  remaining_kcal: number | null;
+}
+
 export interface DayTotals {
   kcal: number;
   protein_g: number;

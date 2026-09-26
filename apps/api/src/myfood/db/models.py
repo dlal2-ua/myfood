@@ -140,6 +140,10 @@ class Food(Base):
     attribution: Mapped[str | None] = mapped_column(String, nullable=True)
     barcode_ean: Mapped[str | None] = mapped_column(String, nullable=True)
     name_es: Mapped[str] = mapped_column(String, nullable=False)
+    # Nombre para listas y diario, donde el de la fuente no cabe (migración 0025). La ficha
+    # del alimento sigue enseñando `name_es`, que es el que cita la licencia. Vacío = se usa
+    # `name_es`, que es lo que pasaba hasta ahora.
+    name_short: Mapped[str | None] = mapped_column(String, nullable=True)
     name_en: Mapped[str | None] = mapped_column(String, nullable=True)
     brand: Mapped[str | None] = mapped_column(String, nullable=True)
     category: Mapped[str | None] = mapped_column(String, nullable=True)

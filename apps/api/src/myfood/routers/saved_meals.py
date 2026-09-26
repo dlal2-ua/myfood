@@ -75,7 +75,8 @@ async def _to_out(session: AsyncSession, meal: SavedMeal) -> SavedMealOut:
     names: dict[UUID, str] = {}
     if food_ids:
         names = {
-            f.id: f.name_es
+            # El nombre corto, como en el diario: es una lista.
+            f.id: f.name_short or f.name_es
             for f in await session.scalars(select(Food).where(Food.id.in_(food_ids)))
         }
     items = [

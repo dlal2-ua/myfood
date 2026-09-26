@@ -1,10 +1,10 @@
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from myfood.ai.schemas import AiSessionOut, ai_session_to_out
 from myfood.db.models import Food, FoodLog, FoodNutrient, Profile, Recipe, RecipeIngredient
 from myfood.deps import get_current_user_id, get_db
 from myfood.domain import micronutrients
+from myfood.domain.targets import resolve_targets
 from myfood.errors import AppError
 
 router = APIRouter(prefix="/log", tags=["log"])
@@ -313,7 +314,9 @@ async def get_day_log(
     food_names: dict[UUID, str] = {}
     if food_ids:
         food_names = {
-            f.id: f.name_es
+            # En una lista manda el nombre corto: «Huevo, entero, crudo, congelado, sal…» se
+            # lee truncado y no dice nada. El de la fuente sigue en la ficha del alimento.
+            f.id: f.name_short or f.name_es
             for f in await session.scalars(select(Food).where(Food.id.in_(food_ids)))
         }
     out = []
@@ -340,6 +343,82 @@ class MicronutrientsDayOut(BaseModel):
     date: date
     nutrients: list[MicronutrientOut]
 
+
+
+class WeekDayOut(BaseModel):
+    date: date
+    kcal: float
+    # `False` en los días que todavía no han llegado: no es lo mismo no haber comido que no
+    # haber llegado a ese día.
+    is_past: bool
+
+
+class WeekOut(BaseModel):
+    start: date
+    end: date
+    days: list[WeekDayOut]
+    total_kcal: float
+    # `None` mientras no haya perfil completo: la semana se puede mirar igual, solo que sin
+    # nada contra lo que compararla.
+    target_kcal: float | None
+    remaining_kcal: float | None
+
+
+@router.get("/week")
+async def get_week_log(
+    date_: date = Query(alias="date"),
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+) -> WeekOut:
+    """La semana (lunes a domingo) que contiene esa fecha, con el objetivo de los siete días.
+
+    Un objetivo diario convierte cada día en un aprobado o un suspenso, y eso es justo lo que
+    R10 dice que no se haga: la investigación sobre apps de dieta encuentra que competir
+    consigo mismo día a día empuja a comer cada vez menos. En una semana, un domingo alto se
+    compensa con el lunes y no hay nada que suspender.
+    """
+    start = date_ - timedelta(days=date_.weekday())
+    end = start + timedelta(days=6)
+    rows = (
+        await session.execute(
+            select(FoodLog.log_date, func.sum(FoodLog.kcal))
+            .where(
+                FoodLog.user_id == user_id,
+                FoodLog.log_date >= start,
+                FoodLog.log_date <= end,
+            )
+            .group_by(FoodLog.log_date)
+        )
+    ).all()
+    by_day = {row[0]: float(row[1] or 0) for row in rows}
+    today = date.today()
+    days = [
+        WeekDayOut(
+            date=start + timedelta(days=i),
+            kcal=round(by_day.get(start + timedelta(days=i), 0.0), 1),
+            is_past=start + timedelta(days=i) <= today,
+        )
+        for i in range(7)
+    ]
+    total = round(sum(d.kcal for d in days), 1)
+
+    try:
+        targets = await resolve_targets(session, user_id)
+    except AppError:
+        # Sin perfil completo no hay objetivo, pero el total de la semana sigue valiendo.
+        return WeekOut(
+            start=start, end=end, days=days, total_kcal=total,
+            target_kcal=None, remaining_kcal=None,
+        )
+    weekly = round(float(targets.day_targets().kcal) * 7, 1)
+    return WeekOut(
+        start=start,
+        end=end,
+        days=days,
+        total_kcal=total,
+        target_kcal=weekly,
+        remaining_kcal=round(weekly - total, 1),
+    )
 
 @router.get("/micronutrients")
 async def get_day_micronutrients(
