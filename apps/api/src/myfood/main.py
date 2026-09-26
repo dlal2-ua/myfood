@@ -26,6 +26,7 @@ from myfood.routers import (
     receipts,
     recipes,
     restrictions,
+    saved_meals,
     shopping_list,
     supplements,
     water,
@@ -44,6 +45,7 @@ app.include_router(calc.router, prefix="/api")
 app.include_router(foods.router, prefix="/api")
 app.include_router(log.router, prefix="/api")
 app.include_router(favorites.router, prefix="/api")
+app.include_router(saved_meals.router, prefix="/api")
 app.include_router(restrictions.router, prefix="/api")
 app.include_router(shopping_list.router, prefix="/api")
 app.include_router(pantry.router, prefix="/api")

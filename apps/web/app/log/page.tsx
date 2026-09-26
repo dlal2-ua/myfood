@@ -36,6 +36,7 @@ import {
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { DiaryProposalCard } from "@/components/chat/DiaryProposalCard";
 import { PlatePhotoPanel } from "@/components/PlatePhotoPanel";
+import { SavedMeals, SaveMealButton } from "@/components/SavedMeals";
 import { describeInterpretation, ORIGIN_LABELS } from "@/lib/smartLog";
 
 const inputClass =
@@ -105,6 +106,8 @@ export default function LogPage() {
   const [smartWarning, setSmartWarning] = useState<string | null>(null);
   const [smartQuestion, setSmartQuestion] = useState<string | null>(null);
   const [smartMissing, setSmartMissing] = useState<string[]>([]);
+  // Sube cuando se guarda una comida, para que la lista de «lo de siempre» se entere.
+  const [savedMealsKey, setSavedMealsKey] = useState(0);
   const [smartProposal, setSmartProposal] = useState<SmartLogResult["proposal"]>(null);
   const [smartDeciding, setSmartDeciding] = useState(false);
   const [smartReviewItems, setSmartReviewItems] = useState<SmartLogReviewItem[]>([]);
@@ -536,8 +539,15 @@ export default function LogPage() {
                   >
                     <div className="flex items-center justify-between gap-3 px-4 py-3">
                       <h2 className="text-[15px] font-bold">{MEAL_TYPE_LABELS[group.mealType]}</h2>
-                      <span className="text-xs font-semibold text-[var(--color-muted)]">
-                        {Math.round(group.entries.reduce((sum, e) => sum + Number(e.kcal), 0))} kcal
+                      <span className="flex items-center gap-2">
+                        <SaveMealButton
+                          logDate={logDate}
+                          mealType={group.mealType}
+                          onSaved={() => setSavedMealsKey((n) => n + 1)}
+                        />
+                        <span className="text-xs font-semibold text-[var(--color-muted)]">
+                          {Math.round(group.entries.reduce((sum, e) => sum + Number(e.kcal), 0))} kcal
+                        </span>
                       </span>
                     </div>
                     <ul className="divide-y divide-[var(--color-border)] border-t border-[var(--color-border)] px-4">
@@ -731,6 +741,13 @@ export default function LogPage() {
           <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">{queuedNote}</p>
         )}
       </section>
+
+      <SavedMeals
+        logDate={logDate}
+        mealType={mealType}
+        reloadKey={savedMealsKey}
+        onLogged={() => void loadDay(logDate)}
+      />
 
       {userId && (
         <PlatePhotoPanel

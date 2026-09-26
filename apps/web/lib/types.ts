@@ -252,6 +252,31 @@ export interface SimilarFoodsResponse {
   items: SimilarFoodItem[];
 }
 
+/** Un combo con nombre que se apunta de un toque (migración 0024). Resuelve además los platos
+ * compuestos que no están en el catálogo: «bocadillo de sobrasada» no existe como alimento,
+ * pero guardado una vez es una sola línea con sus macros. */
+export interface SavedMealItem {
+  id: string;
+  food_id: string | null;
+  name: string;
+  grams: number;
+  kcal: number;
+  protein_g: number;
+  fat_g: number;
+  carbs_g: number;
+  /** `true` cuando la línea no es un alimento del catálogo y sus números los puso el modelo. */
+  estimated: boolean;
+}
+
+export interface SavedMeal {
+  id: string;
+  name: string;
+  meal_type: MealType | null;
+  use_count: number;
+  items: SavedMealItem[];
+  totals: DayTotals;
+}
+
 export interface Favorite {
   id: string;
   food_id: string;

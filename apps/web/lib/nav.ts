@@ -12,6 +12,7 @@ import {
   MessageSquareText,
   Pill,
   Camera,
+  Repeat2,
   ScanBarcode,
   Scale,
   Search,
@@ -129,6 +130,7 @@ export interface QuickAction {
 }
 
 export const QUICK_ACTIONS: QuickAction[] = [
+  { key: "saved", label: "Lo de siempre", href: "/log#guardadas", icon: Repeat2 },
   { key: "log", label: "Registrar comida", href: "/log#registrar", icon: UtensilsCrossed },
   { key: "search", label: "Buscar alimento", href: "/foods", icon: Search },
   { key: "scan", label: "Escanear producto", href: "/scan", icon: ScanBarcode },

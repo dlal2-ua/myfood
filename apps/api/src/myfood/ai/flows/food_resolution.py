@@ -43,14 +43,31 @@ async def search_candidates_for_text(text: str) -> list[dict]:
     """
     seen: dict[str, dict] = {}
     for mention in split_into_food_mentions(text):
-        hits, _total = await search_foods(mention, kind=None, limit=HITS_PER_MENTION, offset=0)
-        generic_hits, _ = await search_foods(
-            mention, kind="generic", limit=GENERIC_HITS_PER_MENTION, offset=0
-        )
-        # Los genéricos primero: si hay que recortar por `CANDIDATE_LIMIT`, que sobrevivan.
-        for hit in [*generic_hits, *hits]:
-            seen.setdefault(hit["id"], hit)
+        for query in _queries_for(mention):
+            hits, _total = await search_foods(query, kind=None, limit=HITS_PER_MENTION, offset=0)
+            generic_hits, _ = await search_foods(
+                query, kind="generic", limit=GENERIC_HITS_PER_MENTION, offset=0
+            )
+            # Los genéricos primero: si hay que recortar por `CANDIDATE_LIMIT`, que sobrevivan.
+            for hit in [*generic_hits, *hits]:
+                seen.setdefault(hit["id"], hit)
     return list(seen.values())[:CANDIDATE_LIMIT]
+
+
+def _queries_for(mention: str) -> list[str]:
+    """La mención entera y, si lleva un «de», también lo que va detrás.
+
+    «Bocadillo de sobrasada» no encuentra nada —Meilisearch exige que TODOS los términos estén
+    en el documento y ningún alimento se llama así—, pero «sobrasada» sí, y estaba en el
+    catálogo todo el rato. Buscar las dos cosas no descarta nada: el plato entero, si existe
+    («tortilla de patatas» sí), sigue saliendo por la primera consulta y además gana por
+    relevancia; la segunda solo añade el ingrediente como red.
+    """
+    queries = [mention]
+    head, _, tail = mention.partition(" de ")
+    if tail.strip() and head.strip():
+        queries.append(tail.strip())
+    return queries
 
 
 async def filter_restricted(
