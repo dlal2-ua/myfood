@@ -83,6 +83,54 @@ def test_classify_food(name, category, group):
     assert fg.classify_food(name, category) == group
 
 
+@pytest.mark.parametrize(
+    ("name", "category", "group"),
+    [
+        # USDA nombra así cientos de carnes, y «agua» no las convierte en bebida.
+        (
+            "Cerdo, curado, jamón y producto con agua añadida, contra, con hueso",
+            "Pork Products",
+            fg.PROCESSED_MEAT,
+        ),
+        ("Pollo, pechuga, con agua añadida, cruda", "Poultry Products", fg.MEAT),
+        ("Ternera, con solución de agua añadida, cruda", "Beef Products", fg.MEAT),
+        ("Pechuga de Pollo Marinada a las Finas Hierbas con agua añadida", None, fg.MEAT),
+        # Y en las conservas, «en agua» es cómo viene, no lo que es.
+        (
+            "Pescado, atún, claro, en conserva en agua, sólidos escurridos",
+            "Finfish and Shellfish Products",
+            fg.FISH,
+        ),
+        (
+            "Tuna, light, canned in water, drained solids",
+            "Finfish and Shellfish Products",
+            fg.FISH,
+        ),
+        ("Judías verdes, enlatadas, en agua", "canned green beans", fg.VEGETABLE),
+        (
+            "Garbanzos, semillas maduras, en conserva, escurridos, aclarados con agua",
+            "Legumes and Legume Products",
+            fg.LEGUME,
+        ),
+        (
+            "Champiñón de París o champiñón cultivado, hervido/cocido en agua",
+            "légumes cuits",
+            fg.VEGETABLE,
+        ),
+        ("Cereales, avena, cocida con agua, con sal", "Breakfast Cereals", fg.CEREAL),
+        ("Pan de agua", "breads", fg.BREAD),
+        # Lo que de verdad es agua sigue siéndolo.
+        ("Agua mineral natural", None, fg.BEVERAGE),
+        ("Agua con gas", "Beverages", fg.BEVERAGE),
+    ],
+)
+def test_el_agua_como_medio_no_convierte_el_alimento_en_bebida(name, category, group):
+    """`\bagua\b` mandaba a bebidas todo lo que llevara la palabra en el nombre, y el grupo no
+    es solo una etiqueta: decide el tamaño de ración por defecto. Un jamón con agua añadida
+    recibía la ración de un refresco."""
+    assert fg.classify_food(name, category) == group
+
+
 def test_a_name_that_says_nothing_falls_back_to_the_category():
     assert fg.classify_food("Rosca", "Cereales y derivados") == fg.GRAIN
 

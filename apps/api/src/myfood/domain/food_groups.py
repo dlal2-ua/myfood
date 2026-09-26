@@ -265,12 +265,27 @@ _EXCLUDING_CATEGORIES: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+# «Agua» y «water» aparecen constantemente en los nombres como MEDIO en el que viene el
+# alimento, no como lo que el alimento es: «Atún, enlatado, en agua», «Cerdo, curado, jamón con
+# agua añadida», «canned in water», «Garbanzos cocidos en agua y sal». Sin quitar esas frases,
+# la regla de bebidas se quedaba con el atún, con el jamón y con los garbanzos — y el grupo no
+# es solo una etiqueta de filtro: decide el tamaño de ración por defecto (`_BOUNDS`,
+# `UNIT_GRAMS_BY_GROUP`), así que a un jamón se le aplicaba la ración de una bebida.
+# Se quita solo la frase, no la palabra: «Agua mineral natural» sigue siendo una bebida.
+_COOKING_MEDIUM = re.compile(
+    r"\b(?:en|con|al|sin|de)\s+agua(?:\s+anadida)?\b"
+    r"|\bagua\s+anadida\b"
+    r"|\b(?:in|with|packed\s+in|canned\s+in)\s+water\b"
+    r"|\b(?:water\s+added|added\s+water)\b"
+)
+
+
 def classify_food(name: str | None, category: str | None = None) -> str:
     """Grupo alimentario deducido del nombre y, si este no basta, de la categoría."""
     for text in (name, category):
         if not text:
             continue
-        normalized = _normalize(text)
+        normalized = _COOKING_MEDIUM.sub(" ", _normalize(text))
         for group, pattern in _RULES:
             if pattern.search(normalized):
                 if group in PLANNABLE_GROUPS and category:
