@@ -4,7 +4,8 @@ import { localDateIso } from "@/lib/dates";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { apiFetch, errorMessage } from "@/lib/api";
+import { ApiError, apiFetch, errorMessage } from "@/lib/api";
+import { AiConsentPrompt } from "@/components/AiConsentPrompt";
 import type { AiProposal, AiSession, DietPlan, FoodDetail } from "@/lib/types";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 
@@ -29,7 +30,7 @@ export default function DietPlansPage() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
-  const [aiConsent, setAiConsent] = useState(false);
+  const [aiNeedsConsent, setAiNeedsConsent] = useState(false);
   const [aiNumDays, setAiNumDays] = useState("7");
   const [aiRequesting, setAiRequesting] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -130,18 +131,17 @@ export default function DietPlansPage() {
     await tick();
   }
 
-  async function onGenerateWithAi(e: React.FormEvent) {
+  function onGenerateWithAi(e: React.FormEvent) {
     e.preventDefault();
+    void generateWithAi();
+  }
+
+  async function generateWithAi() {
     setAiRequesting(true);
     setAiError(null);
+    setAiNeedsConsent(false);
     setAiSession(null);
     try {
-      if (aiConsent) {
-        await apiFetch("/api/consents", {
-          method: "POST",
-          body: JSON.stringify({ kind: "ai_processing", version: "v1" }),
-        });
-      }
       const session = await apiFetch<AiSession>("/api/ai/diet-plan", {
         method: "POST",
         body: JSON.stringify({ num_days: Number(aiNumDays) }),
@@ -149,7 +149,8 @@ export default function DietPlansPage() {
       setAiSession(session);
       await pollAiSession(session.id);
     } catch (err) {
-      setAiError(errorMessage(err));
+      if (err instanceof ApiError && err.code === "AI_CONSENT_REQUIRED") setAiNeedsConsent(true);
+      else setAiError(errorMessage(err));
     } finally {
       setAiRequesting(false);
     }
@@ -245,16 +246,12 @@ export default function DietPlansPage() {
             {aiRequesting || aiSession?.status === "running" ? "Generando…" : "Generar con IA"}
           </button>
         </form>
-        <label className="mt-2 flex items-start gap-2 text-sm text-neutral-600 dark:text-neutral-400">
-          <input
-            type="checkbox"
-            checked={aiConsent}
-            onChange={(e) => setAiConsent(e.target.checked)}
-            className="mt-0.5"
+        {aiNeedsConsent && (
+          <AiConsentPrompt
+            what="tus objetivos y restricciones, anonimizados,"
+            onAccepted={() => void generateWithAi()}
           />
-          Acepto que mis objetivos y restricciones (anonimizados, sin nombre ni datos
-          identificativos) se envíen a Claude para diseñar la estructura del plan.
-        </label>
+        )}
 
         {aiError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{aiError}</p>}
 
