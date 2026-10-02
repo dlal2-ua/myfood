@@ -576,7 +576,9 @@ export default function LogPage() {
                           </p>
                           {entry.components && entry.components.length > 0 && (
                             <p className="text-xs text-neutral-500">
-                              {entry.components.map((c) => c.name).join(" · ")}
+                              {entry.components
+                                .map((c) => (c.grams ? `${c.name} ${Math.round(c.grams)} g` : c.name))
+                                .join(" · ")}
                             </p>
                           )}
                         </div>
@@ -709,7 +711,6 @@ export default function LogPage() {
 
       {userId && (
         <PlatePhotoPanel
-          userId={userId}
           logDate={logDate}
           mealType={mealType}
           onAdded={() => void loadDay(logDate)}

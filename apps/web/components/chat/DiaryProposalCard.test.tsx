@@ -72,6 +72,8 @@ describe("DiaryProposalCard", () => {
     // Y el total, que mezcla estimaciones, también.
     expect(screen.getByText("aprox. 470 kcal")).toBeInTheDocument();
     expect(screen.getByText(/estimación orientativa, no una medición/)).toBeInTheDocument();
+    // Sin nada confirmado por el catálogo no se habla de él.
+    expect(screen.queryByText(/toma sus valores por 100 g del catálogo/)).toBeNull();
   });
 
   it("shows what a dish is made of", () => {
@@ -80,6 +82,35 @@ describe("DiaryProposalCard", () => {
     expect(screen.getByText(/rosquilla/)).toBeInTheDocument();
     expect(screen.getByText(/ensaladilla rusa/)).toBeInTheDocument();
     expect(screen.getByText(/anchoa/)).toBeInTheDocument();
+  });
+
+  it("shows the grams of each part and which ones take their values from the catalog", () => {
+    const refined: ChatDiaryPayload = {
+      ...payload,
+      items: [
+        {
+          ...payload.items[0],
+          name: "Bocadillo de jamón",
+          components: [
+            { name: "pan", grams: 100, kcal: 262, catalog: "Pan blanco de barra" },
+            { name: "jamón serrano", grams: 40, kcal: 94, catalog: "Jamón curado Serrano" },
+            { name: "alioli casero", grams: 5, kcal: 35 },
+          ],
+        },
+        { ...payload.items[2], name: "Manzana", estimated: true, food_id: null, catalog: "Manzana Gala" },
+      ],
+    };
+    render(<DiaryProposalCard payload={refined} deciding={false} onDecide={() => {}} />);
+
+    // «Bocadillo de jamón (pan 100 g, jamón 40 g…)»: cada parte con sus gramos.
+    expect(screen.getByText("100 g")).toBeInTheDocument();
+    expect(screen.getByText("40 g")).toBeInTheDocument();
+    expect(screen.getByText("5 g")).toBeInTheDocument();
+    // Dos partes confirmadas por el catálogo, una estimada; y la manzana, confirmada entera.
+    expect(screen.getAllByRole("img", { name: "Valores del catálogo" })).toHaveLength(2);
+    expect(screen.getByText("valores del catálogo")).toBeInTheDocument();
+    // Sigue siendo una estimación: los gramos son a ojo.
+    expect(screen.getByText(/las cantidades son a ojo/)).toBeInTheDocument();
   });
 
   it("offers saving only the dishes that are not in the catalog yet", async () => {

@@ -170,6 +170,18 @@ def clean_ai_credentials_before_each_test(protect_real_ai_credential):
 
 
 @pytest.fixture(autouse=True)
+def fresh_catalog_index():
+    """El índice de genéricos con el que se afinan las estimaciones se guarda media hora por
+    proceso. Entre tests no puede sobrevivir: uno que inserte un alimento genérico cambiaría
+    las calorías que espera el siguiente."""
+    from myfood.domain import catalog_refine
+
+    catalog_refine.clear_cache()
+    yield
+    catalog_refine.clear_cache()
+
+
+@pytest.fixture(autouse=True)
 def signup_open_unless_the_test_says_otherwise(monkeypatch):
     """En producción la instancia nace CERRADA (hace falta código de invitación), pero casi
     todos los tests se registran por el camino normal. Se abre aquí para el conjunto; los
@@ -427,3 +439,42 @@ async def diet_candidates(superuser_conn):
         text("DELETE FROM foods WHERE id = ANY(:ids)"), {"ids": [str(i) for i in ids]}
     )
     await superuser_conn.commit()
+
+
+@pytest_asyncio.fixture
+async def catalog_bread_and_ham(superuser_conn):
+    """Dos genéricos «de tabla» para que el afinado tenga con qué confirmar."""
+    from myfood.domain import catalog_refine
+
+    foods = [
+        ("Pan blanco, de barra", 262, 8.5, 1.4, 52.0, '{"calcium_mg": 30, "iron_mg": 1.5}'),
+        ("Jamón curado Serrano", 235, 30.5, 12.6, 0.0, '{"iron_mg": 2.0}'),
+        ("Manzana, cruda", 52, 0.3, 0.2, 12.0, '{"vitamin_c_mg": 5}'),
+    ]
+    ids = []
+    for name, kcal, protein, fat, carbs, micros in foods:
+        food_id = uuid.uuid4()
+        ids.append(str(food_id))
+        await superuser_conn.execute(
+            text(
+                "INSERT INTO foods (id, kind, source, source_id, license, name_es, quality_rank) "
+                "VALUES (:id, 'generic', 'bedca', :sid, 'CC0', :name, 1)"
+            ),
+            {"id": str(food_id), "sid": str(food_id), "name": name},
+        )
+        await superuser_conn.execute(
+            text(
+                "INSERT INTO food_nutrients "
+                "(food_id, kcal_100g, protein_100g, fat_100g, carbs_100g, micros) "
+                "VALUES (:id, :k, :p, :f, :c, CAST(:m AS jsonb))"
+            ),
+            {"id": str(food_id), "k": kcal, "p": protein, "f": fat, "c": carbs, "m": micros},
+        )
+    await superuser_conn.commit()
+    catalog_refine.clear_cache()
+    yield
+    await superuser_conn.execute(
+        text("DELETE FROM foods WHERE id = ANY(CAST(:ids AS uuid[]))"), {"ids": ids}
+    )
+    await superuser_conn.commit()
+    catalog_refine.clear_cache()

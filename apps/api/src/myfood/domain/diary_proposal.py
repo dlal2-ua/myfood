@@ -7,6 +7,9 @@ exactamente qué se va a guardar — petición, calorías y macros — antes de 
 Lo normal es que cada línea sea un PLATO entero estimado por el modelo («marinera», «bocadillo
 de pastrami»), con su desglose al lado y marcado como estimación
 (`entry_source='ai_estimate'`): la app nunca lo enseña como dato oficial. Tres variantes:
+- cada parte del plato se contrasta con los genéricos del catálogo
+  (`domain/catalog_refine.py`) y, si hay uno que encaja, sus valores por 100 g sustituyen a
+  los del modelo y aportan los micronutrientes; los gramos siguen siendo los estimados;
 - si ese plato ya está guardado en el catálogo (`domain/estimated_dishes.py`), se usan los
   números guardados en vez de los que diga el modelo esta vez: la misma marinera pesa lo mismo
   todos los días;
@@ -28,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import Food, FoodLog, FoodNutrient, ShoppingListItem, WaterLog
-from myfood.domain import estimated_dishes
+from myfood.domain import catalog_refine, estimated_dishes
 from myfood.domain.diet_engine import CandidateFood
 from myfood.domain.estimated_dishes import SavedDish
 from myfood.domain.quantity_text import resolve_grams
@@ -74,6 +77,11 @@ class ProposedItem:
     meal_type: str | None = None
     # El plato ya estaba guardado en el catálogo y se han usado sus números.
     from_catalog: bool = False
+    # Micronutrientes de las partes que el catálogo ha confirmado (ya por el total comido).
+    # Es una cota inferior: lo que no se confirma no aporta ninguno.
+    micros: dict = field(default_factory=dict)
+    # Un alimento simple («una manzana») confirmado entero: el del catálogo que lo confirma.
+    catalog: str | None = None
 
 
 def _round(value: float, digits: int = 1) -> float:
@@ -215,14 +223,21 @@ def _from_saved_dish(dish: SavedDish, quantity: float, entry: dict) -> ProposedI
         ],
         meal_type=_item_meal_type(entry),
         from_catalog=True,
+        micros={key: round(value * quantity, 4) for key, value in (dish.micros or {}).items()},
     )
 
 
-def _from_dish(entry: dict, saved: dict[str, SavedDish]) -> ProposedItem:
-    """Un plato tal y como se comió, estimado entero por el modelo.
+async def _from_dish(
+    session: AsyncSession, entry: dict, saved: dict[str, SavedDish]
+) -> ProposedItem:
+    """Un plato tal y como se comió: lo estima entero el modelo y lo afina el catálogo.
 
-    Los valores llegan por UNA unidad y aquí se multiplican por `cantidad`. Si el plato trae
-    desglose, sus calorías son la suma de las partes: así lo que se enseña debajo cuadra
+    Los valores llegan por UNA unidad y aquí se multiplican por `cantidad`. Cada parte del
+    desglose se contrasta con los genéricos del catálogo (`domain/catalog_refine.py`): la que
+    encaja toma de ahí sus calorías, sus macros y sus micronutrientes; la que no, se queda con
+    lo que estimó el modelo. Un alimento simple sin desglose («una manzana») es su única parte.
+
+    Las calorías del plato son la suma de sus partes: así lo que se enseña debajo cuadra
     siempre con el total, que es justo lo que el usuario va a mirar. Todo se acota, igual que
     en `_from_estimate`, para que un error de interpretación no meta un número imposible."""
     name = str(entry.get("nombre") or "").strip()
@@ -237,19 +252,47 @@ def _from_dish(entry: dict, saved: dict[str, SavedDish]) -> ProposedItem:
 
     grams = _number(entry.get("gramos"))
     kcal = _number(entry.get("kcal"))
-    components = []
+    parts = []
     for raw in (entry.get("componentes") or [])[:MAX_COMPONENTS]:
         if not isinstance(raw, dict) or not str(raw.get("nombre") or "").strip():
             continue
-        components.append(
+        parts.append(
             {
                 "name": str(raw["nombre"]).strip(),
                 "grams": _number(raw.get("gramos")),
                 "kcal": _number(raw.get("kcal")),
+                "protein_g": _number(raw.get("proteina_g")),
+                "fat_g": _number(raw.get("grasa_g")),
+                "carbs_g": _number(raw.get("carbos_g")),
             }
         )
-    if components and all(c["kcal"] is not None and c["kcal"] >= 0 for c in components):
-        kcal = sum(c["kcal"] for c in components)
+
+    def dish_macro(key: str) -> float | None:
+        return _number(entry.get(key))
+
+    macros = {
+        "protein_g": dish_macro("proteina_g"),
+        "fat_g": dish_macro("grasa_g"),
+        "carbs_g": dish_macro("carbos_g"),
+    }
+    catalog_name: str | None = None
+    if parts:
+        micros = await catalog_refine.refine_parts(session, parts)
+        if all(p["kcal"] is not None and p["kcal"] >= 0 for p in parts):
+            kcal = sum(p["kcal"] for p in parts)
+        for key in macros:
+            # Los macros salen de las partes cuando todas los traen (del catálogo o del
+            # modelo); si alguna no, vale lo que el modelo dijo del plato entero.
+            if all(p[key] is not None for p in parts) or macros[key] is None:
+                macros[key] = sum(p[key] or 0.0 for p in parts)
+    else:
+        whole = {"name": name, "grams": grams, "kcal": kcal, **macros}
+        micros = await catalog_refine.refine_parts(session, [whole])
+        if whole.get("catalog"):
+            catalog_name = whole["catalog"]
+            kcal = whole["kcal"]
+            macros = {key: whole[key] for key in macros}
+
     if grams is None or kcal is None:
         raise AppError("INVALID_ESTIMATE", f"No entendí las cantidades de «{name}».", 422)
     if (
@@ -261,29 +304,33 @@ def _from_dish(entry: dict, saved: dict[str, SavedDish]) -> ProposedItem:
             "IMPLAUSIBLE_ESTIMATE", f"Los valores que salen para «{name}» no son plausibles.", 422
         )
 
-    def macro(key: str) -> float:
+    def bounded(value: float | None) -> float:
         # Ningún macro puede pesar más que el propio plato.
-        return max(0.0, min(_number(entry.get(key)) or 0.0, grams))
+        return max(0.0, min(value or 0.0, grams))
 
     return ProposedItem(
         name=_display_name(name),
         grams=_round(grams * quantity),
         kcal=_round(kcal * quantity),
-        protein_g=_round(macro("proteina_g") * quantity),
-        fat_g=_round(macro("grasa_g") * quantity),
-        carbs_g=_round(macro("carbos_g") * quantity),
+        protein_g=_round(bounded(macros["protein_g"]) * quantity),
+        fat_g=_round(bounded(macros["fat_g"]) * quantity),
+        carbs_g=_round(bounded(macros["carbs_g"]) * quantity),
         food_id=None,
         estimated=True,
         quantity=quantity,
         components=[
             {
-                "name": c["name"],
-                "grams": _round(c["grams"] * quantity) if c["grams"] is not None else None,
-                "kcal": _round(c["kcal"] * quantity) if c["kcal"] is not None else None,
+                "name": p["name"],
+                "grams": _round(p["grams"] * quantity) if p["grams"] is not None else None,
+                "kcal": _round(p["kcal"] * quantity) if p["kcal"] is not None else None,
+                # El alimento del catálogo que confirma esta parte, si lo hay.
+                **({"catalog": p["catalog"]} if p.get("catalog") else {}),
             }
-            for c in components
+            for p in parts
         ],
         meal_type=_item_meal_type(entry),
+        micros={key: round(value * quantity, 4) for key, value in micros.items()},
+        catalog=catalog_name,
     )
 
 
@@ -324,7 +371,7 @@ async def build_payload(
         elif _is_dish(entry):
             if saved is None:
                 saved = await estimated_dishes.load_saved(session)
-            items.append(_from_dish(entry, saved))
+            items.append(await _from_dish(session, entry, saved))
         else:
             items.append(_from_estimate(entry))
 
@@ -365,9 +412,12 @@ def summary_text(payload: dict) -> str | None:
         if (item.get("quantity") or 1) != 1:
             line += f" ×{_round(item['quantity']):g}"
         line += f": {prefix}{round(item['kcal'])} kcal"
-        names = [c["name"] for c in item.get("components") or []]
-        if names:
-            line += f" ({', '.join(names)})"
+        parts = [
+            f"{c['name']} {round(c['grams'])} g" if c.get("grams") else c["name"]
+            for c in item.get("components") or []
+        ]
+        if parts:
+            line += f" ({', '.join(parts)})"
         lines.append(line)
     approx = "Aprox. " if payload.get("has_estimates") else ""
     total = f"{approx}{round(payload['totals']['kcal'])} kcal en total".capitalize()
@@ -427,7 +477,7 @@ async def materialize(
                 protein_g=item["protein_g"],
                 fat_g=item["fat_g"],
                 carbs_g=item["carbs_g"],
-                micros={},
+                micros=item.get("micros") or {},
             )
         )
     session.add_all(rows)

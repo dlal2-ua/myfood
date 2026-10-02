@@ -188,6 +188,7 @@ async def update_log_food(
         entry.protein_g = round(float(entry.protein_g) * factor, 2)
         entry.fat_g = round(float(entry.fat_g) * factor, 2)
         entry.carbs_g = round(float(entry.carbs_g) * factor, 2)
+        entry.micros = {key: round(value * factor, 4) for key, value in entry.micros.items()}
         if entry.components:
             entry.components = [
                 {

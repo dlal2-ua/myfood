@@ -845,6 +845,8 @@ export interface DiaryProposalItem {
   meal_type?: MealType | null;
   /** El plato ya estaba guardado en el catálogo y se han usado sus números. */
   from_catalog?: boolean;
+  /** Un alimento simple confirmado por el catálogo: el nombre del que le da sus valores. */
+  catalog?: string | null;
 }
 
 /** Una parte de un plato estimado: «marinera» → rosquilla, ensaladilla rusa, anchoa. */
@@ -852,6 +854,8 @@ export interface DishComponent {
   name: string;
   grams: number | null;
   kcal: number | null;
+  /** El alimento del catálogo que confirma esta parte y le da sus valores por 100 g. */
+  catalog?: string;
 }
 
 export interface DiaryProposalEdit {

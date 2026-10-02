@@ -195,125 +195,6 @@ def build_resolve_food_items_tool(sink: list[dict]) -> SdkMcpTool[Any]:
 
 
 
-DESCRIBE_PLATE_TOOL_NAME = "describe_plate"
-
-# La fase de visión del registro por foto. El modelo DESCRIBE lo que ve; no calcula nada. Por
-# eso no hay ningún campo de gramos ni de calorías aquí: `tipo_cantidad` + `cantidad` + `tamano`
-# es lo que `domain/quantity_text.py` convierte después en un gramaje, exactamente igual que
-# con lo que escribe el usuario a mano (R1).
-DESCRIBE_PLATE_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "required": ["alimentos"],
-    "properties": {
-        "alimentos": {
-            "type": "array",
-            "maxItems": 12,
-            "items": {
-                "type": "object",
-                "required": ["nombre", "cantidad", "tipo_cantidad"],
-                "properties": {
-                    "nombre": {
-                        "type": "string",
-                        "maxLength": 80,
-                        "description": (
-                            "El alimento a secas, en español y como se buscaría en un "
-                            "recetario: «tortilla de patatas», «arroz blanco». Sin "
-                            "coletillas ni paréntesis: con ellos no se encuentra nada."
-                        ),
-                    },
-                    "cantidad": {"type": "number", "minimum": 0.1, "maximum": 20},
-                    "tipo_cantidad": {"type": "string", "enum": list(TIPOS_DE_CANTIDAD)},
-                    "tamano": {"type": "string", "enum": ["pequeno", "mediano", "grande"]},
-                    "origen": {"type": "string", "enum": list(ORIGENES)},
-                    "confianza": {"type": "string", "enum": ["alta", "media", "baja"]},
-                    "pista_referencia": {
-                        "type": "string",
-                        "maxLength": 80,
-                        "description": (
-                            "Qué has usado para estimar el tamaño: el plato, un cubierto, "
-                            "una mano, un vaso… Si no hay nada, dilo."
-                        ),
-                    },
-                },
-            },
-        },
-        "nota": {
-            "type": "string",
-            "maxLength": 200,
-            "description": "Algo que el usuario deba saber para juzgar la estimación.",
-        },
-    },
-}
-
-
-def build_describe_plate_tool(sink: list[dict]) -> SdkMcpTool[Any]:
-    """Fase de visión del registro por foto: qué hay en el plato y en qué cantidad."""
-
-    @tool(
-        DESCRIBE_PLATE_TOOL_NAME,
-        "Describe los alimentos que se ven en la foto de un plato y en qué cantidad.",
-        DESCRIBE_PLATE_SCHEMA,
-    )
-    async def _describe_plate(args: dict[str, Any]) -> dict[str, Any]:
-        sink.append(args)
-        return {"content": [{"type": "text", "text": "Plato descrito."}]}
-
-    return _describe_plate
-
-
-ESTIMATE_FOODS_TOOL_NAME = "estimate_foods"
-
-# Respaldo cuando el catálogo no tiene el alimento. Aquí SÍ hay valores nutricionales, y es la
-# excepción que ya existía para el chat: lo que no está en el catálogo entra con los números
-# que pone el modelo y queda marcado como estimación (`entry_source='ai_estimate'`), nunca
-# mezclado con el dato oficial. `fuente` es obligatoria en la práctica: si un número no viene
-# del ETL, que se vea de dónde viene (R9).
-ESTIMATE_FOODS_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "required": ["items"],
-    "properties": {
-        "items": {
-            "type": "array",
-            "maxItems": 5,
-            "items": {
-                "type": "object",
-                "required": ["nombre", "cantidad_texto", "kcal_100g"],
-                "properties": {
-                    "nombre": {"type": "string", "maxLength": 80},
-                    "cantidad_texto": {"type": "string", "maxLength": 100},
-                    "tipo_cantidad": {"type": "string", "enum": list(TIPOS_DE_CANTIDAD)},
-                    "tamano": {"type": "string", "enum": ["pequeno", "mediano", "grande"]},
-                    "kcal_100g": {"type": "number", "minimum": 0, "maximum": 900},
-                    "protein_100g": {"type": "number", "minimum": 0, "maximum": 100},
-                    "fat_100g": {"type": "number", "minimum": 0, "maximum": 100},
-                    "carbs_100g": {"type": "number", "minimum": 0, "maximum": 100},
-                    "fuente": {
-                        "type": "string",
-                        "maxLength": 200,
-                        "description": "La URL de donde has sacado los valores.",
-                    },
-                },
-            },
-        },
-    },
-}
-
-
-def build_estimate_foods_tool(sink: list[dict]) -> SdkMcpTool[Any]:
-    """Valores por 100 g de un alimento que no está en el catálogo, con su fuente."""
-
-    @tool(
-        ESTIMATE_FOODS_TOOL_NAME,
-        "Devuelve los valores nutricionales por 100 g de alimentos que no están en el "
-        "catálogo, citando de dónde salen.",
-        ESTIMATE_FOODS_SCHEMA,
-    )
-    async def _estimate_foods(args: dict[str, Any]) -> dict[str, Any]:
-        sink.append(args)
-        return {"content": [{"type": "text", "text": "Estimación recibida."}]}
-
-    return _estimate_foods
-
 ESTIMATE_MEAL_TOOL_NAME = "estimate_meal"
 
 # Un plato tal y como se comió, estimado ENTERO con el conocimiento general del modelo. Es el
@@ -336,7 +217,7 @@ DISH_PROPERTIES: dict[str, Any] = {
     "cantidad": {"type": "number", "description": "Cuántas unidades o raciones. 1 si no se dice."},
     "gramos": {"type": "number", "description": "Peso de UNA unidad (ml si es bebida)."},
     "kcal": {"type": "number", "description": "De UNA unidad."},
-    "proteina_g": {"type": "number"},
+    "proteina_g": {"type": "number", "description": "Solo si no lleva componentes."},
     "grasa_g": {"type": "number"},
     "carbos_g": {"type": "number"},
     "componentes": {
@@ -347,9 +228,16 @@ DISH_PROPERTIES: dict[str, Any] = {
             "type": "object",
             "required": ["nombre"],
             "properties": {
-                "nombre": {"type": "string", "maxLength": 60},
+                "nombre": {
+                    "type": "string",
+                    "maxLength": 60,
+                    "description": "El ingrediente a secas: «pan», «jamón serrano».",
+                },
                 "gramos": {"type": "number"},
                 "kcal": {"type": "number"},
+                "proteina_g": {"type": "number"},
+                "grasa_g": {"type": "number"},
+                "carbos_g": {"type": "number"},
             },
         },
     },

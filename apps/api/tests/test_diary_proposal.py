@@ -419,3 +419,82 @@ async def test_saving_a_dish_on_approval_adds_it_to_the_catalog_and_reuses_it_ne
     assert item["food_id"] == str(saved_ids[0])
     assert (item["grams"], item["kcal"]) == (130, 260)
     assert item["estimated"] is True
+
+
+# --- afinado con el catálogo (`domain/catalog_refine.py`) -----------------------------------
+
+
+async def test_a_simple_food_confirmed_by_the_catalog_takes_its_values_and_micros(
+    catalog_bread_and_ham,
+):
+    """«Una manzana» no tiene desglose: ella misma es lo que se contrasta con el catálogo."""
+    payload = await _dish_payload(
+        {"nombre": "manzana", "gramos": 180, "kcal": 95, "proteina_g": 0.5, "carbos_g": 25},
+        {"nombre": "caña de cerveza", "gramos": 200, "kcal": 90, "carbos_g": 7},
+    )
+    manzana, cana = payload["items"]
+    assert manzana["catalog"] == "Manzana, cruda"
+    assert (manzana["grams"], manzana["kcal"], manzana["carbs_g"]) == (180, 93.6, 21.6)
+    assert manzana["micros"] == {"vitamin_c_mg": 9.0}
+    assert manzana["estimated"] is True and manzana["food_id"] is None
+    # Lo que el catálogo no confirma se queda exactamente como lo estimó el modelo.
+    assert cana["catalog"] is None and cana["micros"] == {}
+    assert (cana["kcal"], cana["carbs_g"]) == (90, 7)
+
+
+async def test_the_catalog_never_moves_a_part_far_from_the_estimate(catalog_bread_and_ham):
+    """Si las calorías no coinciden no es el mismo alimento: un «pan» de 400 kcal/100 g es
+    otra cosa (bollería), y no se le ponen los valores del pan de barra."""
+    payload = await _dish_payload(
+        {
+            "nombre": "tostada",
+            "gramos": 60,
+            "componentes": [{"nombre": "pan", "gramos": 60, "kcal": 240, "carbos_g": 30}],
+        }
+    )
+    (part,) = payload["items"][0]["components"]
+    assert part == {"name": "pan", "grams": 60, "kcal": 240}
+
+
+async def test_micronutrients_reach_the_diary_and_the_saved_dish(
+    registered_client, superuser_conn, catalog_bread_and_ham, no_saved_dishes_left_behind
+):
+    """Lo que se gana afinando: un plato estimado deja de contar cero en el panel de
+    micronutrientes, y al guardarlo en el catálogo los conserva."""
+    client, user_id = registered_client
+    payload = await _dish_payload(
+        {
+            "nombre": "bocadillo de jamón",
+            "cantidad": 2,
+            "gramos": 140,
+            "componentes": [
+                {"nombre": "pan", "gramos": 100, "kcal": 260},
+                {"nombre": "jamón serrano", "gramos": 40, "kcal": 100},
+            ],
+        }
+    )
+    (item,) = payload["items"]
+    assert item["micros"] == {"calcium_mg": 60.0, "iron_mg": 4.6}  # dos bocadillos
+    saved_ids: list = []
+    async with AdminSessionLocal() as session:
+        await diary_proposal.materialize(
+            session, user_id, payload, save_to_catalog=[0], saved_food_ids=saved_ids
+        )
+        await session.commit()
+
+    today = date.today().isoformat()
+    micros = (await client.get(f"/api/log/micronutrients?date={today}")).json()["nutrients"]
+    by_key = {n["key"]: n["amount"] for n in micros}
+    assert by_key["iron_mg"] == 4.6 and by_key["calcium_mg"] == 60.0
+
+    # Media ración: los micronutrientes se reescalan con todo lo demás.
+    (entry,) = (await client.get(f"/api/log?date={today}")).json()["food"]
+    await client.patch(f"/api/log/food/{entry['id']}", json={"grams": 140})
+    micros = (await client.get(f"/api/log/micronutrients?date={today}")).json()["nutrients"]
+    assert {n["key"]: n["amount"] for n in micros}["iron_mg"] == 2.3
+
+    # La ficha guardada lleva los de UNA ración (140 g), por 100 g.
+    detail = (await client.get(f"/api/foods/{saved_ids[0]}")).json()
+    assert detail["micros"]["iron_mg"] == round(2.3 / 140 * 100, 4)
+    again = await _dish_payload({"nombre": "bocadillo de jamón"})
+    assert again["items"][0]["micros"]["iron_mg"] == pytest.approx(2.3, abs=0.001)

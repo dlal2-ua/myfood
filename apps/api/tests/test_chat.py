@@ -1322,7 +1322,8 @@ async def test_a_diary_proposal_answers_with_the_total_and_the_breakdown(
 
     message = pushed["message"]
     assert message.startswith("Te propongo apuntar esto.\n\nAprox. 840 kcal en total:")
-    assert "• Marinera: aprox. 260 kcal (rosquilla, ensaladilla rusa)" in message
+    # Cada parte con sus gramos: «bocadillo de jamón (pan 100 g, jamón 40 g, aceite 5 g)».
+    assert "• Marinera: aprox. 260 kcal (rosquilla 60 g, ensaladilla rusa 70 g)" in message
     assert "• Caña de cerveza: aprox. 90 kcal" in message
     assert "• Bocadillo de pastrami: aprox. 490 kcal" in message
     assert message.endswith("Es una estimación orientativa, no una medición.")
