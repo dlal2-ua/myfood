@@ -8,6 +8,7 @@ Agent SDK de todo el proyecto corre aquí, nunca en el proceso `api`.
 import asyncio
 import logging
 from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import redis.asyncio as redis
@@ -274,12 +275,46 @@ async def fail_stale_sessions(now: datetime | None = None) -> int:
         return result.rowcount
 
 
+# Carpetas de `image_storage_path` con ficheros que solo viven mientras se procesan: la foto
+# del plato y la del ticket. Cada flujo borra la suya en un `finally`, pero si el worker se
+# reinicia a mitad del trabajo ese `finally` no llega a correr.
+_TRANSIENT_UPLOAD_DIRS = ("plates", "receipts")
+
+
+def purge_orphan_uploads(now: datetime | None = None, root: Path | None = None) -> int:
+    """Borra las fotos de platos y tickets que sobrevivieron a su trabajo.
+
+    «La foto se borra en cuanto se ha analizado» era verdad salvo cuando el servicio se
+    reiniciaba en mitad del análisis: la sesión se marcaba como huérfana y la foto —un dato
+    de salud, lo que come alguien— se quedaba en disco para siempre. Se encontró una así en
+    producción, de cinco días antes. Ningún trabajo dura más que `_STALE_SESSION_AFTER`, así
+    que todo lo que sea más viejo que eso ya no lo espera nadie."""
+    cutoff = ((now or datetime.now(UTC)) - _STALE_SESSION_AFTER).timestamp()
+    root = root or Path(settings.image_storage_path)
+    removed = 0
+    for name in _TRANSIENT_UPLOAD_DIRS:
+        folder = root / name
+        if not folder.is_dir():
+            continue
+        for path in folder.iterdir():
+            try:
+                if path.is_file() and path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed += 1
+            except OSError:
+                logger.warning("no se pudo borrar la foto huérfana %s", path.name)
+    return removed
+
+
 async def _stale_sessions_loop() -> None:
     while True:
         try:
             failed = await fail_stale_sessions()
             if failed:
                 logger.warning("marcadas %s sesiones de iafood huérfanas como fallidas", failed)
+            purged = purge_orphan_uploads()
+            if purged:
+                logger.warning("borradas %s fotos que sobrevivieron a su análisis", purged)
         except Exception:
             logger.exception(
                 "fallo limpiando sesiones huérfanas — se reintenta en el siguiente ciclo"
