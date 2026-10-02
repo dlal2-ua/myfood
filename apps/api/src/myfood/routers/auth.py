@@ -279,6 +279,9 @@ async def me(
         # Los obligatorios que faltan (spec 7.1): la web bloquea el uso hasta aceptarlos.
         "pending_consents": [c for c in REQUIRED_CONSENTS if c not in granted_consents],
         "totp_enabled": user.totp_enabled,
+        # Los avisos que tiene plegados: van con la sesión para que la primera pantalla ya
+        # salga con ellos plegados, sin un parpadeo mientras se piden aparte.
+        "collapsed_notices": list((user.ui_prefs or {}).get("collapsed_notices") or []),
     }
 
 

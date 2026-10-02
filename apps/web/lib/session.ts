@@ -10,6 +10,8 @@ export interface CurrentUser {
   /** Consentimientos obligatorios que faltan (R4): mientras haya alguno se bloquea el uso. */
   pending_consents: string[];
   totp_enabled: boolean;
+  /** Los avisos que el usuario tiene plegados (`components/Notices.tsx`). */
+  collapsed_notices?: string[];
 }
 
 /** Server-side only: reads the session cookie from the incoming request and

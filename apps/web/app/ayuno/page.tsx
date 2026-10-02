@@ -152,7 +152,7 @@ export default function FastingPage() {
           queda registrado.
         </p>
       </div>
-      <MedicalDisclaimer>
+      <MedicalDisclaimer id="medical-fasting" title="El ayuno no es para todo el mundo">
         El ayuno intermitente no es adecuado para todo el mundo (embarazo, lactancia, menores,
         diabetes o medicación, historial de trastornos de la conducta alimentaria). Consúltalo con
         un profesional sanitario antes de empezar y detén el ayuno si te encuentras mal.

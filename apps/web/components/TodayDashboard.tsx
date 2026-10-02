@@ -6,7 +6,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useCurrentUserId } from "@/components/CurrentUser";
 import { DATA_CHANGED_EVENT } from "@/components/shell/QuickAddSheet";
 import { BudgetRing } from "@/components/ui/BudgetRing";
-import { WeekBudget } from "@/components/WeekBudget";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import { localDateIso } from "@/lib/dates";
@@ -125,11 +124,9 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
   const [waterNote, setWaterNote] = useState<string | null>(null);
   // Sube cada vez que se recargan los datos del día, para que la semana se entere de lo
   // que se acaba de apuntar sin tener que pasarle los datos.
-  const [reloadKey, setReloadKey] = useState(0);
 
   const load = useCallback(async () => {
     const date = localDateIso();
-    setReloadKey((n) => n + 1);
     try {
       const [log, targets, water, supplements, fasting] = await Promise.all([
         apiFetch<LogDay>(`/api/log?date=${date}`),
@@ -262,7 +259,6 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
         </div>
       </section>
 
-      <WeekBudget date={localDateIso()} reloadKey={reloadKey} />
         </>
       )}
 

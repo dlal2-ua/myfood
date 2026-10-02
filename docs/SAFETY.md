@@ -8,7 +8,7 @@ Estas reglas no se discuten ni se relajan por conveniencia. Fuente normativa: No
 - **R4** — Datos de salud = categoría especial RGPD art. 9: cifrado en reposo, consentimiento explícito, borrado real.
 - **R5** — Nunca se envían datos identificativos al LLM. Anonimización centralizada en `ai/anonymize.py`.
 - **R6** — Suelo de seguridad calórico: nunca se genera automáticamente por debajo de la TMB; inquebrantable desde la IA.
-- **R7** — Disclaimers médicos visibles en onboarding, calculadoras, dietas generadas y suplementación.
+- **R7** — Disclaimers médicos visibles en onboarding, calculadoras, dietas generadas y suplementación. Fuera del registro, el usuario puede plegar cada aviso a una línea con su título (decisión del titular, 2026-10-02): plegado sigue a la vista y se despliega de un toque; nunca desaparece. En el registro va siempre entero.
 - **R8** — Secretos fuera de git: `.env` en `.gitignore`, solo `.env.example` con valores ficticios.
 - **R9** — Nada de datos nutricionales inventados; todo alimento sale del ETL de fuentes reales.
 - **R10** — La gamificación premia el registro, nunca el déficit calórico ni el resultado corporal.

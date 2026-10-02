@@ -289,7 +289,7 @@ export default function CalculatorsPage() {
           IA.
         </p>
       </div>
-      <MedicalDisclaimer />
+      <MedicalDisclaimer id="medical-calc" />
       <BmrCalculator />
       <BodyFatCalculator />
     </main>

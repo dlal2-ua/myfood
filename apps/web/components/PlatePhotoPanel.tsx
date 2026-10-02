@@ -4,6 +4,7 @@ import { Camera, Images } from "lucide-react";
 import { useRef, useState } from "react";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import { shrinkImage } from "@/lib/imageResize";
+import { AiConsentPrompt } from "@/components/AiConsentPrompt";
 import { DiaryProposalCard } from "@/components/chat/DiaryProposalCard";
 import { type AiSession, type MealType, type SmartLogResult } from "@/lib/types";
 import { AiWaiting, QuotaBadge, useAiQuota, useElapsedSeconds } from "@/components/ui/AiWaiting";
@@ -30,7 +31,10 @@ export function PlatePhotoPanel({
   mealType: MealType;
   onAdded: () => void;
 }) {
-  const [consent, setConsent] = useState(false);
+  // Solo cuando el servidor dice que falta el consentimiento para usar la IA; la foto se
+  // guarda mientras tanto para no tener que volver a hacerla.
+  const [needsConsent, setNeedsConsent] = useState(false);
+  const pendingImageRef = useRef<{ image: Blob; name: string } | null>(null);
   const [analysing, setAnalysing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -92,44 +96,55 @@ export function PlatePhotoPanel({
     if (!file) return;
     setAnalysing(true);
     setError(null);
-    setWarning(null);
-    setQuestion(null);
-    setNotice(null);
-    setProposal(null);
     try {
       // Se reduce aquí, antes de subirla: una foto de móvil entera tarda en subir más de lo
       // que tarda el modelo en mirarla.
       const image = await shrinkImage(file);
       if (image.size > MAX_BYTES) {
         setError("La foto pesa más de 10 MB. Hazla con menos calidad o recórtala.");
+        setAnalysing(false);
         return;
       }
-      if (consent) {
-        await apiFetch("/api/consents", {
-          method: "POST",
-          body: JSON.stringify({ kind: "ai_processing", version: "v1" }),
-        });
-      }
+      await analyse(image, image === file ? file.name : "plato.jpg");
+    } finally {
+      // Para poder volver a elegir la MISMA foto si algo falló.
+      input.value = "";
+    }
+  }
+
+  async function analyse(image: Blob, name: string) {
+    setAnalysing(true);
+    setError(null);
+    setWarning(null);
+    setQuestion(null);
+    setNotice(null);
+    setProposal(null);
+    setNeedsConsent(false);
+    try {
       const form = new FormData();
-      form.append("image", image, image === file ? file.name : "plato.jpg");
+      form.append("image", image, name);
       form.append("log_date", logDate);
       form.append("meal_type", mealType);
       const session = await apiFetch<AiSession>("/api/log/photo", {
         method: "POST",
         body: form,
       });
+      pendingImageRef.current = null;
       await pollSession(session.id);
     } catch (err) {
-      setError(
-        err instanceof ApiError && err.status === 429
-          ? `${err.message} Se reinician a las 00:00.`
-          : errorMessage(err),
-      );
+      if (err instanceof ApiError && err.code === "AI_CONSENT_REQUIRED") {
+        pendingImageRef.current = { image, name };
+        setNeedsConsent(true);
+      } else {
+        setError(
+          err instanceof ApiError && err.status === 429
+            ? `${err.message} Se reinician a las 00:00.`
+            : errorMessage(err),
+        );
+      }
     } finally {
       setAnalysing(false);
       reloadQuota();
-      // Para poder volver a elegir la MISMA foto si algo falló.
-      input.value = "";
     }
   }
 
@@ -213,17 +228,20 @@ export function PlatePhotoPanel({
         </label>
       </div>
 
-      <label className="mt-2 flex items-start gap-2 text-sm text-neutral-600 dark:text-neutral-400">
-        <input
-          type="checkbox"
-          checked={consent}
-          onChange={(e) => setConsent(e.target.checked)}
-          className="mt-0.5"
-          disabled={analysing}
+      <p className="mt-2 text-xs text-neutral-500">
+        La foto no se guarda: se borra en cuanto se ha analizado.
+      </p>
+
+      {needsConsent && (
+        <AiConsentPrompt
+          what="esta foto"
+          onAccepted={() => {
+            const pending = pendingImageRef.current;
+            if (pending) void analyse(pending.image, pending.name);
+            else setNeedsConsent(false);
+          }}
         />
-        Acepto que esta foto (sin mi nombre ni datos identificativos) se envíe a Claude para
-        interpretarla. No se guarda: se borra en cuanto se ha analizado.
-      </label>
+      )}
 
       {analysing && (
         <div className="mt-3">

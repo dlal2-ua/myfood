@@ -18,7 +18,10 @@ export function BarChart({ data, unit = "" }: { data: BarDatum[]; unit?: string 
   const barHeight = 28;
   const gap = 10;
   const labelWidth = 70;
-  const chartWidth = width - labelWidth;
+  // Hueco para la cifra, que va a la derecha de la barra. Sin él, la barra más larga llegaba
+  // al borde del gráfico y su cifra —la de carbohidratos, casi siempre— se quedaba fuera.
+  const valueWidth = 62;
+  const chartWidth = width - labelWidth - valueWidth;
   const height = data.length * (barHeight + gap);
 
   return (

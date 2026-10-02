@@ -50,6 +50,9 @@ class User(Base):
     # activarlo hasta confirmar un código real (`/auth/2fa/confirm`).
     totp_secret: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Ajustes de pantalla que siguen al usuario entre dispositivos (migración 0027). Hoy:
+    # `collapsed_notices`, la lista de avisos que tiene plegados.
+    ui_prefs: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     profile: Mapped["Profile"] = relationship(back_populates="user", uselist=False)

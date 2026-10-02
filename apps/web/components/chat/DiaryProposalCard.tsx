@@ -1,7 +1,8 @@
 "use client";
 
-import { BadgeCheck, BookmarkCheck, Check, TriangleAlert, X } from "lucide-react";
+import { BadgeCheck, BookmarkCheck, Check, X } from "lucide-react";
 import { useState } from "react";
+import { CollapsibleNotice } from "@/components/Notices";
 import { MEAL_TYPE_LABELS, type ChatDiaryPayload, type DiaryProposalItem } from "@/lib/types";
 
 const MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -260,22 +261,20 @@ export function DiaryProposalCard({
       )}
 
       {payload.has_estimates && (
-        <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-300">
-          <TriangleAlert size={13} aria-hidden="true" className="mt-px shrink-0" />
-          <span>
-            Es una estimación orientativa, no una medición: las cantidades son a ojo.
-            {hasCatalogValues && (
-              <>
-                {" "}
-                Lo marcado con <BadgeCheck size={11} aria-hidden="true" className="inline-block align-[-1px]" />{" "}
-                toma sus valores por 100 g del catálogo.
-              </>
-            )}
-            {anySavable && (
-              <> Lo que guardes en el catálogo se reutiliza la próxima vez que lo nombres.</>
-            )}
-          </span>
-        </p>
+        <CollapsibleNotice id="estimate-note" title="Estimación orientativa" className="mt-2">
+          Es una estimación orientativa, no una medición: las cantidades son a ojo.
+          {hasCatalogValues && (
+            <>
+              {" "}
+              Lo marcado con{" "}
+              <BadgeCheck size={11} aria-hidden="true" className="inline-block align-[-1px]" /> toma
+              sus valores por 100 g del catálogo.
+            </>
+          )}
+          {anySavable && (
+            <> Lo que guardes en el catálogo se reutiliza la próxima vez que lo nombres.</>
+          )}
+        </CollapsibleNotice>
       )}
 
       <div className="mt-3 flex gap-2">

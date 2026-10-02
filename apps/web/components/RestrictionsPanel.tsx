@@ -192,7 +192,7 @@ export function RestrictionsPanel() {
         )}
       </form>
 
-      <MedicalDisclaimer>
+      <MedicalDisclaimer id="allergens-restrictions" title="Alérgenos: información orientativa">
         La información de alérgenos de los alimentos es <strong>orientativa</strong>: en los
         productos de marca viene de lo que declara el fabricante (y trazas), y en los alimentos
         genéricos se infiere por su nombre. Revisa siempre la etiqueta del producto que vayas a
