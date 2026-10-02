@@ -480,7 +480,7 @@ export default function ChatPage() {
           )}
         </div>
         <div className="mt-2">
-          <MedicalDisclaimer>
+          <MedicalDisclaimer id="medical-chat" title="Calorías estimadas, no consejo médico">
             El chat no da consejo médico. Las calorías que propone son estimaciones
             aproximadas que tú confirmas, no mediciones; consulta con un profesional ante
             cualquier duda de salud.

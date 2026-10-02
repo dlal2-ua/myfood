@@ -174,7 +174,7 @@ export default function DietPlansPage() {
   return (
     <main className="flex flex-col gap-6">
       <h1 className="text-3xl font-extrabold tracking-tight">Planes de dieta</h1>
-      <MedicalDisclaimer />
+      <MedicalDisclaimer id="medical-plans" />
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Generar un plan nuevo</h2>

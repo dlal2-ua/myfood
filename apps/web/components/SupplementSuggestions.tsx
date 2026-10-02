@@ -107,7 +107,7 @@ export function SupplementSuggestions({ onAdded }: { onAdded: () => void }) {
         se te propone, como mucho, alguno de una lista cerrada. La dosis la pone MyFood; nada se añade
         sin que lo apruebes.
       </p>
-      <MedicalDisclaimer>
+      <MedicalDisclaimer id="medical-supplements" title="Suplementos: no es consejo médico">
         Esto no es consejo médico. Si estás embarazada o en lactancia, tienes una patología, tomas
         medicación o eres menor de edad, no se sugieren suplementos: consulta a un profesional.
       </MedicalDisclaimer>

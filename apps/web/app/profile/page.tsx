@@ -443,7 +443,7 @@ export default function ProfilePage() {
 
       <section>
         <h2 className="mb-4 text-xl font-semibold">Cálculos</h2>
-        <MedicalDisclaimer />
+        <MedicalDisclaimer id="medical-profile" />
         <button
           type="button"
           onClick={onCalculate}

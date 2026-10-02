@@ -411,3 +411,47 @@ async def test_first_profile_requests_of_a_new_user_do_not_collide(registered_cl
     client, _ = registered_client
     responses = await asyncio.gather(*[client.get("/api/profile") for _ in range(8)])
     assert [r.status_code for r in responses] == [200] * 8
+
+
+# --- preferencias de pantalla (migración 0027) ----------------------------------------------
+
+
+async def test_collapsed_notices_follow_the_account_and_come_with_the_session(
+    registered_client,
+):
+    """Plegar un aviso se guarda en la cuenta, no en el navegador: al volver a entrar —en
+    este dispositivo o en otro— sigue plegado. Viaja con `/auth/me` para que la primera
+    pantalla ya salga así."""
+    client, _ = registered_client
+    assert (await client.get("/api/auth/me")).json()["collapsed_notices"] == []
+
+    resp = await client.put(
+        "/api/profile/ui-prefs",
+        json={"collapsed_notices": ["medical-chat", "estimate-note", "medical-chat"]},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"collapsed_notices": ["estimate-note", "medical-chat"]}
+    assert (await client.get("/api/auth/me")).json()["collapsed_notices"] == [
+        "estimate-note", "medical-chat",
+    ]
+
+    # Desplegarlos todos también se guarda.
+    await client.put("/api/profile/ui-prefs", json={"collapsed_notices": []})
+    assert (await client.get("/api/auth/me")).json()["collapsed_notices"] == []
+
+
+async def test_ui_prefs_only_accept_notice_identifiers(registered_client):
+    client, _ = registered_client
+    for bad in (["<script>"], ["Con Espacios"], ["x" * 41], ["ok"] * 61):
+        resp = await client.put("/api/profile/ui-prefs", json={"collapsed_notices": bad})
+        assert resp.status_code == 422, bad
+
+
+async def test_ui_prefs_need_a_session():
+    from httpx import ASGITransport, AsyncClient
+
+    from myfood.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as anon:
+        resp = await anon.put("/api/profile/ui-prefs", json={"collapsed_notices": []})
+    assert resp.status_code == 401

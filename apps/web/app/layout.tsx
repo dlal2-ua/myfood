@@ -4,6 +4,7 @@ import "./globals.css";
 import { ConsentGate } from "@/components/ConsentGate";
 import { LocalNotificationsSync } from "@/components/LocalNotificationsSync";
 import { CurrentUserProvider } from "@/components/CurrentUser";
+import { NoticePrefsProvider } from "@/components/Notices";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { AppShell } from "@/components/shell/AppShell";
 import { getCurrentUser } from "@/lib/session";
@@ -50,8 +51,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <ServiceWorkerRegister />
         <LocalNotificationsSync authenticated={user != null} />
         <CurrentUserProvider userId={user?.id ?? null}>
-          <ConsentGate pending={user?.pending_consents ?? []} />
-          <AppShell user={user}>{children}</AppShell>
+          {/* `key`: al cambiar de cuenta en el mismo navegador se parte de los avisos del
+              usuario nuevo, no de los que tenía plegados el anterior. */}
+          <NoticePrefsProvider key={user?.id ?? "anon"} initial={user?.collapsed_notices ?? []}>
+            <ConsentGate pending={user?.pending_consents ?? []} />
+            <AppShell user={user}>{children}</AppShell>
+          </NoticePrefsProvider>
         </CurrentUserProvider>
       </body>
     </html>

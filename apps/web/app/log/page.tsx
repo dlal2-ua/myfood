@@ -32,6 +32,7 @@ import {
 } from "@/lib/types";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { DiaryProposalCard } from "@/components/chat/DiaryProposalCard";
+import { AiConsentPrompt } from "@/components/AiConsentPrompt";
 import { PlatePhotoPanel } from "@/components/PlatePhotoPanel";
 import { SavedMeals, SaveMealButton } from "@/components/SavedMeals";
 
@@ -90,7 +91,8 @@ export default function LogPage() {
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
   const [smartText, setSmartText] = useState("");
-  const [smartConsent, setSmartConsent] = useState(false);
+  // Solo cuando el servidor dice que falta el consentimiento para usar la IA.
+  const [smartNeedsConsent, setSmartNeedsConsent] = useState(false);
   const [smartRequesting, setSmartRequesting] = useState(false);
   const [smartError, setSmartError] = useState<string | null>(null);
   const [smartWarning, setSmartWarning] = useState<string | null>(null);
@@ -367,24 +369,23 @@ export default function LogPage() {
     });
   }
 
-  async function onSmartLogSubmit(e: React.FormEvent) {
+  function onSmartLogSubmit(e: React.FormEvent) {
     e.preventDefault();
+    void requestSmartLog();
+  }
+
+  async function requestSmartLog() {
     // Segunda barrera además de `disabled`: el Enter del teclado móvil puede llegar
     // mientras el botón ya está deshabilitado, y cada envío gasta una petición del día.
     if (smartRequesting || !smartText.trim()) return;
     setSmartRequesting(true);
+    setSmartNeedsConsent(false);
     setSmartError(null);
     setSmartWarning(null);
     setSmartQuestion(null);
     setSmartNotice(null);
     setSmartProposal(null);
     try {
-      if (smartConsent) {
-        await apiFetch("/api/consents", {
-          method: "POST",
-          body: JSON.stringify({ kind: "ai_processing", version: "v1" }),
-        });
-      }
       const session = await apiFetch<AiSession>("/api/log/smart", {
         method: "POST",
         body: JSON.stringify({
@@ -398,11 +399,15 @@ export default function LogPage() {
       if (session.status === "running") await pollSmartLogSession(session.id);
       else showSmartLogResult(session);
     } catch (err) {
-      setSmartError(
-        err instanceof ApiError && err.status === 429
-          ? `${err.message} Se reinician a las 00:00.`
-          : errorMessage(err),
-      );
+      if (err instanceof ApiError && err.code === "AI_CONSENT_REQUIRED") {
+        setSmartNeedsConsent(true);
+      } else {
+        setSmartError(
+          err instanceof ApiError && err.status === 429
+            ? `${err.message} Se reinician a las 00:00.`
+            : errorMessage(err),
+        );
+      }
     } finally {
       setSmartRequesting(false);
       reloadSmartQuota();
@@ -723,11 +728,7 @@ export default function LogPage() {
           <QuotaBadge quota={smartQuota} />
         </div>
         <p className="mb-3 text-sm text-neutral-500">
-          Escribe lo que has comido como se lo contarías a alguien: &quot;a media mañana una
-          marinera y una caña, y luego un bocadillo de pastrami con rúcula y mayonesa&quot;.
-          Claude estima cada plato entero, te dice de qué se compone y te da un total
-          aproximado; tú lo confirmas antes de que se apunte nada. Es lo mismo que hace el
-          chat cuando se lo dictas.
+          Escribe lo que has comido y te lo devuelvo estimado, plato a plato. Tú confirmas.
         </p>
         <form onSubmit={onSmartLogSubmit} className="flex flex-wrap items-end gap-3">
           <input
@@ -748,17 +749,9 @@ export default function LogPage() {
             {smartRequesting ? "Estimando…" : "Estimar"}
           </button>
         </form>
-        <label className="mt-2 flex items-start gap-2 text-sm text-neutral-600 dark:text-neutral-400">
-          <input
-            type="checkbox"
-            checked={smartConsent}
-            onChange={(e) => setSmartConsent(e.target.checked)}
-            className="mt-0.5"
-            disabled={smartRequesting}
-          />
-          Acepto que este texto (sin nombre ni datos identificativos) se envíe a Claude
-          para interpretarlo.
-        </label>
+        {smartNeedsConsent && (
+          <AiConsentPrompt what="este texto" onAccepted={() => void requestSmartLog()} />
+        )}
 
         {smartRequesting && (
           <div className="mt-3">

@@ -1,10 +1,10 @@
 from datetime import date
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +14,11 @@ from myfood.db.models import (
     HEALTH_FLAG_PREGNANT,
     BodyMeasurement,
     Profile,
+    User,
 )
+from myfood.db.session import get_session
 from myfood.deps import get_current_user_id, get_db
+from myfood.errors import AppError
 from myfood.routers.consents import require_health_data_consent
 
 router = APIRouter(tags=["profile"])
@@ -203,3 +206,30 @@ async def upsert_measurement(
     await session.commit()
     await session.refresh(existing)
     return _measurement_to_out(existing)
+
+
+# Identificador de un aviso de la web («medical-chat», «estimate-note»). Se acota para que
+# esto no sirva de cajón donde guardar cualquier cosa.
+NoticeKey = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")]
+
+
+class UiPrefs(BaseModel):
+    # Los avisos fijos que el usuario ha dejado plegados, en una línea con su título.
+    collapsed_notices: list[NoticeKey] = Field(default_factory=list, max_length=60)
+
+
+@router.put("/profile/ui-prefs")
+async def update_ui_prefs(
+    body: UiPrefs,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> UiPrefs:
+    """Guarda las preferencias de pantalla en la cuenta, para que le sigan a cualquier
+    dispositivo. Se leen con la sesión (`GET /auth/me`), no con un `GET` propio."""
+    user = await session.get(User, user_id)
+    if user is None:
+        raise AppError("NOT_AUTHENTICATED", "Se requiere iniciar sesión.", 401)
+    collapsed = sorted(set(body.collapsed_notices))
+    user.ui_prefs = {**(user.ui_prefs or {}), "collapsed_notices": collapsed}
+    await session.commit()
+    return UiPrefs(collapsed_notices=collapsed)

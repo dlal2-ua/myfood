@@ -205,7 +205,7 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
 
         {mode === "register" && (
           <>
-            <MedicalDisclaimer />
+            <MedicalDisclaimer collapsible={false} />
             <p className="text-xs text-[var(--color-muted)]">
               Tras crear la cuenta te pediremos tu consentimiento para tratar tus datos de salud
               (peso, medidas, comidas). Podrás revocarlo y borrar tu cuenta cuando quieras.

@@ -6,6 +6,7 @@ import { FoodImage } from "@/components/FoodImage";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { MedicalDisclaimer } from "@/components/MedicalDisclaimer";
+import { CollapsibleNotice } from "@/components/Notices";
 import { AddToLogForm } from "@/components/AddToLogForm";
 import { SimilarFoods } from "@/components/foods/SimilarFoods";
 import { apiFetch, errorMessage } from "@/lib/api";
@@ -106,33 +107,33 @@ export default function FoodDetailPage() {
       </div>
 
       {food.source === "ai_estimate" && (
-        <section className="max-w-xl rounded-[var(--radius-card)] border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
-          <p className="font-semibold">Estimación orientativa</p>
-          <p className="mt-1 text-neutral-700 dark:text-neutral-300">
+        <CollapsibleNotice id="estimate-food" title="Estimación orientativa" className="max-w-xl">
+          <p>
             Este plato se guardó desde el chat o el diario. Sus valores son aproximados: los
             estimó Claude con su conocimiento general, no salen de una tabla oficial ni de una
             etiqueta. Valen para seguir la tendencia de tus semanas, no como medición.
           </p>
-          {food.components && food.components.length > 0 && (
-            <>
-              <p className="mt-2 font-semibold">De qué se compone una ración</p>
-              <ul className="mt-1 flex flex-col gap-0.5">
-                {food.components.map((component, i) => (
-                  <li key={`${component.name}-${i}`} className="flex justify-between gap-3">
-                    <span>
-                      {component.name}
-                      {component.grams != null && (
-                        <span className="text-neutral-500"> · {Math.round(component.grams)} g</span>
-                      )}
-                    </span>
-                    {component.kcal != null && (
-                      <span className="text-neutral-500">aprox. {Math.round(component.kcal)} kcal</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
+        </CollapsibleNotice>
+      )}
+
+      {food.components && food.components.length > 0 && (
+        <section className="max-w-sm text-sm">
+          <h2 className="mb-1 font-semibold">De qué se compone una ración</h2>
+          <ul className="flex flex-col gap-0.5">
+            {food.components.map((component, i) => (
+              <li key={`${component.name}-${i}`} className="flex justify-between gap-3">
+                <span>
+                  {component.name}
+                  {component.grams != null && (
+                    <span className="text-neutral-500"> · {Math.round(component.grams)} g</span>
+                  )}
+                </span>
+                {component.kcal != null && (
+                  <span className="text-neutral-500">aprox. {Math.round(component.kcal)} kcal</span>
+                )}
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
@@ -240,7 +241,7 @@ export default function FoodDetailPage() {
             ))}
           </ul>
         )}
-        <MedicalDisclaimer>
+        <MedicalDisclaimer id="allergens-food" title="Alérgenos: revisa la etiqueta">
           Información de alérgenos orientativa. Revisa siempre la etiqueta del producto.
         </MedicalDisclaimer>
       </section>
