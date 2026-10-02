@@ -454,6 +454,14 @@ async def process_chat_job(ai_session_id: str) -> None:
                 summary = diary_proposal.summary_text(proposal_out["payload"])
                 if summary:
                     assistant_text = f"{turn.text.strip()}\n\n{summary}".strip()
+                skipped = (turn.diary_args or {}).get("skipped_dates")
+                if skipped:
+                    # Una propuesta apunta en un solo día. Mejor decirlo que dejar creer
+                    # que lo del otro día también ha quedado preparado.
+                    assistant_text += (
+                        "\n\nSolo puedo preparar un día por mensaje: lo del "
+                        f"{' y el '.join(skipped)} dímelo en otro mensaje."
+                    )
 
         if turn.day_change_args is not None and proposal_out is None:
             proposal_out, day_error = await _build_day_change_proposal(

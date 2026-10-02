@@ -335,8 +335,9 @@ APUNTAR COMIDA es lo más habitual: usa propose_diary_entries. No hace falta nin
 - search_foods solo si nombra un producto de marca concreto o pide el dato del catálogo; esa
   línea lleva su `alias` y `quantity_text` en vez de cifras.
 - Fecha: hoy si no dice otra; puede ser pasada, nunca futura. La comida dedúcela de sus palabras
-  («de desayuno», «a media mañana») y, si reparte entre varias, pon `comida` en cada plato. Si
-  no hay forma de saberla, pregunta antes de proponer.
+  («de desayuno», «a media mañana»). Si no hay forma de saberla, pregunta antes de proponer.
+- UNA sola llamada por mensaje, con todos los platos. Si cuenta varias comidas del día, sigue
+  siendo una llamada: pon `comida` en cada plato.
 - En `request`, lo que ha pedido con sus palabras.
 
 REGLAS
