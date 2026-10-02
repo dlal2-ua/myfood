@@ -458,7 +458,7 @@ async def test_process_chat_job_saves_voice_message_with_the_already_transcribed
     le llega el texto. Si el worker intentara transcribir, este test revienta."""
     user_id, _ = two_users
 
-    async def _worker_must_never_transcribe(audio_bytes: bytes) -> str:
+    async def _worker_must_never_transcribe(audio_bytes: bytes, **_) -> str:
         raise AssertionError("el worker no debe transcribir: el audio no le llega")
 
     monkeypatch.setattr(flow, "run_chat_turn", _fake_turn(text="Vale."))
@@ -486,9 +486,10 @@ async def test_process_chat_job_saves_voice_message_with_the_already_transcribed
 
 
 def _fake_transcribe(text_out: str, received: dict | None = None):
-    async def _fake(audio_bytes: bytes) -> str:
+    async def _fake(audio_bytes: bytes, *, filename: str = "") -> str:
         if received is not None:
             received["audio"] = audio_bytes
+            received["filename"] = filename
         return text_out
 
     return _fake
@@ -627,7 +628,7 @@ async def test_request_chat_message_voice_with_whisper_down_raises_503_and_creat
 ):
     user_id, _ = two_users
 
-    async def _down(audio_bytes: bytes) -> str:
+    async def _down(audio_bytes: bytes, **_) -> str:
         raise TranscriptionUnavailable("no responde")
 
     monkeypatch.setattr(flow, "transcribe", _down)
@@ -788,7 +789,7 @@ async def test_send_chat_message_voice_with_whisper_down_is_503_with_a_readable_
     async with AdminSessionLocal() as session:
         await ai_client.set_credential(session, admin_user_id=user_id, token="fake-token")
 
-    async def _down(audio_bytes: bytes) -> str:
+    async def _down(audio_bytes: bytes, **_) -> str:
         raise TranscriptionUnavailable("no responde")
 
     monkeypatch.setattr(flow, "transcribe", _down)
@@ -1229,8 +1230,167 @@ async def test_day_change_is_refused_when_the_day_has_a_batch_cooking_recipe(
 def test_system_prompt_forbids_leaking_aliases_and_claiming_changes_are_applied():
     """Encontrado en las pruebas reales: el modelo decía «(c15)» al usuario y
     «He movido el pollo a la cena» cuando solo había una propuesta pendiente."""
-    from myfood.ai.prompts import CHAT_SYSTEM_V1
+    from myfood.ai.prompts import CHAT_SYSTEM_V2
 
-    assert "Nunca menciones los alias internos" in CHAT_SYSTEM_V1
-    assert "Tú solo PROPONES" in CHAT_SYSTEM_V1
-    assert "Nunca digas que ya has cambiado" in CHAT_SYSTEM_V1
+    assert "Nunca menciones los alias internos" in CHAT_SYSTEM_V2
+    assert "Tú solo PROPONES" in CHAT_SYSTEM_V2
+    assert "nunca digas que ya has apuntado" in CHAT_SYSTEM_V2
+
+
+def test_chat_and_diary_text_share_the_same_estimation_rules():
+    """Escribir en el diario y dictarle al chat tienen que dar lo mismo: las reglas de
+    estimación son un único texto, no dos que se puedan ir separando."""
+    from myfood.ai.prompts import CHAT_SYSTEM_V2, MEAL_ESTIMATE_RULES, SMART_LOG_SYSTEM_V3
+
+    assert MEAL_ESTIMATE_RULES in CHAT_SYSTEM_V2
+    assert MEAL_ESTIMATE_RULES in SMART_LOG_SYSTEM_V3
+    assert "nunca lo partas en ingredientes sueltos" in MEAL_ESTIMATE_RULES
+    # Sin búsqueda web (decisión del usuario): ni se menciona ni se ofrece la herramienta.
+    assert "WebSearch" not in CHAT_SYSTEM_V2 + SMART_LOG_SYSTEM_V3
+
+
+def test_the_chat_tool_takes_whole_dishes_with_the_shared_schema():
+    from myfood.ai.tools import DISH_PROPERTIES, ESTIMATE_MEAL_SCHEMA
+    from myfood.chat.tools import LOG_MEAL_SCHEMA
+
+    chat_item = LOG_MEAL_SCHEMA["properties"]["items"]["items"]["properties"]
+    text_item = ESTIMATE_MEAL_SCHEMA["properties"]["platos"]["items"]["properties"]
+    assert text_item == DISH_PROPERTIES
+    assert DISH_PROPERTIES.items() <= chat_item.items()
+    assert {"componentes", "kcal", "gramos", "cantidad"} <= set(DISH_PROPERTIES)
+
+
+def test_the_prompt_tells_the_model_what_day_it_is_and_which_dishes_are_saved():
+    prompt = build_chat_user_prompt(
+        "ayer cené una marinera", today="viernes 2026-10-02", known_dishes=["Marinera"]
+    )
+    assert prompt.startswith("Hoy es viernes 2026-10-02. platos_guardados: Marinera.")
+    assert prompt.endswith("ayer cené una marinera")
+
+
+def test_today_label_carries_the_weekday():
+    from datetime import datetime
+
+    from myfood.chat.agent_loop import today_label
+
+    assert today_label(datetime(2026, 10, 2, 11, 0)) == "viernes 2026-10-02"
+
+
+async def test_a_diary_proposal_answers_with_the_total_and_the_breakdown(
+    two_users, configured_credential, monkeypatch
+):
+    """Lo que se pidió: un total aproximado y el desglose por plato, con el bocadillo como un
+    conjunto. Sale de los números de la propuesta, no de lo que redacte el modelo."""
+    user_id, _ = two_users
+    diary_args = {
+        "date": date.today().isoformat(),
+        "meal_type": "morning_snack",
+        "request": "una marinera, una caña y un bocadillo de pastrami",
+        "items": [
+            {
+                "nombre": "marinera",
+                "gramos": 130,
+                "kcal": 260,
+                "componentes": [
+                    {"nombre": "rosquilla", "gramos": 60, "kcal": 160},
+                    {"nombre": "ensaladilla rusa", "gramos": 70, "kcal": 100},
+                ],
+            },
+            {"nombre": "caña de cerveza", "gramos": 200, "kcal": 90},
+            {
+                "nombre": "bocadillo de pastrami",
+                "comida": "lunch",
+                "gramos": 230,
+                "kcal": 490,
+                "proteina_g": 22,
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        flow, "run_chat_turn", _fake_turn(text="Te propongo apuntar esto.", diary_args=diary_args)
+    )
+    pushed = {}
+    monkeypatch.setattr(flow, "push_chat_result", _fake_push(pushed))
+
+    async with AdminSessionLocal() as session:
+        ai_session = _running_ai_session(user_id, {"source": "voice", "text": "una marinera…"})
+        session.add(ai_session)
+        await session.commit()
+        session_id = ai_session.id
+
+    await flow.process_chat_job(str(session_id))
+
+    message = pushed["message"]
+    assert message.startswith("Te propongo apuntar esto.\n\nAprox. 840 kcal en total:")
+    assert "• Marinera: aprox. 260 kcal (rosquilla, ensaladilla rusa)" in message
+    assert "• Caña de cerveza: aprox. 90 kcal" in message
+    assert "• Bocadillo de pastrami: aprox. 490 kcal" in message
+    assert message.endswith("Es una estimación orientativa, no una medición.")
+
+    payload = pushed["proposal"]["payload"]
+    assert pushed["proposal"]["scope"] == "diary"
+    assert len(payload["items"]) == 3  # tres platos, no una lista de ingredientes
+    assert [i["meal_type"] for i in payload["items"]] == [
+        "morning_snack", "morning_snack", "lunch",
+    ]
+    # Queda escrito en la conversación, para que el siguiente mensaje tenga a qué referirse.
+    async with AdminSessionLocal() as session:
+        answer = await session.scalar(
+            select(ChatMessage).where(
+                ChatMessage.user_id == user_id, ChatMessage.role == "assistant"
+            )
+        )
+    assert answer.content == message
+
+
+async def test_a_recorded_note_keeps_its_real_format_all_the_way_to_whisper(
+    registered_client, monkeypatch
+):
+    """`MediaRecorder` etiqueta la nota como `audio/webm;codecs=opus` (o `audio/mp4;…` en
+    Safari). Tiene que pasar tal cual, y a Whisper llegarle con la extensión de verdad."""
+    from myfood.chat import router as chat_router
+
+    client, user_id = registered_client
+    await _complete_profile_and_login(client)
+    async with AdminSessionLocal() as session:
+        await ai_client.set_credential(session, admin_user_id=user_id, token="fake-token")
+
+    async def _fake_wait(session_id: str, timeout_seconds: int):
+        return {"message": "Vale.", "proposal": None}
+
+    monkeypatch.setattr(chat_router, "wait_for_chat_result", _fake_wait)
+    monkeypatch.setattr(flow, "enqueue_chat_job", _noop_enqueue)
+
+    for content_type, expected in (
+        ("audio/webm;codecs=opus", "note.webm"),
+        ("audio/mp4; codecs=mp4a.40.2", "note.m4a"),
+        ("audio/ogg", "note.ogg"),
+    ):
+        received: dict = {}
+        monkeypatch.setattr(flow, "transcribe", _fake_transcribe("una marinera", received))
+        resp = await client.post(
+            "/api/chat/message", files={"audio": ("nota", b"audio falso", content_type)}
+        )
+        assert resp.status_code == 200, (content_type, resp.text)
+        assert received["filename"] == expected
+
+    async with AdminSessionLocal() as session:
+        await session.execute(text("DELETE FROM ai_credentials"))
+        await session.commit()
+
+
+async def test_an_empty_recording_is_refused_before_reaching_whisper(registered_client):
+    client, user_id = registered_client
+    await _complete_profile_and_login(client)
+    async with AdminSessionLocal() as session:
+        await ai_client.set_credential(session, admin_user_id=user_id, token="fake-token")
+
+    resp = await client.post(
+        "/api/chat/message", files={"audio": ("nota.webm", b"", "audio/webm")}
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "EMPTY_AUDIO"
+
+    async with AdminSessionLocal() as session:
+        await session.execute(text("DELETE FROM ai_credentials"))
+        await session.commit()

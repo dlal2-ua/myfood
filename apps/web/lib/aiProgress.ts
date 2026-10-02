@@ -8,8 +8,9 @@
 
 /** Segundos que tarda normalmente cada tipo de petición (medido en producción). */
 export const TYPICAL_SECONDS = {
-  /** Interpretar un texto de comida: una llamada con búsqueda en el catálogo. */
-  smart_log: 12,
+  /** Estimar un texto de comida: una llamada, que escribe cada plato con su desglose. Si
+   * todo son platos ya guardados no se llama al modelo y esto ni se llega a ver. */
+  smart_log: 16,
   /** Un turno de chat: unos 5 s sin herramientas, más si tiene que consultar tu día. */
   chat: 10,
   /** Foto del plato: son DOS llamadas al modelo, mirar la foto y cuadrarla con el catálogo. */

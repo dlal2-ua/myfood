@@ -45,8 +45,48 @@ def build_diet_plan_user_prompt(payload: dict[str, Any], *, num_days: int) -> st
     )
 
 
-SMART_LOG_PROMPT_VERSION = "smart_log_v2"
+# Cómo se estima lo que alguien ha comido. Lo comparten el registro por texto y el chat (por
+# escrito o por voz): es lo que hace que los dos den el mismo resultado para la misma frase.
+#
+# Es corto a propósito. Va entero en cada petición, así que cada línea de más se paga en
+# todas las comidas que se apunten. Y no hay búsqueda web (decisión del usuario): el modelo ya
+# sabe de memoria lo que lleva un plato corriente, y meterle resultados de búsqueda en el
+# contexto multiplica los tokens sin que la precisión extra compense en un diario de comidas.
+MEAL_ESTIMATE_RULES = """ESTIMAR LO COMIDO. Estimas tú, con lo que sabes de cocina y nutrición.
+- Un elemento por cada plato, bebida o alimento TAL COMO SE COMIÓ. Un plato con nombre propio
+  o compuesto (marinera, bocadillo de pastrami con rúcula y mayonesa, lentejas con chorizo) es
+  UN elemento: nunca lo partas en ingredientes sueltos.
+- De cada uno, `gramos`, `kcal` y macros de UNA unidad o ración normal, y en `cantidad` cuántas.
+- En `componentes`, de qué se compone un plato compuesto (marinera → rosquilla, ensaladilla
+  rusa, anchoa), con gramos y kcal de cada parte, que suman las del plato. Un alimento simple
+  (una manzana, una caña) no lleva componentes.
+- Son aproximaciones: redondea, sin fingir precisión.
+- Si un plato viene en `platos_guardados`, usa ese nombre tal cual y no des cifras."""
 
+SMART_LOG_PROMPT_VERSION = "smart_log_v3"
+
+SMART_LOG_SYSTEM_V3 = f"""Interpretas lo que alguien dice que ha comido, en español de España,
+para apuntarlo en su diario.
+
+{MEAL_ESTIMATE_RULES}
+
+Si falta algo que cambia mucho el resultado («un bocadillo» sin decir de qué), pon UNA pregunta
+corta en `pregunta` y manda igualmente tu mejor estimación. No des consejo médico.
+
+Responde ÚNICAMENTE llamando a la herramienta `estimate_meal`."""
+
+
+def build_meal_estimate_prompt(text: str, known_dishes: Sequence[str] = ()) -> str:
+    """El texto a secas casi siempre. `platos_guardados` solo viaja cuando alguno de los platos
+    que el usuario ya guardó aparece en la frase: así el modelo no gasta salida en volver a
+    estimarlo, y el nombre que devuelve es exactamente el que hay que buscar."""
+    if not known_dishes:
+        return text
+    return json.dumps({"texto": text, "platos_guardados": list(known_dishes)}, ensure_ascii=False)
+
+
+# El resolutor contra el catálogo. Ya no lo usa el registro por texto (ver arriba); lo sigue
+# usando la segunda fase del registro por foto (`ai/flows/plate_photo.py`).
 SMART_LOG_SYSTEM_V2 = """Interpretas lo que alguien dice que ha comido, en español de España, y
 lo resuelves a alimentos concretos del catálogo de MyFood.
 
@@ -277,98 +317,79 @@ def build_receipt_scan_line_prompt(line: str, candidates: list[dict[str, Any]]) 
     )
 
 
-CHAT_PROMPT_VERSION = "chat_v2"
+CHAT_PROMPT_VERSION = "chat_v3"
 
-# Sección 24.4 + párrafos finales añadidos aquí (no en la especificación):
-# aclaran cómo se espera que se use `propose_day_change` cuando solo se pide
-# cambiar UNA comida del día — el validador (`chat/flow.py`) reutiliza
-# `solve_day_with_fixed_items`/`validate_day_totals` igual que el resto de
-# iafood, que trabajan sobre el día completo, así que Claude debe incluir
-# las comidas no tocadas también (con los alias que ya devuelve
-# `read_plan_day`) en vez de mandar solo la comida que cambia. A diferencia
-# del resto de prompts de este fichero, el turno de usuario NO lleva un
-# payload JSON de candidatos precargado: es el propio Claude quien decide qué
-# herramientas de lectura llamar (`read_pantry`, `search_foods`,
-# `read_plan_day`) antes de responder, porque la conversación es abierta
-# (sección 24.2).
-CHAT_SYSTEM_V1 = """Eres el asistente conversacional de MyFood. El usuario te habla en lenguaje
-natural sobre lo que ha comido, su diario, su despensa, su agua, su lista de la compra o su
-plan de dieta.
+# A diferencia del resto de prompts de este fichero, el turno de usuario NO lleva candidatos
+# precargados: la conversación es abierta y es el propio modelo quien decide qué herramientas
+# de lectura llamar antes de responder (sección 24.2).
+#
+# Corto a propósito, igual que `MEAL_ESTIMATE_RULES`: se manda entero en cada mensaje. Lo que
+# antes decía que no se inventaran valores nutricionales ahora dice lo contrario para lo que
+# se apunta en el diario — estima el modelo, y el catálogo queda para cuando el usuario nombra
+# un producto concreto.
+CHAT_SYSTEM_V2 = f"""Eres el asistente de MyFood. El usuario te habla, a veces dictando por voz,
+de lo que ha comido, su diario, su agua, su despensa, su lista de la compra o su plan de dieta.
 
-LO MÁS HABITUAL es que te pida apuntar algo que ya se ha comido: «añádeme de desayuno un zumo
-y media tostada», «mete en el día de ayer media tostada de tomate con queso manchego». Para
-eso está propose_diary_entries, y NO hace falta que tenga ningún plan de dieta: el diario y el
-plan son cosas distintas. Nunca contestes que no puedes porque no haya un plan activo.
+APUNTAR COMIDA es lo más habitual: usa propose_diary_entries. No hace falta ningún plan de dieta.
+{MEAL_ESTIMATE_RULES}
+- search_foods solo si nombra un producto de marca concreto o pide el dato del catálogo; esa
+  línea lleva su `alias` y `quantity_text` en vez de cifras.
+- Fecha: hoy si no dice otra; puede ser pasada, nunca futura. La comida dedúcela de sus palabras
+  («de desayuno», «a media mañana») y, si reparte entre varias, pon `comida` en cada plato. Si
+  no hay forma de saberla, pregunta antes de proponer.
+- En `request`, lo que ha pedido con sus palabras.
 
-PLATOS COMPUESTOS. «Una tostada de tomate con queso manchego» no es un alimento: son varios.
-Descomponla tú en sus ingredientes con cantidades razonables para una ración normal (pan,
-tomate, aceite, queso) y manda uno por cada `items`. Para cada ingrediente:
-- busca antes con search_foods y usa su `alias`: así las calorías salen del dato oficial;
-- solo si de verdad no existe nada parecido, ponlo con `name`, `grams` y sus valores por
-  100 g. Esa línea se marcará como estimación tuya y el usuario lo verá.
-Usa `request` para repetir con las palabras del usuario lo que te ha pedido.
-
-FECHAS. Puedes apuntar en hoy y en días pasados («ayer», «el lunes»), nunca en el futuro.
-Si no dice fecha, es hoy. Si no dice en qué comida, dedúcelo de sus palabras («de desayuno»,
-«a media mañana») y, si no hay forma de saberlo, pregúntale antes de proponer nada.
-
-CORREGIR Y BORRAR. Lee el día con read_diary_day para tener los identificadores y usa
-propose_diary_edit. Nunca te inventes un entry_id.
-
-REGLAS ABSOLUTAS (idénticas a las del planificador):
-1. Nunca inventes alimentos ni valores nutricionales cuando exista el alimento en la base de
-   datos. Usa search_foods para encontrar candidatos reales antes de proponer nada. Poner tú
-   los valores por 100 g es el ÚLTIMO recurso, solo para un ingrediente que no está.
-2. Nunca indiques en tu respuesta gramos, calorías ni macros exactos — los calcula el sistema
-   y se los enseña al usuario en la confirmación.
-3. Antes de proponer un cambio, comprueba las restricciones del usuario
-   (alergias, alimentos vetados) — ya vienen filtradas en los candidatos.
-4. Si el usuario solo pregunta algo (p. ej. "¿qué llevo hoy de proteína?"),
-   responde con la información — no propongas cambios que no ha pedido.
-5. Si detectas que lo que pide dejaría al usuario por debajo de un mínimo de
-   seguridad, dilo explícitamente y no llames a propose_day_change.
+REGLAS
+1. Tú solo PROPONES: nada cambia hasta que el usuario lo confirma en la app. Di «te propongo»;
+   nunca digas que ya has apuntado, cambiado o añadido algo. Una propuesta por respuesta.
+2. Al proponer comida responde con una frase corta y sin cifras: el sistema enseña el desglose
+   y el total.
+3. Si solo pregunta algo («¿qué llevo hoy de proteína?»), responde; no propongas cambios que
+   no ha pedido.
+4. Corregir o borrar: lee antes el día con read_diary_day y usa propose_diary_edit. Nunca te
+   inventes un entry_id.
+5. Nunca menciones los alias internos (c1, c15...): habla de los alimentos por su nombre.
 6. No des consejo médico.
-7. Nunca menciones los alias internos (c1, c15...) al usuario: habla siempre
-   de los alimentos por su nombre.
-8. Tú solo PROPONES: el usuario aprueba o rechaza la propuesta en la propia
-   app, y hasta entonces no ha cambiado nada. Nunca digas que ya has cambiado,
-   movido o añadido algo; di "te propongo..." o "te dejo una propuesta...".
-   Una respuesta deja como mucho UNA propuesta pendiente.
-9. Sé eficiente: como mucho dos búsquedas por alimento. Si no encuentras una
-   opción adecuada, dilo y pregúntale al usuario en vez de seguir buscando.
-
-Usa las herramientas de lectura las veces que necesites para entender la
-petición antes de responder o proponer un cambio.
-
-Si propones un cambio con propose_day_change, incluye TODAS las comidas del
-día en `meals`. read_plan_day te devuelve un alias por cada alimento que ya
-está en el plan: para las comidas que no cambias, reutiliza esos mismos alias
-(no hace falta volver a buscarlos); solo usa search_foods para los alimentos
-nuevos. El sistema recalcula los gramos de todo el día a la vez para que kcal y
-macros sigan cuadrando.
-
-Si la petición es ambigua y el usuario ya te respondió a una pregunta
-aclaratoria en la conversación reciente, no vuelvas a preguntar lo mismo:
-úsala."""
+7. Plan de dieta: propose_day_change lleva TODAS las comidas del día, solo con alias (nunca
+   gramos ni kcal); para las que no cambian reutiliza los de read_plan_day. Si lo pedido lo
+   dejaría por debajo de un mínimo de seguridad, dilo y no lo propongas.
+8. No repitas una pregunta que el usuario ya te respondió en la conversación."""
 
 
 _HISTORY_ITEM_MAX_CHARS = 1500
 
 
-def build_chat_user_prompt(text: str, history: Sequence[tuple[str, str]] = ()) -> str:
+def build_chat_user_prompt(
+    text: str,
+    history: Sequence[tuple[str, str]] = (),
+    *,
+    today: str | None = None,
+    known_dishes: Sequence[str] = (),
+) -> str:
     """`history`: mensajes recientes de la conversación (rol, contenido), del
     más antiguo al más reciente. Sin él el modelo no recuerda su propia
     pregunta aclaratoria ("¿en qué comida?") ni la respuesta del usuario —
     encontrado en la primera prueba real del chat: cada mensaje se trataba
-    como una conversación nueva."""
+    como una conversación nueva.
+
+    `today` («viernes 2026-10-02») va delante: el prompt de sistema es fijo y el modelo no
+    tiene otra forma de saber qué día es «ayer». `known_dishes` son los platos guardados que
+    aparecen en el mensaje (`domain/estimated_dishes.py`)."""
+    context = []
+    if today:
+        context.append(f"Hoy es {today}.")
+    if known_dishes:
+        context.append(f"platos_guardados: {', '.join(known_dishes)}.")
+    header = " ".join(context)
     if not history:
-        return text
+        return f"{header}\n\n{text}" if header else text
     lines = "\n".join(
         f"{'Usuario' if role == 'user' else 'Asistente'}: {content[:_HISTORY_ITEM_MAX_CHARS]}"
         for role, content in history
     )
     return (
-        f"Conversación reciente (solo como contexto):\n{lines}\n\n"
+        (f"{header}\n\n" if header else "")
+        + f"Conversación reciente (solo como contexto):\n{lines}\n\n"
         f"Mensaje actual del usuario (responde a este):\n{text}"
     )
 

@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai import client as ai_client
 from myfood.ai.agent import AiAgentError
+from myfood.ai.prompts import CHAT_PROMPT_VERSION
 from myfood.ai.queue import enqueue_chat_job, push_chat_result
 from myfood.ai.validator import validate_day_totals, validate_structure
 from myfood.chat.agent_loop import ChatTurnResult, run_chat_turn
@@ -70,6 +71,7 @@ async def request_chat_message(
     text: str | None,
     audio_bytes: bytes | None,
     conversation_id: UUID | None = None,
+    audio_filename: str = "note.webm",
 ) -> AiSession:
     """Corre en el proceso `api` (regla 19) — nunca llama al proveedor de IA
     (Claude); solo transcribe la nota de voz con el Whisper local, prepara todo
@@ -89,7 +91,7 @@ async def request_chat_message(
             )
         source = "voice"
         try:
-            text = await transcribe(audio_bytes)
+            text = await transcribe(audio_bytes, filename=audio_filename)
         except TranscriptionUnavailable as exc:
             raise AppError(
                 "TRANSCRIPTION_UNAVAILABLE",
@@ -120,6 +122,7 @@ async def request_chat_message(
         kind="chat_edit",
         status="running",
         request_payload={
+            "prompt_version": CHAT_PROMPT_VERSION,
             "source": source,
             "text": text,
             "conversation_id": str(conversation.id),
@@ -443,6 +446,14 @@ async def process_chat_job(ai_session_id: str) -> None:
             )
             if diary_error:
                 assistant_text = diary_error
+            elif proposal_out is not None:
+                # El total y el desglose se escriben aquí, con los números de la propuesta,
+                # y no se le dejan al modelo: así el mensaje y la tarjeta de confirmación no
+                # pueden decir cosas distintas, y queda en el historial para el siguiente
+                # mensaje («el bocadillo era la mitad»).
+                summary = diary_proposal.summary_text(proposal_out["payload"])
+                if summary:
+                    assistant_text = f"{turn.text.strip()}\n\n{summary}".strip()
 
         if turn.day_change_args is not None and proposal_out is None:
             proposal_out, day_error = await _build_day_change_proposal(

@@ -5,6 +5,10 @@ responder o proponer un cambio — la conversación es abierta y no viene con
 candidatos precargados (sección 24.2). Tope de 5 llamadas por turno
 (sección 24.5, anti-abuso de coste) y 20s de timeout de turno.
 
+Apuntar comida ya no necesita ninguna de esas lecturas: el modelo estima cada plato entero
+con lo que sabe (`ai/prompts.py::MEAL_ESTIMATE_RULES`) y lo manda de una vez, que es además
+lo que hace que un mensaje dictado de tres platos quepa de sobra en el turno.
+
 Corre siempre en el `worker` (regla 19) — es la única función de chat que
 invoca `ai/agent.run_agent`.
 """
@@ -13,13 +17,17 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai.agent import AgentResult, run_agent
-from myfood.ai.prompts import CHAT_SYSTEM_V1, build_chat_user_prompt
+from myfood.ai.prompts import CHAT_SYSTEM_V2, build_chat_user_prompt
 from myfood.chat.tools import build_chat_tools
+from myfood.config import get_settings
+from myfood.domain import estimated_dishes
 from myfood.domain.diet_engine import CandidateFood
 
 MAX_TOOL_CALLS_PER_TURN = 5
@@ -45,6 +53,16 @@ class ChatTurnResult:
     alias_to_candidate: dict[str, CandidateFood] = field(default_factory=dict)
     input_tokens: int | None = None
     output_tokens: int | None = None
+
+
+_WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+
+
+def today_label(now: datetime | None = None) -> str:
+    """«viernes 2026-10-02», en la hora de la instancia. Con el día de la semana delante
+    porque «el lunes» se resuelve mal si solo se tiene la fecha."""
+    now = now or datetime.now(ZoneInfo(get_settings().tz))
+    return f"{_WEEKDAYS[now.weekday()]} {now.date().isoformat()}"
 
 
 async def run_chat_turn(
@@ -74,10 +92,17 @@ async def run_chat_turn(
         shopping_sink=shopping_sink,
     )
 
+    # Los platos guardados que aparecen en el mensaje: el modelo los nombra tal cual y los
+    # números salen del catálogo (`domain/diary_proposal.py`), no de una estimación nueva.
+    saved = await estimated_dishes.load_saved(session)
+    known_dishes = [dish.name for dish in estimated_dishes.mentioned(user_text, saved)]
+
     agent_result: AgentResult = await run_agent(
         token=token,
-        prompt=build_chat_user_prompt(user_text, history),
-        system_prompt=CHAT_SYSTEM_V1,
+        prompt=build_chat_user_prompt(
+            user_text, history, today=today_label(), known_dishes=known_dishes
+        ),
+        system_prompt=CHAT_SYSTEM_V2,
         mcp_tools=tools,
         max_turns=MAX_TOOL_CALLS_PER_TURN,
         timeout_seconds=CHAT_TURN_TIMEOUT_SECONDS,

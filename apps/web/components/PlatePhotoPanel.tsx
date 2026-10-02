@@ -157,13 +157,16 @@ export function PlatePhotoPanel({
   /** La propuesta del respaldo web se acepta entera, como la del chat: son valores estimados
    * que no vienen del catálogo, así que se enseñan juntos con su fuente y se confirman de una
    * vez en vez de línea a línea. */
-  async function decideWebProposal(decision: "approve" | "reject") {
+  async function decideWebProposal(decision: "approve" | "reject", saveToCatalog: number[]) {
     const proposal = webProposal;
     if (!proposal) return;
     setWebDeciding(true);
     try {
       await apiFetch(`/api/ai/proposals/${proposal.ai_proposal_id}/${decision}`, {
         method: "POST",
+        ...(decision === "approve"
+          ? { body: JSON.stringify({ save_to_catalog: saveToCatalog }) }
+          : {}),
       });
       setWebProposal(null);
       if (decision === "approve") onAdded();
@@ -302,9 +305,12 @@ export function PlatePhotoPanel({
             una estimación y se apuntan marcados como tal:
           </p>
           <DiaryProposalCard
+            key={webProposal.ai_proposal_id}
             payload={webProposal.payload}
             deciding={webDeciding}
-            onDecide={(decision) => void decideWebProposal(decision)}
+            onDecide={(decision, saveToCatalog) =>
+              void decideWebProposal(decision, saveToCatalog)
+            }
           />
         </div>
       )}

@@ -1,26 +1,45 @@
-"""Tests del flujo de Smart Log (sección 10.8). `process_smart_log_job`
-(la mitad que corre en el `worker`) se prueba construyendo el
-`ai_session.request_payload` a mano — igual que en
-`test_ai_flow_diet_plan.py` — para no depender de qué haya indexado
-Meilisearch en este entorno. `request_smart_log` (la mitad en el proceso
-`api`) sí necesita `search_foods`, pero se simula: el índice de Meilisearch
-puede estar vacío (CI no ejecuta el ETL) o tener el catálogo real completo
-(entorno de desarrollo), y ninguno de los dos debe condicionar si este test
-pasa."""
+"""Tests del registro por texto, "Smart Log" (sección 10.8).
+
+Desde la migración 0026 el texto ya no se resuelve contra el catálogo: cada plato se estima
+entero, con su desglose, y lo que sale es una propuesta de diario como la del chat.
+`process_smart_log_job` (la mitad que corre en el `worker`) se prueba simulando `run_agent`;
+`resolve_saved_dishes` (el camino sin modelo) no necesita simular nada.
+
+Los dos tests del final son del RAG de `food_resolution`, que sigue usando el registro por
+foto."""
 
 import uuid
+from datetime import date
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from myfood.ai import client as ai_client
 from myfood.ai.agent import AgentResult, AiAgentError
 from myfood.ai.flows import food_resolution
 from myfood.ai.flows import smart_log as flow
-from myfood.db.models import AiSession
+from myfood.ai.prompts import SMART_LOG_SYSTEM_V3
+from myfood.db.models import AiProposal, AiSession
 from myfood.db.session import AdminSessionLocal
+from myfood.domain import estimated_dishes
 from myfood.errors import AppError
+
+MARINERA = {
+    "nombre": "marinera",
+    "cantidad": 1,
+    "gramos": 130,
+    "kcal": 999,  # mandan los componentes: 160 + 90 + 10
+    "proteina_g": 8,
+    "grasa_g": 9,
+    "carbos_g": 38,
+    "componentes": [
+        {"nombre": "rosquilla", "gramos": 60, "kcal": 160},
+        {"nombre": "ensaladilla rusa", "gramos": 60, "kcal": 90},
+        {"nombre": "anchoa", "gramos": 10, "kcal": 10},
+    ],
+}
+CANA = {"nombre": "caña de cerveza", "gramos": 200, "kcal": 90, "carbos_g": 7}
 
 
 @pytest_asyncio.fixture
@@ -48,6 +67,21 @@ async def one_real_food(superuser_conn):
     await superuser_conn.commit()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def no_saved_dishes_left_behind(superuser_conn):
+    """Los platos guardados son globales: uno que sobreviva a su test cambia el resultado del
+    siguiente (se reutilizaría en vez de estimarse)."""
+    yield
+    await superuser_conn.execute(
+        text(
+            "DELETE FROM food_log WHERE food_id IN "
+            "(SELECT id FROM foods WHERE source = 'ai_estimate')"
+        )
+    )
+    await superuser_conn.execute(text("DELETE FROM foods WHERE source = 'ai_estimate'"))
+    await superuser_conn.commit()
+
+
 @pytest_asyncio.fixture
 async def configured_credential(two_users):
     admin_id, _ = two_users
@@ -60,7 +94,7 @@ async def configured_credential(two_users):
 
 
 @pytest_asyncio.fixture
-async def running_smart_log_session(two_users, one_real_food):
+async def running_smart_log_session(two_users):
     user_id, _ = two_users
     async with AdminSessionLocal() as session:
         ai_session = AiSession(
@@ -68,12 +102,10 @@ async def running_smart_log_session(two_users, one_real_food):
             kind="smart_log",
             status="running",
             request_payload={
-                "prompt_version": "smart_log_v1",
-                "text": "dos huevos fritos",
-                "candidates": [
-                    {"id": "c1", "name": "Huevo frito (test)", "category": None},
-                ],
-                "alias_to_food_id": {"c1": one_real_food},
+                "prompt_version": "smart_log_v3",
+                "text": "una marinera y una caña",
+                "log_date": date.today().isoformat(),
+                "meal_type": "morning_snack",
             },
         )
         session.add(ai_session)
@@ -87,58 +119,122 @@ async def _reload(session_id) -> AiSession:
         return await session.get(AiSession, session_id)
 
 
-def _fake_agent_call(items: list[dict]):
+def _fake_agent_call(args: dict, seen: dict | None = None):
     async def _fake_run_agent(
         *, token, prompt, system_prompt, mcp_tools, max_turns, timeout_seconds
     ):
-        await mcp_tools[0].handler({"items": items})
+        if seen is not None:
+            seen.update(prompt=prompt, system_prompt=system_prompt, tools=mcp_tools)
+        await mcp_tools[0].handler(args)
         return AgentResult(text="", input_tokens=3, output_tokens=2)
 
     return _fake_run_agent
 
 
+async def _save_marinera(user_id) -> str:
+    """Deja «Marinera» guardada en el catálogo, como si se hubiera aprobado con la casilla."""
+    async with AdminSessionLocal() as session:
+        food_id = await estimated_dishes.save_dish(
+            session,
+            user_id,
+            {
+                "name": "Marinera",
+                "quantity": 1,
+                "grams": 130,
+                "kcal": 260,
+                "protein_g": 8,
+                "fat_g": 9,
+                "carbs_g": 38,
+                "components": [
+                    {"name": "rosquilla", "grams": 60, "kcal": 160},
+                    {"name": "ensaladilla rusa", "grams": 60, "kcal": 90},
+                    {"name": "anchoa", "grams": 10, "kcal": 10},
+                ],
+            },
+        )
+        await session.commit()
+    return str(food_id)
+
+
 # --- process_smart_log_job (worker) -----------------------------------------
 
 
-async def test_success_path_resolves_alias_to_real_food_with_default_grams(
-    running_smart_log_session, one_real_food, configured_credential, monkeypatch
+async def test_each_dish_is_estimated_whole_and_left_as_a_diary_proposal(
+    running_smart_log_session, configured_credential, monkeypatch
 ):
-    monkeypatch.setattr(
-        food_resolution,
-        "run_agent",
-        _fake_agent_call([{"alias": "c1", "approx_quantity_text": "dos"}]),
-    )
+    """Lo que se pidió: la marinera es UNA línea, con su desglose, y no tres alimentos."""
+    seen: dict = {}
+    monkeypatch.setattr(flow, "run_agent", _fake_agent_call({"platos": [MARINERA, CANA]}, seen))
 
     await flow.process_smart_log_job(str(running_smart_log_session))
 
     ai_session = await _reload(running_smart_log_session)
     assert ai_session.status == "succeeded"
     assert ai_session.input_tokens == 3
-    assert ai_session.output_tokens == 2
-    items = ai_session.response_payload["items"]
-    assert len(items) == 1
-    assert items[0]["food_id"] == one_real_food
-    assert items[0]["name_es"] == "Huevo frito (test)"
-    assert items[0]["grams"] == 120.0  # 60g de ración x2 ("dos")
-    assert items[0]["approx_quantity_text"] == "dos"
-    assert ai_session.response_payload["warning"] is None
+    proposal = ai_session.response_payload["proposal"]
+    payload = proposal["payload"]
+    assert [item["name"] for item in payload["items"]] == ["Marinera", "Caña de cerveza"]
+    marinera = payload["items"][0]
+    assert marinera["kcal"] == 260  # la suma del desglose, no las 999 que decía el plato
+    assert [c["name"] for c in marinera["components"]] == [
+        "rosquilla", "ensaladilla rusa", "anchoa",
+    ]
+    assert marinera["estimated"] is True and marinera["food_id"] is None
+    assert payload["totals"]["kcal"] == 350
+    assert payload["has_estimates"] is True
+    assert payload["meal_type"] == "morning_snack"
+    assert payload["request"] == "una marinera y una caña"
+    # Nada del formato antiguo: ya no hay alimentos del catálogo que confirmar uno a uno.
+    assert ai_session.response_payload["items"] == []
+    assert ai_session.response_payload["from_saved"] is False
+
+    async with AdminSessionLocal() as session:
+        stored = await session.get(AiProposal, uuid.UUID(proposal["ai_proposal_id"]))
+    assert stored.scope == "diary" and stored.status == "pending"
+    # El modelo no recibe catálogo: solo el texto y una única herramienta.
+    assert seen["prompt"] == "una marinera y una caña"
+    assert seen["system_prompt"] == SMART_LOG_SYSTEM_V3
+    assert [t.name for t in seen["tools"]] == ["estimate_meal"]
 
 
-async def test_unknown_alias_is_silently_dropped_not_invented(
-    running_smart_log_session, configured_credential, monkeypatch
+async def test_a_dish_already_in_the_catalog_keeps_its_saved_numbers(
+    running_smart_log_session, two_users, configured_credential, monkeypatch
 ):
+    """La misma marinera pesa lo mismo todos los días, diga lo que diga hoy el modelo."""
+    user_id, _ = two_users
+    food_id = await _save_marinera(user_id)
+    seen: dict = {}
     monkeypatch.setattr(
-        food_resolution,
+        flow,
         "run_agent",
-        _fake_agent_call([{"alias": "ghost", "approx_quantity_text": "uno"}]),
+        _fake_agent_call({"platos": [{"nombre": "marinera", "cantidad": 2}, CANA]}, seen),
     )
 
     await flow.process_smart_log_job(str(running_smart_log_session))
 
-    ai_session = await _reload(running_smart_log_session)
-    assert ai_session.status == "succeeded"
-    assert ai_session.response_payload["items"] == []
-    assert ai_session.response_payload["warning"] == "NO_MATCH"
+    payload = (await _reload(running_smart_log_session)).response_payload["proposal"]["payload"]
+    marinera = payload["items"][0]
+    assert marinera["food_id"] == food_id
+    assert marinera["from_catalog"] is True
+    assert marinera["kcal"] == 520 and marinera["grams"] == 260  # dos raciones guardadas
+    # Se le dice al modelo que ese plato ya está, para que no gaste salida en estimarlo.
+    assert '"platos_guardados": ["Marinera"]' in seen["prompt"]
+
+
+async def test_the_question_travels_with_the_proposal(
+    running_smart_log_session, configured_credential, monkeypatch
+):
+    monkeypatch.setattr(
+        flow,
+        "run_agent",
+        _fake_agent_call({"platos": [CANA], "pregunta": "¿De qué era el bocadillo?"}),
+    )
+
+    await flow.process_smart_log_job(str(running_smart_log_session))
+
+    response = (await _reload(running_smart_log_session)).response_payload
+    assert response["pregunta"] == "¿De qué era el bocadillo?"
+    assert response["proposal"] is not None
 
 
 async def test_no_tool_call_still_succeeds_with_no_match_warning(
@@ -147,21 +243,43 @@ async def test_no_tool_call_still_succeeds_with_no_match_warning(
     async def _fake_run_agent(
         *, token, prompt, system_prompt, mcp_tools, max_turns, timeout_seconds
     ):
-        return AgentResult(text="no encuentro nada parecido", input_tokens=1, output_tokens=1)
+        return AgentResult(text="no entiendo qué has comido", input_tokens=1, output_tokens=1)
 
-    monkeypatch.setattr(food_resolution, "run_agent", _fake_run_agent)
+    monkeypatch.setattr(flow, "run_agent", _fake_run_agent)
 
     await flow.process_smart_log_job(str(running_smart_log_session))
 
     ai_session = await _reload(running_smart_log_session)
     assert ai_session.status == "succeeded"
     assert ai_session.response_payload == {
+        "proposal": None,
+        "pregunta": None,
+        "from_saved": False,
         "items": [],
         "warning": "NO_MATCH",
-        "pregunta": None,
-        "no_encontrados": [],
-        "proposal": None,
     }
+
+
+async def test_an_impossible_estimate_fails_instead_of_reaching_the_diary(
+    running_smart_log_session, two_users, configured_credential, monkeypatch
+):
+    user_id, _ = two_users
+    monkeypatch.setattr(
+        flow,
+        "run_agent",
+        _fake_agent_call({"platos": [{"nombre": "caña", "gramos": 200, "kcal": 9000}]}),
+    )
+
+    await flow.process_smart_log_job(str(running_smart_log_session))
+
+    ai_session = await _reload(running_smart_log_session)
+    assert ai_session.status == "failed"
+    assert ai_session.validation_errors[0]["code"] == "IMPLAUSIBLE_ESTIMATE"
+    async with AdminSessionLocal() as session:
+        proposals = (
+            await session.scalars(select(AiProposal).where(AiProposal.user_id == user_id))
+        ).all()
+    assert proposals == []
 
 
 async def test_agent_error_marks_session_failed(
@@ -172,7 +290,7 @@ async def test_agent_error_marks_session_failed(
     ):
         raise AiAgentError("boom", code="AI_TIMEOUT")
 
-    monkeypatch.setattr(food_resolution, "run_agent", _fake_run_agent)
+    monkeypatch.setattr(flow, "run_agent", _fake_run_agent)
 
     await flow.process_smart_log_job(str(running_smart_log_session))
 
@@ -203,6 +321,56 @@ async def test_already_processed_session_is_left_untouched(
     assert ai_session.status == "succeeded"
 
 
+# --- resolve_saved_dishes (api, sin modelo) -----------------------------------
+
+
+async def test_saved_dishes_are_resolved_without_calling_the_model(two_users, monkeypatch):
+    """La segunda marinera no gasta tokens ni espera a nadie: ni hay credencial configurada
+    ni hace falta."""
+    user_id, _ = two_users
+    food_id = await _save_marinera(user_id)
+
+    async def _must_not_run(**kwargs):
+        raise AssertionError("no debería llamarse al modelo")
+
+    monkeypatch.setattr(flow, "run_agent", _must_not_run)
+
+    async with AdminSessionLocal() as session:
+        ai_session = await flow.resolve_saved_dishes(
+            session,
+            user_id,
+            text="Hoy a media mañana me he tomado dos marineras",
+            log_date=date.today().isoformat(),
+            meal_type="lunch",
+        )
+
+    assert ai_session is not None and ai_session.status == "succeeded"
+    assert ai_session.input_tokens == 0
+    response = ai_session.response_payload
+    assert response["from_saved"] is True
+    payload = response["proposal"]["payload"]
+    assert payload["meal_type"] == "morning_snack"  # lo dice el texto; manda sobre el de la UI
+    assert payload["items"][0]["food_id"] == food_id
+    assert payload["items"][0]["quantity"] == 2
+    assert payload["totals"]["kcal"] == 520
+
+
+async def test_anything_unknown_in_the_text_goes_to_the_model(two_users):
+    user_id, _ = two_users
+    await _save_marinera(user_id)
+
+    async with AdminSessionLocal() as session:
+        ai_session = await flow.resolve_saved_dishes(
+            session,
+            user_id,
+            text="una marinera y un pincho de tortilla",
+            log_date=date.today().isoformat(),
+            meal_type="lunch",
+        )
+
+    assert ai_session is None
+
+
 # --- request_smart_log (api) -------------------------------------------------
 
 
@@ -219,41 +387,15 @@ async def test_request_raises_ai_not_configured_without_credential(two_users):
         assert exc_info.value.code == "AI_NOT_CONFIGURED"
 
 
-async def test_request_raises_no_candidate_foods_when_search_finds_nothing(
-    two_users, configured_credential, monkeypatch
-):
-    user_id, _ = two_users
-
-    async def _fake_search_foods(query, kind, limit, offset):
-        return [], 0
-
-    monkeypatch.setattr(food_resolution, "search_foods", _fake_search_foods)
-
-    async with AdminSessionLocal() as session:
-        with pytest.raises(AppError) as exc_info:
-            await flow.request_smart_log(
-                session, user_id, text="algo muy raro", log_date="2026-09-24",
-                meal_type="lunch"
-            )
-    assert exc_info.value.code == "NO_CANDIDATE_FOODS"
-
-
 async def test_request_creates_running_session_and_enqueues_job(
     two_users, configured_credential, monkeypatch
 ):
     user_id, _ = two_users
-
-    async def _fake_search_foods(query, kind, limit, offset):
-        return [
-            {"id": "11111111-1111-1111-1111-111111111111", "name_es": "Huevo", "category": None}
-        ], 1
-
     enqueued = []
 
     async def _fake_enqueue(ai_session_id: str) -> None:
         enqueued.append(ai_session_id)
 
-    monkeypatch.setattr(food_resolution, "search_foods", _fake_search_foods)
     monkeypatch.setattr(flow, "enqueue_smart_log_job", _fake_enqueue)
 
     async with AdminSessionLocal() as session:
@@ -263,12 +405,13 @@ async def test_request_creates_running_session_and_enqueues_job(
 
     assert ai_session.status == "running"
     assert ai_session.kind == "smart_log"
-    payload = ai_session.request_payload
-    assert payload["text"] == "un huevo"
-    # El candidato lleva más contexto que antes: sin `es_generico` ni `marca` el modelo no
-    # podía distinguir un plato casero de uno de supermercado, que es lo que más mueve las kcal.
-    assert payload["candidates"] == [{"id": "c1", "name": "Huevo", "es_generico": False}]
-    assert payload["alias_to_food_id"] == {"c1": "11111111-1111-1111-1111-111111111111"}
+    # Ya no viaja ningún candidato del catálogo: el texto, dónde apuntarlo y nada más.
+    assert ai_session.request_payload == {
+        "prompt_version": "smart_log_v3",
+        "text": "un huevo",
+        "log_date": "2026-09-24",
+        "meal_type": "lunch",
+    }
     assert enqueued == [str(ai_session.id)]
 
 

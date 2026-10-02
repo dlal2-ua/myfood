@@ -165,6 +165,8 @@ export interface FoodDetail {
   portions: Portion[];
   /** Cantidad propuesta al abrir el formulario, en gramos. */
   default_grams: number;
+  /** De qué se compone una ración, si es un plato estimado (`source === "ai_estimate"`). */
+  components?: DishComponent[];
 }
 
 /** origin: 'declared' (etiqueta del fabricante), 'trace' ("puede contener") o
@@ -209,6 +211,8 @@ export interface LogFoodEntry {
   protein_g: number;
   fat_g: number;
   carbs_g: number;
+  /** Desglose de un plato estimado, tal y como se aceptó. */
+  components?: DishComponent[] | null;
 }
 
 /** La semana de lunes a domingo. Un objetivo diario convierte cada día en un aprobado o un
@@ -638,14 +642,18 @@ export interface SmartLogItem {
 }
 
 export interface SmartLogResult {
+  /** Solo el registro por foto: alimentos del catálogo que se confirman uno a uno. */
   items: SmartLogItem[];
   warning: string | null;
-  /** Una pregunta del modelo cuando algo de verdad ambiguo cambia mucho el gramaje. */
+  /** Una pregunta del modelo cuando algo de verdad ambiguo cambia mucho el resultado. */
   pregunta?: string | null;
-  /** Lo que se mencionó y no existe en el catálogo. Antes desaparecía sin decir nada. */
+  /** Lo que se mencionó y no existe en el catálogo (registro por foto). */
   no_encontrados?: string[];
-  /** Propuesta con lo que se ha estimado buscando en internet, si el respaldo está activo. */
+  /** Lo que se propone apuntar. En el registro por texto es TODO el resultado: cada plato
+   * estimado entero, con su desglose. En el de por foto, solo lo que no estaba en el catálogo. */
   proposal?: { ai_proposal_id: string; payload: ChatDiaryPayload } | null;
+  /** Todo salió de platos ya guardados: no se ha llamado al modelo. */
+  from_saved?: boolean;
 }
 
 export interface ReceiptScanItem extends SmartLogItem {
@@ -829,6 +837,21 @@ export interface DiaryProposalItem {
   estimated: boolean;
   /** De dónde salió el número cuando vino de una búsqueda web. */
   source_url?: string | null;
+  /** Cuántas unidades o raciones; gramos, kcal y macros ya son el total de todas. */
+  quantity?: number;
+  /** De qué se compone el plato, por el total de lo comido. */
+  components?: DishComponent[];
+  /** La comida de esta línea, cuando el mensaje reparte entre varias. */
+  meal_type?: MealType | null;
+  /** El plato ya estaba guardado en el catálogo y se han usado sus números. */
+  from_catalog?: boolean;
+}
+
+/** Una parte de un plato estimado: «marinera» → rosquilla, ensaladilla rusa, anchoa. */
+export interface DishComponent {
+  name: string;
+  grams: number | null;
+  kcal: number | null;
 }
 
 export interface DiaryProposalEdit {

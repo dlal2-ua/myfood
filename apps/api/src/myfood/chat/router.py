@@ -23,17 +23,34 @@ from myfood.errors import AppError
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-_ALLOWED_AUDIO_CONTENT_TYPES = {
-    "audio/ogg",
-    "audio/webm",
-    "audio/mpeg",
-    "audio/mp3",
-    "audio/wav",
-    "audio/x-wav",
-    "audio/mp4",
-    "audio/m4a",
-    "audio/aac",
+# Tipo → extensión con la que se le pasa a Whisper. `video/webm` y `video/mp4` están porque
+# es lo que declaran algunos navegadores para una grabación que solo lleva audio.
+_AUDIO_EXTENSIONS = {
+    "audio/ogg": "ogg",
+    "audio/webm": "webm",
+    "video/webm": "webm",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/mp4": "m4a",
+    "video/mp4": "m4a",
+    "audio/m4a": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/aac": "aac",
 }
+
+
+def _audio_extension(content_type: str | None) -> str | None:
+    """La extensión del audio, o `None` si el formato no se admite.
+
+    Se compara sin parámetros: `MediaRecorder` etiqueta lo que graba como
+    `audio/webm;codecs=opus` o `audio/mp4;codecs=mp4a.40.2`, y una comparación exacta contra
+    la lista obligaba a la web a mentir sobre el tipo para que la nota pasara."""
+    base = (content_type or "").split(";", 1)[0].strip().lower()
+    return _AUDIO_EXTENSIONS.get(base)
+
+
 _MAX_AUDIO_BYTES = 15 * 1024 * 1024
 # Turno del chat (sección 24.5) + un margen breve para el propio Redis
 # BRPOP — evita que el 504 llegue justo antes de que el worker termine.
@@ -75,12 +92,22 @@ async def send_chat_message(
     await require_ai_processing_consent(session, user_id)
 
     audio_bytes: bytes | None = None
+    audio_extension: str | None = None
     if audio is not None:
-        if audio.content_type not in _ALLOWED_AUDIO_CONTENT_TYPES:
+        audio_extension = _audio_extension(audio.content_type)
+        if audio_extension is None:
             raise AppError(
                 "UNSUPPORTED_AUDIO_TYPE", "Formato de audio no soportado.", status_code=422
             )
         audio_bytes = await audio.read()
+        if not audio_bytes:
+            # Una grabación que se corta antes de que el navegador entregue el primer trozo
+            # llega vacía; sin esto acababa en Whisper y volvía como «no disponible».
+            raise AppError(
+                "EMPTY_AUDIO",
+                "La nota de voz ha llegado vacía. Vuelve a grabarla o escribe tu mensaje.",
+                status_code=422,
+            )
         if len(audio_bytes) > _MAX_AUDIO_BYTES:
             raise AppError(
                 "AUDIO_TOO_LARGE", "La nota de voz es demasiado larga.", status_code=422
@@ -100,7 +127,12 @@ async def send_chat_message(
         ) from exc
 
     ai_session = await request_chat_message(
-        session, user_id, text=text, audio_bytes=audio_bytes, conversation_id=conversation_id
+        session,
+        user_id,
+        text=text,
+        audio_bytes=audio_bytes,
+        conversation_id=conversation_id,
+        audio_filename=f"note.{audio_extension or 'webm'}",
     )
 
     result = await wait_for_chat_result(str(ai_session.id), timeout_seconds=_WAIT_TIMEOUT_SECONDS)

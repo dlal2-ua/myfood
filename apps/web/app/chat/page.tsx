@@ -23,13 +23,31 @@ import {
   useElapsedSeconds,
 } from "@/components/ui/AiWaiting";
 
-const bubbleBase = "max-w-[85%] rounded-2xl px-4 py-2 text-sm";
+// `whitespace-pre-line`: la respuesta a un apunte trae el total y una línea por plato.
+const bubbleBase = "max-w-[85%] whitespace-pre-line rounded-2xl px-4 py-2 text-sm";
 const userBubble = `${bubbleBase} self-end bg-[var(--color-primary)] text-[var(--color-on-primary)]`;
 const assistantBubble = `${bubbleBase} self-start border border-[var(--color-border)]`;
 
 /** Se corta sola: 15 MB de audio se alcanzan sin darse cuenta y Whisper tarda más cuanto más
  * larga es la nota. Dos minutos son de sobra para contar lo que se ha comido. */
 const MAX_RECORDING_SECONDS = 120;
+
+/** Los formatos en los que sabe grabar cada navegador, del preferido al de reserva. Chrome,
+ * Firefox y Android graban WebM/Opus; Safari (el único motor que hay en un iPhone) solo sabe
+ * MP4/AAC. Antes se exigía `audio/webm` y en iOS el micrófono decía «tu navegador no admite
+ * grabar notas de voz». */
+const RECORDING_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+
+function pickRecordingType(): string | undefined {
+  if (typeof MediaRecorder === "undefined") return undefined;
+  return RECORDING_TYPES.find((type) => MediaRecorder.isTypeSupported(type));
+}
+
+function extensionFor(mimeType: string): string {
+  if (mimeType.includes("mp4")) return "m4a";
+  if (mimeType.includes("ogg")) return "ogg";
+  return "webm";
+}
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -53,7 +71,7 @@ export default function ChatPage() {
   const [foodNames, setFoodNames] = useState<Record<string, string>>({});
   const [deciding, setDeciding] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [micUnsupported, setMicUnsupported] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -300,18 +318,38 @@ export default function ChatPage() {
   }
 
   async function startRecording() {
-    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      setMicUnsupported(true);
+    setMicError(null);
+    if (
+      typeof window === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      setMicError("Tu navegador no admite grabar notas de voz aquí — puedes escribir tu mensaje.");
       return;
     }
-    const mimeType = "audio/webm";
-    if (typeof MediaRecorder !== "undefined" && !MediaRecorder.isTypeSupported(mimeType)) {
-      setMicUnsupported(true);
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      // No es lo mismo que el navegador no sepa grabar que haberle negado el permiso: lo
+      // segundo se arregla en dos toques, y con el aviso de antes no había forma de saberlo.
+      const denied =
+        err instanceof DOMException &&
+        (err.name === "NotAllowedError" || err.name === "SecurityError");
+      setMicError(
+        denied
+          ? "No tengo permiso para usar el micrófono. Dáselo a esta página en los ajustes del navegador y vuelve a intentarlo."
+          : "No encuentro ningún micrófono — puedes escribir tu mensaje.",
+      );
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType });
+      const preferred = pickRecordingType();
+      // Sin formato preferido se deja elegir al navegador: mejor grabar en lo que sepa que
+      // no grabar. El servidor acepta todos los de `RECORDING_TYPES`.
+      const recorder = preferred
+        ? new MediaRecorder(stream, { mimeType: preferred })
+        : new MediaRecorder(stream);
       chunksRef.current = [];
       cancelledRef.current = false;
       recorder.ondataavailable = (e) => {
@@ -323,9 +361,17 @@ export default function ChatPage() {
           chunksRef.current = [];
           return;
         }
+        // El tipo real con el que se ha grabado, no el que se pidió: es lo que le dice al
+        // servidor cómo decodificarlo.
+        const mimeType = recorder.mimeType || preferred || "audio/webm";
         const blob = new Blob(chunksRef.current, { type: mimeType });
+        chunksRef.current = [];
+        if (blob.size === 0) {
+          setError("No se ha grabado nada. Mantén la grabación un par de segundos y vuelve a intentarlo.");
+          return;
+        }
         const body = new FormData();
-        body.set("audio", blob, "nota.webm");
+        body.set("audio", blob, `nota.${extensionFor(mimeType)}`);
         // Con `pending` se ve la burbuja de la nota mientras Whisper transcribe: sin ella la
         // pantalla solo mostraba «Pensando…» y parecía que no se había enviado nada.
         void send(body, "Nota de voz enviada…");
@@ -334,10 +380,9 @@ export default function ChatPage() {
       recorder.start();
       setRecordingSeconds(0);
       setRecording(true);
-      // Si antes falló (permiso denegado y luego concedido), el aviso debe desaparecer.
-      setMicUnsupported(false);
     } catch {
-      setMicUnsupported(true);
+      stream.getTracks().forEach((t) => t.stop());
+      setMicError("Tu navegador no admite grabar notas de voz aquí — puedes escribir tu mensaje.");
     }
   }
 
@@ -353,17 +398,25 @@ export default function ChatPage() {
     setRecordingSeconds(0);
   }
 
-  async function decideProposal(decision: "approve" | "reject") {
+  async function decideProposal(decision: "approve" | "reject", saveToCatalog: number[] = []) {
     if (!proposal) return;
     setDeciding(true);
     setError(null);
     try {
       await apiFetch(`/api/ai/proposals/${proposal.ai_proposal_id}/${decision}`, {
         method: "POST",
+        // Los platos marcados para guardar en el catálogo, además de apuntarlos.
+        ...(decision === "approve"
+          ? { body: JSON.stringify({ save_to_catalog: saveToCatalog }) }
+          : {}),
       });
       setProposal(null);
       if (decision === "approve") {
-        setNotice("Apuntado en tu diario.");
+        setNotice(
+          saveToCatalog.length > 0
+            ? "Apuntado en tu diario y guardado en el catálogo."
+            : "Apuntado en tu diario.",
+        );
         setShowDiaryLink(true);
       }
     } catch (err) {
@@ -379,7 +432,8 @@ export default function ChatPage() {
         <h1 className="text-3xl font-extrabold tracking-tight">Chat</h1>
         <div className="mt-1 flex flex-wrap items-center gap-2">
           <p className="text-sm text-neutral-500">
-            Pídeme cambios sobre la marcha — nunca aplico nada sin que lo confirmes.
+            Cuéntame qué has comido, escrito o de viva voz — nunca apunto nada sin que lo
+            confirmes.
           </p>
           <QuotaBadge quota={quota} />
         </div>
@@ -427,8 +481,9 @@ export default function ChatPage() {
         </div>
         <div className="mt-2">
           <MedicalDisclaimer>
-            El chat no da consejo médico. Los cambios que propone son estimaciones que tú
-            confirmas; consulta con un profesional ante cualquier duda de salud.
+            El chat no da consejo médico. Las calorías que propone son estimaciones
+            aproximadas que tú confirmas, no mediciones; consulta con un profesional ante
+            cualquier duda de salud.
           </MedicalDisclaimer>
         </div>
       </div>
@@ -437,8 +492,9 @@ export default function ChatPage() {
         {loadingHistory && <Skeleton lines={3} />}
         {!loadingHistory && history.length === 0 && (
           <p className="text-sm text-neutral-500">
-            Escríbeme algo como «cámbiame la cena de hoy, tengo salmón» o «¿qué llevo hoy de
-            proteína?».
+            Dime lo que has comido como se lo contarías a alguien: «a media mañana una marinera
+            y una caña, y luego un bocadillo de pastrami». Te lo devuelvo con un total
+            aproximado y su desglose. También puedes preguntarme «¿qué llevo hoy de proteína?».
           </p>
         )}
         <div className="flex flex-col gap-2">
@@ -467,9 +523,10 @@ export default function ChatPage() {
 
         {proposal?.scope === "diary" && (
           <DiaryProposalCard
+            key={proposal.ai_proposal_id}
             payload={proposal.payload}
             deciding={deciding}
-            onDecide={(decision) => void decideProposal(decision)}
+            onDecide={(decision, saveToCatalog) => void decideProposal(decision, saveToCatalog)}
           />
         )}
 
@@ -536,11 +593,7 @@ export default function ChatPage() {
           </button>
         </div>
       )}
-      {micUnsupported && (
-        <p className="text-xs text-neutral-500">
-          Tu navegador no admite grabar notas de voz aquí — puedes escribir tu mensaje.
-        </p>
-      )}
+      {micError && <p className="text-xs text-neutral-500">{micError}</p>}
 
       <form onSubmit={onSendText} className="flex items-end gap-2">
         <textarea

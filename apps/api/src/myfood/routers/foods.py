@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.cache import get_cached_barcode_lookup, set_cached_barcode_lookup
-from myfood.db.models import Food, FoodNutrient
+from myfood.db.models import Food, FoodComponent, FoodNutrient
 from myfood.db.session import get_session
 from myfood.deps import get_current_user_id, get_db
 from myfood.domain import portions as portions_calc
@@ -241,6 +241,12 @@ class PortionOut(BaseModel):
     grams: float
 
 
+class FoodComponentOut(BaseModel):
+    name: str
+    grams: float | None
+    kcal: float | None
+
+
 class FoodDetail(BaseModel):
     id: str
     kind: str
@@ -277,6 +283,8 @@ class FoodDetail(BaseModel):
     portions: list[PortionOut] = []
     # Cantidad propuesta al abrir el formulario, en gramos.
     default_grams: float = 100.0
+    # De qué se compone una ración, si es un plato estimado (`source='ai_estimate'`).
+    components: list[FoodComponentOut] = []
 
 
 def _f(value) -> float | None:
@@ -396,12 +404,22 @@ async def get_food(
     nutrients = await session.get(FoodNutrient, food_id)
     if nutrients is None:
         raise AppError("FOOD_NOT_FOUND", "No existe ese alimento.", status_code=404)
-    return _to_detail(
+    detail = _to_detail(
         food,
         nutrients,
         await _load_allergens(session, food_id),
         await _load_image_credit(session, food_id),
     )
+    if food.source == "ai_estimate":
+        detail.components = [
+            FoodComponentOut(name=c.name, grams=_f(c.grams), kcal=_f(c.kcal))
+            for c in await session.scalars(
+                select(FoodComponent)
+                .where(FoodComponent.food_id == food_id)
+                .order_by(FoodComponent.position)
+            )
+        ]
+    return detail
 
 
 async def _get_food_by_barcode(session: AsyncSession, ean: str) -> FoodDetail | None:
