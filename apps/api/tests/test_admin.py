@@ -93,7 +93,6 @@ async def test_admin_limits_defaults(admin_client):
         "max_tokens_per_call": 8000,
         "chat_messages_per_profile_daily": 50,
         "plate_photo_per_profile_daily": 10,
-        "web_search_fallback": True,
     }
 
 
@@ -113,7 +112,6 @@ async def test_admin_updates_limits_and_get_reflects_it(admin_client):
         "max_tokens_per_call": 4000,
         "chat_messages_per_profile_daily": 50,
         "plate_photo_per_profile_daily": 10,
-        "web_search_fallback": True,
     }
 
 

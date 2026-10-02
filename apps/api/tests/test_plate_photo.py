@@ -1,11 +1,14 @@
 """Registro por foto del plato (`ai/flows/plate_photo.py`).
 
 La llamada real al modelo se simula: lo que hay que probar aquí es que la foto se normaliza y
-se borra, que la visión no puede colar gramos, y que la segunda fase pasa por el mismo resolutor
-que el registro por texto. Que el modelo *vea* de verdad se comprueba en vivo, no en un test.
+se borra, que es UNA llamada con la imagen, y que lo que sale es una propuesta de diario con
+cada plato entero y su desglose afinado con el catálogo — lo mismo que en el registro por
+texto. Que el modelo *vea* de verdad se comprueba en vivo (`apps/web/e2e/plate-photo.cjs`).
 """
 
+import uuid
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -14,8 +17,10 @@ from sqlalchemy import text
 
 from myfood.ai import client as ai_client
 from myfood.ai.agent import AgentResult, AiAgentError
+from myfood.ai.flows import meal_estimate
 from myfood.ai.flows import plate_photo as flow
-from myfood.db.models import AiSession
+from myfood.ai.prompts import PLATE_PHOTO_SYSTEM_V2
+from myfood.db.models import AiProposal, AiSession
 from myfood.db.session import AdminSessionLocal
 from myfood.errors import AppError
 
@@ -121,15 +126,13 @@ async def test_la_foto_se_borra_pase_lo_que_pase(two_users, configured_credentia
     quedara en disco sería un dato de salud (lo que come alguien) sin ninguna razón."""
     user_id, _ = two_users
     ai_session = await _request(user_id)
-    from pathlib import Path
-
     path = Path(ai_session.request_payload["image_path"])
     assert path.exists()
 
     async def _boom(**kwargs):
         raise AiAgentError("se cayó el proveedor", code="AI_TIMEOUT")
 
-    monkeypatch.setattr(flow, "run_agent", _boom)
+    monkeypatch.setattr(meal_estimate, "run_agent", _boom)
     await flow.process_plate_photo_job(str(ai_session.id))
 
     assert not path.exists()
@@ -145,62 +148,144 @@ async def test_una_foto_sin_comida_termina_bien_y_lo_dice(
     ai_session = await _request(user_id)
 
     async def _sees_nothing(**kwargs):
+        await kwargs["mcp_tools"][0].handler({"platos": []})
         return AgentResult(text="", input_tokens=500, output_tokens=20)
 
-    monkeypatch.setattr(flow, "run_agent", _sees_nothing)
+    monkeypatch.setattr(meal_estimate, "run_agent", _sees_nothing)
     await flow.process_plate_photo_job(str(ai_session.id))
 
     reloaded = await _reload(ai_session.id)
     assert reloaded.status == "succeeded"
     assert reloaded.response_payload["warning"] == "NO_FOOD_IN_PHOTO"
+    assert reloaded.response_payload["proposal"] is None
     assert reloaded.response_payload["items"] == []
     assert reloaded.input_tokens == 500
 
 
-async def test_la_vision_manda_la_imagen_y_nunca_devuelve_gramos(
+BOCADILLO = {
+    "nombre": "bocadillo de jamón serrano",
+    "cantidad": 1,
+    "gramos": 150,
+    "componentes": [
+        {"nombre": "pan", "gramos": 100, "kcal": 260, "proteina_g": 8, "grasa_g": 1,
+         "carbos_g": 52},
+        {"nombre": "jamón serrano", "gramos": 45, "kcal": 110, "proteina_g": 14, "grasa_g": 6,
+         "carbos_g": 0},
+        {"nombre": "aceite de oliva", "gramos": 5, "kcal": 45, "proteina_g": 0, "grasa_g": 5,
+         "carbos_g": 0},
+    ],
+}
+
+
+def _sees(dishes: list[dict], seen: dict | None = None, pregunta: str | None = None):
+    async def _fake_run_agent(**kwargs):
+        if seen is not None:
+            seen.update(kwargs)
+        await kwargs["mcp_tools"][0].handler({"platos": dishes, "pregunta": pregunta})
+        return AgentResult(text="", input_tokens=900, output_tokens=120)
+
+    return _fake_run_agent
+
+
+async def test_es_una_sola_llamada_con_la_imagen_y_sale_una_propuesta_de_diario(
     two_users, configured_credential, monkeypatch
 ):
-    """La herramienta de visión no tiene ningún campo de gramos ni de kcal a propósito (R1):
-    describe en medidas de casa y el backend hace la cuenta."""
+    """El criterio del registro por texto, con una imagen: el bocadillo es UNA línea, con su
+    desglose en gramos, y queda como propuesta que se aprueba entera."""
     user_id, _ = two_users
-    ai_session = await _request(user_id)
-    recibido = {}
+    ai_session = await _request(user_id, log_date="2026-09-24", meal_type="dinner")
+    calls: list[dict] = []
+    seen: dict = {}
 
-    async def _fake_run_agent(**kwargs):
-        recibido.update(kwargs)
-        # La herramienta escribe en el sink, igual que en producción.
-        for tool_obj in kwargs.get("mcp_tools") or []:
-            await tool_obj.handler(
-                {"alimentos": [{"nombre": "tortilla de patatas", "cantidad": 1,
-                                "tipo_cantidad": "porcion", "origen": "casero"}]}
-            )
-        return AgentResult(text="", input_tokens=900, output_tokens=60)
+    async def _counting(**kwargs):
+        calls.append(kwargs)
+        return await _sees([BOCADILLO], seen, "¿Lleva tomate?")(**kwargs)
 
-    async def _no_candidates(_text):
-        return []
-
-    monkeypatch.setattr(flow, "run_agent", _fake_run_agent)
-    monkeypatch.setattr(flow, "search_candidates_for_text", _no_candidates)
+    monkeypatch.setattr(meal_estimate, "run_agent", _counting)
     await flow.process_plate_photo_job(str(ai_session.id))
 
-    assert recibido["images"], "la foto tiene que viajar como bloque de imagen"
-    media_type, data = recibido["images"][0]
+    assert len(calls) == 1  # antes eran dos, y una tercera de búsqueda web
+    assert seen["system_prompt"] == PLATE_PHOTO_SYSTEM_V2
+    assert [t.name for t in seen["mcp_tools"]] == ["estimate_meal"]
+    (media_type, data) = seen["images"][0]
     assert media_type == "image/jpeg" and len(data) > 100
-    # El esquema no tiene NINGÚN campo donde meter un número nutricional (R1): «gramos» solo
-    # aparece como una de las unidades posibles, para cuando se fotografía una báscula.
-    campos = set(
-        recibido["mcp_tools"][0]
-        .input_schema["properties"]["alimentos"]["items"]["properties"]
-    )
-    assert campos.isdisjoint(
-        {"gramos", "grams", "peso", "kcal", "calorias", "proteina", "grasa", "carbohidratos"}
-    )
 
     reloaded = await _reload(ai_session.id)
     assert reloaded.status == "succeeded"
-    # Sin candidatos, se dice lo que se vio en vez de callarse.
-    assert reloaded.response_payload["no_encontrados"] == ["tortilla de patatas"]
-    assert reloaded.response_payload["visto"][0]["origen"] == "casero"
+    assert (reloaded.input_tokens, reloaded.output_tokens) == (900, 120)
+    response = reloaded.response_payload
+    assert response["pregunta"] == "¿Lleva tomate?"
+    assert response["visto"] == [BOCADILLO]
+    payload = response["proposal"]["payload"]
+    assert (payload["date"], payload["meal_type"]) == ("2026-09-24", "dinner")
+    (item,) = payload["items"]
+    assert item["name"] == "Bocadillo de jamón serrano"
+    assert item["estimated"] is True
+    assert [(c["name"], c["grams"]) for c in item["components"]] == [
+        ("pan", 100), ("jamón serrano", 45), ("aceite de oliva", 5),
+    ]
+    assert item["kcal"] == 415  # la suma de sus partes
+    assert (item["protein_g"], item["fat_g"], item["carbs_g"]) == (22, 12, 52)
+
+    async with AdminSessionLocal() as session:
+        stored = await session.get(AiProposal, uuid.UUID(response["proposal"]["ai_proposal_id"]))
+    assert stored.scope == "diary" and stored.status == "pending"
+
+
+async def test_cada_parte_se_afina_con_el_catalogo_y_lo_demas_se_queda_estimado(
+    two_users, configured_credential, catalog_bread_and_ham, monkeypatch
+):
+    """Lo que se pidió: descomponer, buscar cada alimento en el catálogo para afinar calorías
+    y nutrientes, y estimar lo que no esté. Los gramos son siempre los del modelo."""
+    user_id, _ = two_users
+    ai_session = await _request(user_id)
+    monkeypatch.setattr(meal_estimate, "run_agent", _sees([BOCADILLO]))
+    await flow.process_plate_photo_job(str(ai_session.id))
+
+    (item,) = (await _reload(ai_session.id)).response_payload["proposal"]["payload"]["items"]
+    pan, jamon, aceite = item["components"]
+    # Confirmados: valores del catálogo para los gramos que vio el modelo.
+    assert (pan["grams"], pan["kcal"], pan["catalog"]) == (100, 262, "Pan blanco, de barra")
+    assert (jamon["grams"], jamon["kcal"], jamon["catalog"]) == (45, 105.8, "Jamón curado Serrano")
+    # No hay aceite en este catálogo de prueba: se queda lo que estimó el modelo.
+    assert (aceite["grams"], aceite["kcal"]) == (5, 45) and "catalog" not in aceite
+    assert item["kcal"] == round(262 + 105.8 + 45, 1)
+    assert item["protein_g"] == round(8.5 + 30.5 * 0.45, 1)
+    # Los micronutrientes, que una estimación sola no trae.
+    assert item["micros"] == {"calcium_mg": 30, "iron_mg": 1.5 + 2.0 * 0.45}
+    assert item["estimated"] is True  # los gramos siguen siendo una estimación
+
+
+async def test_una_foto_hecha_en_vertical_no_llega_tumbada(two_users, configured_credential):
+    """La orientación de una foto de móvil va en el EXIF, que se tira: hay que aplicarla
+    antes, o el modelo ve el plato de lado."""
+    user_id, _ = two_users
+    image = Image.new("RGB", (1600, 1200), (200, 180, 140))
+    exif = image.getexif()
+    exif[0x0112] = 6  # «girar 90° para verla derecha»
+    buf = BytesIO()
+    image.save(buf, format="JPEG", exif=exif)
+
+    ai_session = await _request(user_id, image_bytes=buf.getvalue())
+
+    with Image.open(ai_session.request_payload["image_path"]) as stored:
+        assert stored.height > stored.width
+        assert not stored.getexif()
+
+
+async def test_un_plato_imposible_falla_con_un_mensaje_claro(
+    two_users, configured_credential, monkeypatch
+):
+    user_id, _ = two_users
+    ai_session = await _request(user_id)
+    monkeypatch.setattr(
+        meal_estimate, "run_agent", _sees([{"nombre": "paella", "gramos": 300, "kcal": 9000}])
+    )
+    await flow.process_plate_photo_job(str(ai_session.id))
+
+    reloaded = await _reload(ai_session.id)
+    assert reloaded.status == "failed"
+    assert reloaded.validation_errors[0]["code"] == "IMPLAUSIBLE_ESTIMATE"
 
 
 async def test_la_sesion_guarda_la_comida_y_el_dia_para_la_pantalla(
@@ -208,77 +293,6 @@ async def test_la_sesion_guarda_la_comida_y_el_dia_para_la_pantalla(
 ):
     user_id, _ = two_users
     ai_session = await _request(user_id, log_date="2026-09-20", meal_type="dinner")
-    from pathlib import Path
-
-    try:
-        assert ai_session.kind == "plate_photo"
-        assert ai_session.request_payload["log_date"] == "2026-09-20"
-        assert ai_session.request_payload["meal_type"] == "dinner"
-    finally:
-        Path(ai_session.request_payload["image_path"]).unlink(missing_ok=True)
-
-
-async def test_las_coletillas_del_modelo_no_se_buscan(
-    two_users, configured_credential, monkeypatch
-):
-    """Meilisearch exige que TODOS los términos estén en el documento, así que «arroz blanco
-    (forma clara redonda)» no encuentra nada y el alimento se pierde. El prompt pide que no las
-    use; esto es la red por si las usa igualmente."""
-    user_id, _ = two_users
-    ai_session = await _request(user_id)
-    buscado = {}
-
-    async def _sees(**kwargs):
-        for tool_obj in kwargs.get("mcp_tools") or []:
-            await tool_obj.handler(
-                {
-                    "alimentos": [
-                        {"nombre": "arroz blanco (forma clara redonda)", "cantidad": 1,
-                         "tipo_cantidad": "porcion"}
-                    ]
-                }
-            )
-        return AgentResult(text="", input_tokens=1, output_tokens=1)
-
-    async def _capture(texto):
-        buscado["texto"] = texto
-        return []
-
-    monkeypatch.setattr(flow, "run_agent", _sees)
-    monkeypatch.setattr(flow, "search_candidates_for_text", _capture)
-    await flow.process_plate_photo_job(str(ai_session.id))
-
-    assert buscado["texto"] == "arroz blanco"
-
-
-async def test_sin_nada_en_el_catalogo_se_intenta_el_respaldo_web(
-    two_users, configured_credential, monkeypatch
-):
-    """Que el catálogo no tenga NADA de lo que hay en el plato es justo cuando más falta hace
-    el respaldo: antes se salía antes de llegar a buscarlo."""
-    user_id, _ = two_users
-    ai_session = await _request(user_id)
-    pedido = {}
-
-    async def _sees(**kwargs):
-        for tool_obj in kwargs.get("mcp_tools") or []:
-            await tool_obj.handler(
-                {"alimentos": [{"nombre": "pastel de cabracho", "cantidad": 1,
-                                "tipo_cantidad": "racion"}]}
-            )
-        return AgentResult(text="", input_tokens=1, output_tokens=1)
-
-    async def _nothing(_texto):
-        return []
-
-    async def _fake_fallback(session, **kwargs):
-        pedido.update(kwargs)
-        return None, None
-
-    monkeypatch.setattr(flow, "run_agent", _sees)
-    monkeypatch.setattr(flow, "search_candidates_for_text", _nothing)
-    monkeypatch.setattr(flow, "estimate_missing_foods", _fake_fallback)
-    await flow.process_plate_photo_job(str(ai_session.id))
-
-    assert pedido["missing"] == ["pastel de cabracho"]
-    assert pedido["meal_type"] == "lunch"
+    assert ai_session.request_payload["log_date"] == "2026-09-20"
+    assert ai_session.request_payload["meal_type"] == "dinner"
+    assert ai_session.request_payload["prompt_version"] == "plate_photo_v2"

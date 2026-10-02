@@ -1,6 +1,6 @@
 "use client";
 
-import { BookmarkCheck, Check, TriangleAlert, X } from "lucide-react";
+import { BadgeCheck, BookmarkCheck, Check, TriangleAlert, X } from "lucide-react";
 import { useState } from "react";
 import { MEAL_TYPE_LABELS, type ChatDiaryPayload, type DiaryProposalItem } from "@/lib/types";
 
@@ -71,6 +71,9 @@ export function DiaryProposalCard({
   const splitAcrossMeals = mealTypes.size > 1;
   const singleMeal = [...mealTypes][0] ?? payload.meal_type;
   const anySavable = payload.items.some(canSave);
+  const hasCatalogValues = payload.items.some(
+    (item) => item.catalog || item.components?.some((component) => component.catalog),
+  );
 
   function toggleSave(index: number) {
     setToSave((prev) => {
@@ -146,12 +149,37 @@ export function DiaryProposalCard({
                 </p>
               )}
 
+              {item.catalog && (
+                <p
+                  className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--color-muted)]"
+                  title={`Valores por 100 g del catálogo: ${item.catalog}`}
+                >
+                  <BadgeCheck size={11} aria-hidden="true" className="text-[var(--color-primary)]" />
+                  valores del catálogo
+                </p>
+              )}
+
               {item.components && item.components.length > 0 && (
-                <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[var(--color-muted)]">
+                <ul className="mt-1 flex flex-col gap-0.5 text-xs text-[var(--color-muted)]">
                   {item.components.map((component, ci) => (
-                    <li key={`${component.name}-${ci}`}>
-                      {component.name}
-                      {component.kcal != null && <> · {Math.round(component.kcal)} kcal</>}
+                    <li key={`${component.name}-${ci}`} className="flex items-baseline gap-1.5">
+                      <span className="min-w-0 flex-1">
+                        {component.name}
+                        {component.catalog && (
+                          <BadgeCheck
+                            size={11}
+                            role="img"
+                            aria-label="Valores del catálogo"
+                            className="ml-1 inline-block align-[-1px] text-[var(--color-primary)]"
+                          >
+                            <title>{`Valores por 100 g del catálogo: ${component.catalog}`}</title>
+                          </BadgeCheck>
+                        )}
+                      </span>
+                      {component.grams != null && <span>{n(component.grams)} g</span>}
+                      {component.kcal != null && (
+                        <span className="w-16 text-right">{Math.round(component.kcal)} kcal</span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -235,8 +263,14 @@ export function DiaryProposalCard({
         <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-300">
           <TriangleAlert size={13} aria-hidden="true" className="mt-px shrink-0" />
           <span>
-            Es una estimación orientativa, no una medición ni un dato oficial: sirve para ver
-            la tendencia de tus semanas, no para clavar cada comida.
+            Es una estimación orientativa, no una medición: las cantidades son a ojo.
+            {hasCatalogValues && (
+              <>
+                {" "}
+                Lo marcado con <BadgeCheck size={11} aria-hidden="true" className="inline-block align-[-1px]" />{" "}
+                toma sus valores por 100 g del catálogo.
+              </>
+            )}
             {anySavable && (
               <> Lo que guardes en el catálogo se reutiliza la próxima vez que lo nombres.</>
             )}

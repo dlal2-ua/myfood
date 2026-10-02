@@ -14,8 +14,9 @@ export const TYPICAL_SECONDS = {
   /** Un turno de chat: unos 5 s si solo responde, entre 15 y 20 cuando estima lo que has
    * comido (escribe cada plato con su desglose) o tiene que consultar tu día. */
   chat: 15,
-  /** Foto del plato: son DOS llamadas al modelo, mirar la foto y cuadrarla con el catálogo. */
-  plate_photo: 22,
+  /** Foto del plato: una llamada, en la que el modelo mira la foto y escribe cada plato con
+   * su desglose. El afinado con el catálogo es instantáneo. */
+  plate_photo: 12,
 } as const;
 
 export type AiTask = keyof typeof TYPICAL_SECONDS;

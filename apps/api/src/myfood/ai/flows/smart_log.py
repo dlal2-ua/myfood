@@ -28,67 +28,22 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai import client as ai_client
-from myfood.ai import tools
-from myfood.ai.agent import AgentResult, AiAgentError, run_agent
+from myfood.ai.agent import AiAgentError
+from myfood.ai.flows.meal_estimate import estimate_meal, response_payload, store_proposal
 from myfood.ai.prompts import (
     SMART_LOG_PROMPT_VERSION,
     SMART_LOG_SYSTEM_V3,
     build_meal_estimate_prompt,
 )
 from myfood.ai.queue import enqueue_smart_log_job
-from myfood.db.models import AiProposal, AiSession
+from myfood.db.models import AiSession
 from myfood.db.session import AdminSessionLocal
-from myfood.domain import diary_proposal, estimated_dishes
+from myfood.domain import estimated_dishes
 from myfood.errors import AppError
 
 # El subproceso del CLI tarda unos segundos solo en arrancar, y aquí el modelo escribe más
 # que antes: cada plato lleva sus cifras y su desglose, no solo un alias.
 _AGENT_TIMEOUT_SECONDS = 45.0
-# 4 y no 1: el CLI corta con «Reached maximum number of turns» si el modelo gasta un turno
-# antes de llamar a la herramienta. Subir el techo no cuesta tokens.
-_MAX_TURNS = 4
-
-
-async def _store_proposal(
-    session: AsyncSession, ai_session: AiSession, args: dict
-) -> dict:
-    """Construye la propuesta de diario y la deja pendiente. Lanza `AppError` si lo estimado
-    no se puede apuntar (valores imposibles, nada reconocible)."""
-    requested_day = date.fromisoformat(args["date"])
-    payload = await diary_proposal.build_payload(
-        session,
-        args,
-        alias_to_candidate={},
-        # Aquí la fecha no la deduce nadie: es el día que el usuario tiene abierto en el
-        # diario, que también puede apuntar a mano en una fecha futura.
-        today=max(date.today(), requested_day),
-    )
-    proposal = AiProposal(
-        ai_session_id=ai_session.id,
-        user_id=ai_session.user_id,
-        scope="diary",
-        payload=payload,
-        rationale=None,
-        status="pending",
-    )
-    session.add(proposal)
-    await session.flush()
-    return {"ai_proposal_id": str(proposal.id), "payload": payload}
-
-
-def _response(proposal: dict | None, *, question: str | None, from_saved: bool) -> dict:
-    return {
-        "proposal": proposal,
-        # Una sola pregunta del modelo cuando algo que cambia mucho el resultado está de
-        # verdad ambiguo. La propuesta se manda igual: el usuario la ve mientras decide.
-        "pregunta": question,
-        # Todo salió de platos ya guardados: no se ha llamado al modelo.
-        "from_saved": from_saved,
-        # Vacío siempre. Es el formato de antes (alimentos del catálogo a confirmar uno a
-        # uno): se conserva la clave para que una web en caché no falle al leerla.
-        "items": [],
-        "warning": None if proposal else "NO_MATCH",
-    }
 
 
 async def resolve_saved_dishes(
@@ -115,7 +70,7 @@ async def resolve_saved_dishes(
     session.add(ai_session)
     await session.flush()
     try:
-        proposal = await _store_proposal(
+        proposal = await store_proposal(
             session,
             ai_session,
             {
@@ -129,7 +84,7 @@ async def resolve_saved_dishes(
         # «20 marineras»: que lo mire el modelo, que al menos puede preguntar.
         await session.rollback()
         return None
-    ai_session.response_payload = _response(proposal, question=None, from_saved=True)
+    ai_session.response_payload = response_payload(proposal, question=None, from_saved=True)
     await session.commit()
     await session.refresh(ai_session)
     return ai_session
@@ -167,22 +122,6 @@ async def request_smart_log(
     return ai_session
 
 
-async def estimate_meal(
-    *, token: str, text: str, known_dishes: list[str]
-) -> tuple[dict, AgentResult]:
-    """La llamada al modelo: del texto a los platos estimados. Puede lanzar `AiAgentError`."""
-    sink: list[dict] = []
-    result = await run_agent(
-        token=token,
-        prompt=build_meal_estimate_prompt(text, known_dishes),
-        system_prompt=SMART_LOG_SYSTEM_V3,
-        mcp_tools=[tools.build_estimate_meal_tool(sink)],
-        max_turns=_MAX_TURNS,
-        timeout_seconds=_AGENT_TIMEOUT_SECONDS,
-    )
-    return (sink[-1] if sink else {}), result
-
-
 async def process_smart_log_job(ai_session_id: str) -> None:
     """Corre en el `worker` (regla 19)."""
     async with AdminSessionLocal() as session:
@@ -205,7 +144,12 @@ async def process_smart_log_job(ai_session_id: str) -> None:
         saved = await estimated_dishes.load_saved(session)
         known = [dish.name for dish in estimated_dishes.mentioned(text, saved)]
         try:
-            args, agent_result = await estimate_meal(token=token, text=text, known_dishes=known)
+            args, agent_result = await estimate_meal(
+                token=token,
+                prompt=build_meal_estimate_prompt(text, known),
+                system_prompt=SMART_LOG_SYSTEM_V3,
+                timeout_seconds=_AGENT_TIMEOUT_SECONDS,
+            )
         except AiAgentError as exc:
             ai_session.status = "failed"
             ai_session.validation_errors = [{"code": exc.code, "message": str(exc)}]
@@ -220,7 +164,7 @@ async def process_smart_log_job(ai_session_id: str) -> None:
         proposal: dict | None = None
         if dishes:
             try:
-                proposal = await _store_proposal(
+                proposal = await store_proposal(
                     session,
                     ai_session,
                     {
@@ -238,5 +182,5 @@ async def process_smart_log_job(ai_session_id: str) -> None:
                 return
 
         ai_session.status = "succeeded"
-        ai_session.response_payload = _response(proposal, question=question, from_saved=False)
+        ai_session.response_payload = response_payload(proposal, question=question)
         await session.commit()

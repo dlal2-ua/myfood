@@ -17,7 +17,7 @@ from sqlalchemy import select, text
 
 from myfood.ai import client as ai_client
 from myfood.ai.agent import AgentResult, AiAgentError
-from myfood.ai.flows import food_resolution
+from myfood.ai.flows import food_resolution, meal_estimate
 from myfood.ai.flows import smart_log as flow
 from myfood.ai.prompts import SMART_LOG_SYSTEM_V3
 from myfood.db.models import AiProposal, AiSession
@@ -121,7 +121,7 @@ async def _reload(session_id) -> AiSession:
 
 def _fake_agent_call(args: dict, seen: dict | None = None):
     async def _fake_run_agent(
-        *, token, prompt, system_prompt, mcp_tools, max_turns, timeout_seconds
+        *, token, prompt, system_prompt, mcp_tools, max_turns, timeout_seconds, images=None
     ):
         if seen is not None:
             seen.update(prompt=prompt, system_prompt=system_prompt, tools=mcp_tools)
@@ -164,7 +164,9 @@ async def test_each_dish_is_estimated_whole_and_left_as_a_diary_proposal(
 ):
     """Lo que se pidió: la marinera es UNA línea, con su desglose, y no tres alimentos."""
     seen: dict = {}
-    monkeypatch.setattr(flow, "run_agent", _fake_agent_call({"platos": [MARINERA, CANA]}, seen))
+    monkeypatch.setattr(
+        meal_estimate, "run_agent", _fake_agent_call({"platos": [MARINERA, CANA]}, seen)
+    )
 
     await flow.process_smart_log_job(str(running_smart_log_session))
 
@@ -205,7 +207,7 @@ async def test_a_dish_already_in_the_catalog_keeps_its_saved_numbers(
     food_id = await _save_marinera(user_id)
     seen: dict = {}
     monkeypatch.setattr(
-        flow,
+        meal_estimate,
         "run_agent",
         _fake_agent_call({"platos": [{"nombre": "marinera", "cantidad": 2}, CANA]}, seen),
     )
@@ -225,7 +227,7 @@ async def test_the_question_travels_with_the_proposal(
     running_smart_log_session, configured_credential, monkeypatch
 ):
     monkeypatch.setattr(
-        flow,
+        meal_estimate,
         "run_agent",
         _fake_agent_call({"platos": [CANA], "pregunta": "¿De qué era el bocadillo?"}),
     )
@@ -241,11 +243,11 @@ async def test_no_tool_call_still_succeeds_with_no_match_warning(
     running_smart_log_session, configured_credential, monkeypatch
 ):
     async def _fake_run_agent(
-        *, token, prompt, system_prompt, mcp_tools, max_turns, timeout_seconds
+        *, token, prompt, system_prompt, mcp_tools, max_turns, timeout_seconds, images=None
     ):
         return AgentResult(text="no entiendo qué has comido", input_tokens=1, output_tokens=1)
 
-    monkeypatch.setattr(flow, "run_agent", _fake_run_agent)
+    monkeypatch.setattr(meal_estimate, "run_agent", _fake_run_agent)
 
     await flow.process_smart_log_job(str(running_smart_log_session))
 
@@ -265,7 +267,7 @@ async def test_an_impossible_estimate_fails_instead_of_reaching_the_diary(
 ):
     user_id, _ = two_users
     monkeypatch.setattr(
-        flow,
+        meal_estimate,
         "run_agent",
         _fake_agent_call({"platos": [{"nombre": "caña", "gramos": 200, "kcal": 9000}]}),
     )
@@ -286,11 +288,11 @@ async def test_agent_error_marks_session_failed(
     running_smart_log_session, configured_credential, monkeypatch
 ):
     async def _fake_run_agent(
-        *, token, prompt, system_prompt, mcp_tools, max_turns, timeout_seconds
+        *, token, prompt, system_prompt, mcp_tools, max_turns, timeout_seconds, images=None
     ):
         raise AiAgentError("boom", code="AI_TIMEOUT")
 
-    monkeypatch.setattr(flow, "run_agent", _fake_run_agent)
+    monkeypatch.setattr(meal_estimate, "run_agent", _fake_run_agent)
 
     await flow.process_smart_log_job(str(running_smart_log_session))
 
@@ -333,7 +335,7 @@ async def test_saved_dishes_are_resolved_without_calling_the_model(two_users, mo
     async def _must_not_run(**kwargs):
         raise AssertionError("no debería llamarse al modelo")
 
-    monkeypatch.setattr(flow, "run_agent", _must_not_run)
+    monkeypatch.setattr(meal_estimate, "run_agent", _must_not_run)
 
     async with AdminSessionLocal() as session:
         ai_session = await flow.resolve_saved_dishes(

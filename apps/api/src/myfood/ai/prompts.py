@@ -57,9 +57,10 @@ MEAL_ESTIMATE_RULES = """ESTIMAR LO COMIDO. Estimas tú, con lo que sabes de coc
   o compuesto (marinera, bocadillo de pastrami con rúcula y mayonesa, lentejas con chorizo) es
   UN elemento: nunca lo partas en ingredientes sueltos.
 - De cada uno, `gramos`, `kcal` y macros de UNA unidad o ración normal, y en `cantidad` cuántas.
-- En `componentes`, de qué se compone un plato compuesto (marinera → rosquilla, ensaladilla
-  rusa, anchoa), con gramos y kcal de cada parte, que suman las del plato. Un alimento simple
-  (una manzana, una caña) no lleva componentes.
+- En `componentes`, de qué se compone un plato compuesto (bocadillo de jamón → pan, jamón
+  serrano, aceite de oliva), con gramos, kcal y macros de cada parte, que suman los del plato.
+  Nombra cada parte como el ingrediente a secas y no olvides el aceite, la salsa o el aliño
+  que lleve. Un alimento simple (una manzana, una caña) no lleva componentes.
 - Son aproximaciones: redondea, sin fingir precisión.
 - Si un plato viene en `platos_guardados`, usa ese nombre tal cual y no des cifras."""
 
@@ -162,8 +163,43 @@ def build_smart_log_user_prompt(text: str, candidates: list[dict[str, Any]]) -> 
 
 
 
-PLATE_PHOTO_PROMPT_VERSION = "plate_photo_v1"
+PLATE_PHOTO_PROMPT_VERSION = "plate_photo_v2"
 
+# Una sola llamada: el modelo mira la foto y devuelve lo mismo que con un texto —cada plato
+# entero con su desglose en gramos—, y el catálogo afina después cada parte
+# (`domain/catalog_refine.py`). La versión anterior eran dos llamadas (describir sin cifras,
+# y luego elegir entre candidatos del catálogo) más una tercera de búsqueda web: en producción
+# no llegó a terminar ni una vez sin agotar el tiempo.
+PLATE_PHOTO_SYSTEM_V2 = f"""Miras la foto de lo que alguien va a comer o acaba de comer, en
+España, y lo estimas para su diario.
+
+MIRA LA FOTO ENTERA antes de contestar y apunta TODO lo que se vaya a comer o beber: cada
+plato, la guarnición, el pan, la bebida, el postre, y las salsas o el aceite que se vean. Lo
+que no es comida no cuenta, y lo que no distingas no lo inventes.
+
+{MEAL_ESTIMATE_RULES}
+- Calibra las cantidades con lo que haya en la foto: el diámetro del plato, un cubierto, una
+  mano, un vaso. Si la misma comida sale dos veces (un collage, dos ángulos), cuéntala una.
+- Si en la foto no hay comida, llama con `platos` vacío.
+
+En `pregunta`, UNA frase si algo que cambia mucho el resultado no se ve (qué lleva dentro un
+bocadillo cerrado, si la ensalada está aliñada). No identifiques a personas ni des consejo
+médico.
+
+Responde ÚNICAMENTE llamando a la herramienta `estimate_meal`."""
+
+
+def build_plate_photo_prompt(known_dishes: Sequence[str] = ()) -> str:
+    """`platos_guardados`: los que el usuario ya tiene en el catálogo. Si lo de la foto es uno
+    de ellos, el modelo lo nombra tal cual y se reutilizan sus cifras guardadas."""
+    prompt = "Estima lo que hay en esta foto de comida llamando a `estimate_meal`."
+    if known_dishes:
+        prompt += f" platos_guardados: {', '.join(known_dishes)}."
+    return prompt
+
+
+# El prompt de la versión de dos fases. Se conserva el texto porque
+# `ai_sessions.request_payload.prompt_version` guarda cuál se usó.
 PLATE_PHOTO_SYSTEM_V1 = """Miras la foto de un plato de comida y dices qué hay y cuánto hay.
 
 Escribes para alguien que quiere apuntar lo que se ha comido, en España. No eres un catálogo:
@@ -201,60 +237,6 @@ guardar, así que decir «no estoy seguro» sirve de mucho más que fingir preci
 
 Responde ÚNICAMENTE llamando a la herramienta `describe_plate`."""
 
-
-def build_plate_photo_vision_prompt() -> str:
-    return (
-        "Mira esta foto de comida y describe qué alimentos hay y en qué cantidad, "
-        "llamando a `describe_plate`."
-    )
-
-
-def build_plate_photo_resolution_prompt(
-    seen: list[dict[str, Any]], candidates: list[dict[str, Any]]
-) -> str:
-    """Segunda fase: lo que se vio en la foto, contra el catálogo.
-
-    Se le pasa la descripción estructurada tal cual en vez de rehacerla como una frase: el
-    `tipo_cantidad` y el `origen` que ya dedujo mirando la foto son mejores que los que sacaría
-    releyendo un texto que ha escrito él mismo."""
-    payload = {"visto_en_la_foto": seen, "candidates": candidates}
-    return (
-        "Esto es lo que se ha visto en una foto de un plato. Resuelve cada cosa al alimento "
-        "del catálogo que más se le parezca, conservando el `tipo_cantidad`, el `tamano` y el "
-        "`origen` que ya se dedujeron de la imagen:\n"
-        f"{json.dumps(payload, ensure_ascii=False)}"
-    )
-
-
-WEB_ESTIMATE_PROMPT_VERSION = "web_estimate_v1"
-
-WEB_ESTIMATE_SYSTEM_V1 = """Buscas en internet los valores nutricionales de alimentos que no
-están en el catálogo de MyFood, para poder apuntarlos de todas formas.
-
-Estos alimentos NO tienen dato oficial, así que lo que tú digas se marcará como estimación y el
-usuario lo verá señalado. Por eso importa tanto de dónde lo sacas:
-
-1. Busca con `WebSearch`. Prioriza, por este orden: la web del fabricante o de la cadena si es
-   un producto de marca; una base de datos nutricional reconocida; una web de recetas seria.
-2. CITA la URL en `fuente`. Sin fuente, el número no vale nada.
-3. Como mucho dos búsquedas por alimento. Si no lo encuentras, déjalo fuera: es mejor que falte
-   una línea a que el histórico del usuario se llene de números inventados.
-4. Los valores son SIEMPRE por 100 g del alimento tal y como se come. Si la web da los de una
-   ración o los del producto seco, conviértelos y dilo en el nombre.
-5. Si lo que encuentras no cuadra con lo que sabes (un alimento normal por encima de 900 kcal
-   por 100 g, una verdura con 30 g de proteína), no lo mandes.
-6. En `cantidad_texto` va la cantidad tal y como la dijo el usuario, no una que te inventes tú.
-7. No des consejo médico ni nutricional.
-
-Responde ÚNICAMENTE llamando a la herramienta `estimate_foods`."""
-
-
-def build_web_estimate_prompt(missing: list[str]) -> str:
-    listado = ", ".join(missing)
-    return (
-        "Estos alimentos no están en el catálogo de MyFood y el usuario los ha mencionado: "
-        f"{listado}.\nBusca sus valores nutricionales por 100 g y devuélvelos con su fuente."
-    )
 
 RECIPE_IMPORT_PROMPT_VERSION = "recipe_import_v1"
 

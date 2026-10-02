@@ -99,6 +99,8 @@ class SavedDish:
     fat_g: float
     carbs_g: float
     components: tuple[dict, ...] = ()
+    # Micronutrientes de UNA ración, de las partes que el catálogo confirmó al guardarlo.
+    micros: dict | None = None
 
 
 async def load_saved(session: AsyncSession) -> dict[str, SavedDish]:
@@ -151,6 +153,11 @@ async def load_saved(session: AsyncSession) -> dict[str, SavedDish]:
                 fat_g=float(nutrients.fat_100g) * factor,
                 carbs_g=float(nutrients.carbs_100g) * factor,
                 components=tuple(components.get(food.id, ())),
+                micros={
+                    key: value * factor
+                    for key, value in (nutrients.micros or {}).items()
+                    if isinstance(value, int | float)
+                },
             ),
         )
     return saved
@@ -263,7 +270,10 @@ async def save_dish(session: AsyncSession, user_id: UUID, item: dict) -> uuid.UU
             protein_100g=round(float(item["protein_g"]) / quantity * per_100g, 3),
             fat_100g=round(float(item["fat_g"]) / quantity * per_100g, 3),
             carbs_100g=round(float(item["carbs_g"]) / quantity * per_100g, 3),
-            micros={},
+            micros={
+                key: round(float(value) / quantity * per_100g, 4)
+                for key, value in (item.get("micros") or {}).items()
+            },
         )
     )
     for position, component in enumerate(item.get("components") or []):
