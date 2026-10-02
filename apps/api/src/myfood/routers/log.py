@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.ai.consent import require_ai_processing_consent
 from myfood.ai.flows.plate_photo import request_plate_photo
-from myfood.ai.flows.smart_log import request_smart_log
+from myfood.ai.flows.smart_log import request_smart_log, resolve_saved_dishes
 from myfood.ai.limits import load_limits
 from myfood.ai.quota import QuotaExceeded, check_and_consume_quota, reset_at_iso
 from myfood.ai.schemas import AiSessionOut, ai_session_to_out
@@ -65,6 +65,8 @@ class LogFoodOut(BaseModel):
     protein_g: float
     fat_g: float
     carbs_g: float
+    # De qué se compone un plato estimado, tal y como se aceptó (migración 0026).
+    components: list[dict] | None = None
 
 
 def _to_out(entry: FoodLog) -> LogFoodOut:
@@ -85,6 +87,7 @@ def _to_out(entry: FoodLog) -> LogFoodOut:
         protein_g=float(entry.protein_g),
         fat_g=float(entry.fat_g),
         carbs_g=float(entry.carbs_g),
+        components=entry.components,
     )
 
 
@@ -96,6 +99,10 @@ async def _get_food_with_nutrients(
     if food is None or nutrients is None:
         raise AppError("FOOD_NOT_FOUND", "No existe ese alimento.", status_code=404)
     return food, nutrients
+
+
+def _scaled_or_none(value: float | None, factor: float) -> float | None:
+    return None if value is None else round(float(value) * factor, 1)
 
 
 def _raw_grams(food: Food, grams: float, weighed_as: str) -> tuple[float, float | None]:
@@ -171,7 +178,26 @@ async def update_log_food(
     if body.meal_type is not None:
         entry.meal_type = body.meal_type
 
-    if body.grams is not None and entry.food_id is not None:
+    if body.grams is not None and entry.entry_source == "ai_estimate" and float(entry.grams) > 0:
+        # Un plato estimado («el bocadillo era más pequeño») se reescala desde lo que se
+        # aceptó, tenga o no ficha en el catálogo: el snapshot es la estimación de ESE día, y
+        # recalcularlo desde `foods` lo cambiaría por la de la ración guardada.
+        factor = body.grams / float(entry.grams)
+        entry.grams = body.grams
+        entry.kcal = round(float(entry.kcal) * factor, 2)
+        entry.protein_g = round(float(entry.protein_g) * factor, 2)
+        entry.fat_g = round(float(entry.fat_g) * factor, 2)
+        entry.carbs_g = round(float(entry.carbs_g) * factor, 2)
+        if entry.components:
+            entry.components = [
+                {
+                    **component,
+                    "grams": _scaled_or_none(component.get("grams"), factor),
+                    "kcal": _scaled_or_none(component.get("kcal"), factor),
+                }
+                for component in entry.components
+            ]
+    elif body.grams is not None and entry.food_id is not None:
         food, nutrients = await _get_food_with_nutrients(session, entry.food_id)
         # Un registro pesado cocinado se sigue editando en cocinado.
         raw_grams, entered_grams = _raw_grams(food, body.grams, entry.weighed_as)
@@ -477,8 +503,13 @@ async def copy_day(
             meal_type=e.meal_type,
             food_id=e.food_id,
             recipe_id=e.recipe_id,
+            # Sin el nombre, copiar un plato estimado violaba `food_log_identified` y el día
+            # entero fallaba con un 500.
+            custom_name=e.custom_name,
+            components=e.components,
             grams=e.grams,
-            entry_source="manual",
+            # Una estimación copiada sigue siendo una estimación: la marca no se pierde.
+            entry_source="ai_estimate" if e.entry_source == "ai_estimate" else "manual",
             kcal=e.kcal,
             protein_g=e.protein_g,
             fat_g=e.fat_g,
@@ -496,9 +527,8 @@ async def copy_day(
 
 class SmartLogIn(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
-    # Dónde acabaría lo que se apunte. Hace falta para la propuesta del respaldo web, que
-    # se aprueba entera: sin esto se apuntaría en «hoy, comida» aunque el usuario estuviera
-    # registrando la cena de ayer.
+    # Dónde acabaría lo que se apunte: la propuesta se aprueba entera, así que sin esto se
+    # apuntaría en «hoy, comida» aunque el usuario estuviera registrando la cena de ayer.
     log_date: date | None = None
     meal_type: MealType | None = None
 
@@ -509,12 +539,22 @@ async def create_smart_log_request(
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> AiSessionOut:
-    """Registro por lenguaje natural, "Smart Log" (sección 10.8). No guarda
-    nada todavía — el resultado (vía `GET /ai/sessions/{id}`, mismo patrón
-    de polling que el resto de iafood) es una lista de alimentos
-    propuestos; el usuario los revisa, ajusta gramos y confirma llamando a
-    `POST /log/food` normal por cada uno."""
+    """Registro por lenguaje natural, "Smart Log" (sección 10.8). No guarda nada todavía: el
+    resultado (vía `GET /ai/sessions/{id}`, mismo polling que el resto de iafood) es una
+    propuesta de diario con cada plato estimado entero y su desglose, que el usuario aprueba
+    o rechaza con `POST /ai/proposals/{id}/approve|reject` — igual que en el chat."""
     await require_ai_processing_consent(session, user_id)
+    log_date = (body.log_date or date.today()).isoformat()
+    meal_type = body.meal_type or "lunch"
+
+    # Antes de gastar cuota: si todo lo que dice son platos que ya guardó, no hay modelo que
+    # llamar y la sesión vuelve ya terminada.
+    from_saved = await resolve_saved_dishes(
+        session, user_id, text=body.text, log_date=log_date, meal_type=meal_type
+    )
+    if from_saved is not None:
+        return ai_session_to_out(from_saved)
+
     try:
         await check_and_consume_quota(user_id, scope="smart_log")
     except QuotaExceeded as exc:
@@ -523,11 +563,7 @@ async def create_smart_log_request(
         ) from exc
 
     ai_session = await request_smart_log(
-        session,
-        user_id,
-        text=body.text,
-        log_date=(body.log_date or date.today()).isoformat(),
-        meal_type=body.meal_type or "lunch",
+        session, user_id, text=body.text, log_date=log_date, meal_type=meal_type
     )
     return ai_session_to_out(ai_session)
 

@@ -14,4 +14,16 @@ Estas reglas no se discuten ni se relajan por conveniencia. Fuente normativa: No
 - **R10** — La gamificación premia el registro, nunca el déficit calórico ni el resultado corporal.
 - **R11** — Row-Level Security nativa de PostgreSQL como segunda capa, además del filtrado en código.
 
+## Excepción a R1 y R9: estimar lo que ya se ha comido
+
+Decisión del titular (2026-10-01, Notion «TAREA PENDIENTE — Rehacer estimación de calorías del chat/audio»). Al **apuntar en el diario** lo que se ha comido —por el chat, escrito o dictado, y por el texto en lenguaje natural del Diario— las calorías las **estima el modelo con su conocimiento general**, plato entero y con su desglose. El catálogo deja de ser el punto de partida: con él delante, «un bocadillo de pastrami» acababa despiezado en ingredientes sueltos que no eran lo que se había comido. No hay búsqueda web: dispara los tokens de cada registro y la precisión extra no compensa en un diario de comidas.
+
+Lo que hace que esto sea una excepción acotada y no una regla relajada:
+
+- **Solo para registrar el pasado.** Los planes de dieta siguen exactamente igual: la IA elige alimentos por alias y los gramos los pone el optimizador (R1), con el suelo de seguridad intacto (R6).
+- **Nunca se presenta como dato oficial.** Toda entrada estimada lleva `entry_source='ai_estimate'` y la web la enseña siempre con «aprox.» y la nota de que es una estimación orientativa, no una medición. Vale para ver la tendencia de semanas, no para clavar una comida.
+- **Guardar un plato en el catálogo es una decisión explícita del usuario**, plato a plato, al confirmar. Entra en `foods` con `source='ai_estimate'` (fuente y licencia lo dicen), se reutiliza tal cual la siguiente vez que se nombra —sin volver a llamar al modelo— y queda fuera del motor de dietas (`PLAN_SOURCES`), que solo trabaja con dato de laboratorio o de etiqueta.
+- **Se acota igual que antes**: nada por encima de 900 kcal/100 g ni de 5 kg, y nada se escribe sin que el usuario lo confirme.
+- El catálogo sigue ahí como segunda vía: si el usuario nombra un producto de marca concreto, el chat lo busca y esa línea sale del dato real.
+
 Disclaimer médico obligatorio: MyFood no da consejo médico ni diagnóstico. Las calculadoras y dietas son estimaciones orientativas; consultar a un profesional sanitario antes de cambios dietéticos relevantes.

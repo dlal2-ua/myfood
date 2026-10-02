@@ -4,6 +4,7 @@ consentimiento/cuotas, prepara y encola la petición, y expone el estado de
 la sesión y las propuestas resultantes para aprobar/rechazar una a una
 (R1: nada se aplica solo)."""
 
+import logging
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
@@ -23,6 +24,8 @@ from myfood.db.models import (
     AiProposal,
     AiSession,
     DietPlan,
+    Food,
+    FoodNutrient,
     PantryItem,
     PlanDay,
     PlanItem,
@@ -33,6 +36,9 @@ from myfood.deps import get_current_user_id, get_db
 from myfood.domain import diary_proposal
 from myfood.domain.food_candidates import compute_alternatives_for_item
 from myfood.errors import AppError
+from myfood.search import index_food
+
+logger = logging.getLogger("myfood.ai.proposals")
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -191,7 +197,14 @@ async def _materialize_pantry_proposal(session: AsyncSession, user_id: UUID, pay
             )
 
 
-async def _materialize_proposal(session: AsyncSession, user_id: UUID, proposal: AiProposal) -> None:
+async def _materialize_proposal(
+    session: AsyncSession,
+    user_id: UUID,
+    proposal: AiProposal,
+    *,
+    save_to_catalog: list[int] | None = None,
+    saved_food_ids: list[UUID] | None = None,
+) -> None:
     """Vuelca la propuesta de un día en `plan_days`/`plan_meals`/`plan_items`
     reales del `DietPlan` — las mismas tablas que usa el motor determinista,
     con las mismas alternativas precalculadas (sección "Plan de Actuación":
@@ -207,7 +220,13 @@ async def _materialize_proposal(session: AsyncSession, user_id: UUID, proposal: 
     if proposal.scope == "diary":
         # Lo que el chat propuso apuntar en el diario: se guardan los números que el usuario
         # acaba de aceptar, tal cual, sin recalcularlos.
-        await diary_proposal.materialize(session, user_id, proposal.payload)
+        await diary_proposal.materialize(
+            session,
+            user_id,
+            proposal.payload,
+            save_to_catalog=save_to_catalog or (),
+            saved_food_ids=saved_food_ids,
+        )
         return
     if proposal.scope == "pantry":
         await _materialize_pantry_proposal(session, user_id, proposal.payload)
@@ -264,9 +283,31 @@ async def _materialize_proposal(session: AsyncSession, user_id: UUID, proposal: 
             )
 
 
+class ApproveProposalIn(BaseModel):
+    # Posiciones, dentro de `payload.items`, de los platos estimados que el usuario quiere
+    # guardar en el catálogo además de apuntarlos. Solo tiene efecto en propuestas de diario.
+    save_to_catalog: list[int] = Field(default_factory=list, max_length=20)
+
+
+async def _index_saved_dishes(session: AsyncSession, food_ids: list[UUID]) -> None:
+    """Que un plato recién guardado salga ya en el buscador. Si Meilisearch falla no se
+    deshace nada: el plato está en Postgres, que es de donde se reutiliza, y la siguiente
+    reindexación del catálogo lo recoge."""
+    for food_id in food_ids:
+        food = await session.get(Food, food_id)
+        nutrients = await session.get(FoodNutrient, food_id)
+        if food is None or nutrients is None:
+            continue
+        try:
+            await index_food(food, nutrients)
+        except Exception:  # noqa: BLE001 — el índice es secundario, ver el docstring
+            logger.warning("no se pudo indexar el plato guardado %s", food_id, exc_info=True)
+
+
 @router.post("/proposals/{proposal_id}/approve")
 async def approve_proposal(
     proposal_id: UUID,
+    body: ApproveProposalIn | None = None,
     user_id: UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db),
 ) -> AiProposalOut:
@@ -274,12 +315,20 @@ async def approve_proposal(
     if proposal.status != "pending":
         raise AppError("PROPOSAL_NOT_PENDING", "Esta propuesta ya se decidió.", status_code=422)
 
-    await _materialize_proposal(session, user_id, proposal)
+    saved_food_ids: list[UUID] = []
+    await _materialize_proposal(
+        session,
+        user_id,
+        proposal,
+        save_to_catalog=body.save_to_catalog if body else None,
+        saved_food_ids=saved_food_ids,
+    )
 
     proposal.status = "approved"
     proposal.decided_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(proposal)
+    await _index_saved_dishes(session, saved_food_ids)
     return _proposal_to_out(proposal)
 
 

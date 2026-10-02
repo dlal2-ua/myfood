@@ -105,11 +105,45 @@ export default function FoodDetailPage() {
         {favoriteError && <p className="text-sm text-red-600 dark:text-red-400">{favoriteError}</p>}
       </div>
 
+      {food.source === "ai_estimate" && (
+        <section className="max-w-xl rounded-[var(--radius-card)] border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+          <p className="font-semibold">Estimación orientativa</p>
+          <p className="mt-1 text-neutral-700 dark:text-neutral-300">
+            Este plato se guardó desde el chat o el diario. Sus valores son aproximados: los
+            estimó Claude con su conocimiento general, no salen de una tabla oficial ni de una
+            etiqueta. Valen para seguir la tendencia de tus semanas, no como medición.
+          </p>
+          {food.components && food.components.length > 0 && (
+            <>
+              <p className="mt-2 font-semibold">De qué se compone una ración</p>
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {food.components.map((component, i) => (
+                  <li key={`${component.name}-${i}`} className="flex justify-between gap-3">
+                    <span>
+                      {component.name}
+                      {component.grams != null && (
+                        <span className="text-neutral-500"> · {Math.round(component.grams)} g</span>
+                      )}
+                    </span>
+                    {component.kcal != null && (
+                      <span className="text-neutral-500">aprox. {Math.round(component.kcal)} kcal</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
+
       <table className="w-full max-w-sm text-sm">
         <tbody>
           <tr className="border-b border-[var(--color-border)]">
             <td className="py-1 text-neutral-500">Energía</td>
-            <td className="py-1 text-right">{food.kcal_100g} kcal / 100 g</td>
+            <td className="py-1 text-right">
+              {food.source === "ai_estimate" ? "aprox. " : ""}
+              {food.kcal_100g} kcal / 100 g
+            </td>
           </tr>
           {food.serving_size_g != null && food.serving_size_g > 0 && (
             <tr className="border-b border-[var(--color-border)]">
@@ -117,6 +151,7 @@ export default function FoodDetailPage() {
                 Por porción ({food.serving_size_g} g{food.serving_label ? ` · ${food.serving_label}` : ""})
               </td>
               <td className="py-1 text-right">
+                {food.source === "ai_estimate" ? "aprox. " : ""}
                 {Math.round((food.kcal_100g * food.serving_size_g) / 100)} kcal
               </td>
             </tr>

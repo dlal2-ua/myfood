@@ -19,13 +19,15 @@ class TranscriptionUnavailable(Exception):
     el llamador debe poder ofrecer escribir en su lugar (503, sección 24.1)."""
 
 
-async def transcribe(audio_bytes: bytes) -> str:
+async def transcribe(audio_bytes: bytes, *, filename: str = "note.webm") -> str:
+    """`filename` solo aporta la extensión: Whisper decodifica con ffmpeg, que mira el
+    contenido, pero un nombre coherente con el formato real evita depender de eso."""
     settings = get_settings()
     try:
         async with httpx.AsyncClient(
             base_url=settings.whisper_base_url, timeout=_TRANSCRIBE_TIMEOUT_SECONDS
         ) as client:
-            files = {"audio_file": ("note.ogg", audio_bytes)}
+            files = {"audio_file": (filename, audio_bytes)}
             resp = await client.post("/asr", files=files, params={"language": "es"})
             resp.raise_for_status()
     except httpx.HTTPError as exc:

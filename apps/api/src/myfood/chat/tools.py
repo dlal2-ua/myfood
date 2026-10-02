@@ -30,6 +30,7 @@ from claude_agent_sdk import SdkMcpTool, tool
 from sqlalchemy import bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from myfood.ai.tools import DISH_PROPERTIES
 from myfood.db.models import DietPlan, Food, PantryItem
 from myfood.domain import diary_proposal
 from myfood.domain.diet_engine import CandidateFood
@@ -359,13 +360,7 @@ LOG_MEAL_SCHEMA: dict[str, Any] = {
     "required": ["date", "meal_type", "items"],
     "properties": {
         "date": {"type": "string", "format": "date"},
-        "meal_type": {
-            "type": "string",
-            "enum": [
-                "breakfast", "morning_snack", "lunch",
-                "afternoon_snack", "dinner", "supper",
-            ],
-        },
+        "meal_type": {"type": "string", "enum": _MEAL_TYPES},
         "request": {
             "type": "string",
             "description": "Lo que pidió el usuario, con sus palabras, para la confirmación.",
@@ -374,27 +369,18 @@ LOG_MEAL_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {
                 "type": "object",
+                # El mismo plato estimado que en el registro por texto (`ai/tools.py`), más
+                # la vía del catálogo para cuando se nombra un producto concreto.
                 "properties": {
+                    **DISH_PROPERTIES,
                     "alias": {
                         "type": "string",
-                        "description": (
-                            "Alias de un candidate de search_foods. Preferible SIEMPRE: con "
-                            "él, las calorías salen del dato oficial y no de ti."
-                        ),
+                        "description": "Solo para un candidate de search_foods, en vez de cifras.",
                     },
                     "quantity_text": {
                         "type": "string",
-                        "description": "Cuánto, con palabras: «dos rebanadas», «un vaso», «30 g».",
+                        "description": "Con `alias`: cuánto, con palabras («un vaso», «30 g»).",
                     },
-                    "name": {
-                        "type": "string",
-                        "description": "Solo si NO hay alias: cómo se llama el ingrediente.",
-                    },
-                    "grams": {"type": "number", "description": "Solo si no hay alias."},
-                    "kcal_100g": {"type": "number", "description": "Solo si no hay alias."},
-                    "protein_100g": {"type": "number"},
-                    "fat_100g": {"type": "number"},
-                    "carbs_100g": {"type": "number"},
                 },
             },
         },
@@ -405,11 +391,8 @@ LOG_MEAL_SCHEMA: dict[str, Any] = {
 def _build_log_meal_tool(sink: list[dict]) -> SdkMcpTool[Any]:
     @tool(
         LOG_MEAL_TOOL_NAME,
-        "Propone apuntar alimentos en el diario del usuario. Un plato compuesto se "
-        "descompone en sus ingredientes, uno por elemento de `items`. Para cada ingrediente, "
-        "busca antes con search_foods y usa su `alias`; solo si de verdad no existe nada "
-        "parecido, pon `name`, `grams` y los valores por 100 g, que quedarán marcados como "
-        "estimación tuya. No se guarda nada hasta que el usuario lo confirme.",
+        "Propone apuntar en el diario lo que el usuario ha comido: un elemento por plato, "
+        "estimado entero. No se guarda nada hasta que lo confirme.",
         LOG_MEAL_SCHEMA,
     )
     async def _log_meal(args: dict[str, Any]) -> dict[str, Any]:

@@ -154,6 +154,11 @@ class Food(Base):
     nova_group: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     ecoscore_grade: Mapped[str | None] = mapped_column(String, nullable=True)
     cooking_yield_factor: Mapped[object | None] = mapped_column(Numeric(4, 2), nullable=True)
+    # Quién lo dio de alta, cuando no viene del ETL. La columna existe desde la migración
+    # 0001; hasta los platos estimados (migración 0026) no la rellenaba nadie.
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     nutrients: Mapped["FoodNutrient"] = relationship(back_populates="food", uselist=False)
@@ -176,6 +181,23 @@ class FoodNutrient(Base):
     micros: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     food: Mapped["Food"] = relationship(back_populates="nutrients")
+
+
+class FoodComponent(Base):
+    """De qué se compone un plato estimado (migración 0026): «marinera» → rosquilla,
+    ensaladilla rusa, anchoa. Es descripción, no cálculo: las calorías del plato viven en
+    `food_nutrients`, como las de cualquier otro alimento."""
+
+    __tablename__ = "food_components"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    food_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("foods.id", ondelete="CASCADE"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    grams: Mapped[object | None] = mapped_column(Numeric(8, 2), nullable=True)
+    kcal: Mapped[object | None] = mapped_column(Numeric(9, 2), nullable=True)
 
 
 class Allergen(Base):
@@ -264,6 +286,9 @@ class FoodLog(Base):
     # Nombre de una entrada que no es un alimento del catálogo — un plato que el chat
     # estimó porque sus ingredientes no estaban (migración 0020).
     custom_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Desglose de un plato estimado, tal y como se aceptó: `[{name, grams, kcal}]`
+    # (migración 0026). Solo es para enseñarlo; los totales son los de abajo.
+    components: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Snapshot nutricional congelado en el momento del registro (sección 6.5)
     # — si el catálogo cambia después, el histórico del usuario no cambia.
     kcal: Mapped[object] = mapped_column(Numeric(9, 2), nullable=False)

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { Sparkles } from "lucide-react";
 import { DayPager } from "@/components/DayPager";
 import { localDateIso } from "@/lib/dates";
@@ -29,29 +28,20 @@ import {
   type LogDay,
   type LogFoodEntry,
   type MealType,
-  type SmartLogAlternative,
-  type SmartLogItem,
   type SmartLogResult,
 } from "@/lib/types";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { DiaryProposalCard } from "@/components/chat/DiaryProposalCard";
 import { PlatePhotoPanel } from "@/components/PlatePhotoPanel";
 import { SavedMeals, SaveMealButton } from "@/components/SavedMeals";
-import { describeInterpretation, ORIGIN_LABELS } from "@/lib/smartLog";
 
 const inputClass =
   "rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2";
 
-// 60 × 2s = 120s. Antes eran 60 s, que bastaban para una interpretación normal (~12 s)
-// pero no cuando algo no está en el catálogo y se busca en internet (+25 s, y hasta 70
-// si la web de turno va lenta).
-const SMART_LOG_MAX_POLL_ATTEMPTS = 60;
+// 45 × 2s = 90s: el worker corta la estimación a los 45 s, así que con esto sobra margen
+// aunque el trabajo espere un rato en la cola.
+const SMART_LOG_MAX_POLL_ATTEMPTS = 45;
 const SMART_LOG_POLL_INTERVAL_MS = 2000;
-
-interface SmartLogReviewItem extends SmartLogItem {
-  gramsInput: string;
-  mealType: MealType;
-}
 
 function todayIso(): string {
   return localDateIso();
@@ -105,13 +95,11 @@ export default function LogPage() {
   const [smartError, setSmartError] = useState<string | null>(null);
   const [smartWarning, setSmartWarning] = useState<string | null>(null);
   const [smartQuestion, setSmartQuestion] = useState<string | null>(null);
-  const [smartMissing, setSmartMissing] = useState<string[]>([]);
+  const [smartNotice, setSmartNotice] = useState<string | null>(null);
   // Sube cuando se guarda una comida, para que la lista de «lo de siempre» se entere.
   const [savedMealsKey, setSavedMealsKey] = useState(0);
   const [smartProposal, setSmartProposal] = useState<SmartLogResult["proposal"]>(null);
   const [smartDeciding, setSmartDeciding] = useState(false);
-  const [smartReviewItems, setSmartReviewItems] = useState<SmartLogReviewItem[]>([]);
-  const [smartConfirmingIndex, setSmartConfirmingIndex] = useState<number | null>(null);
   const smartPollCountRef = useRef(0);
   const smartElapsed = useElapsedSeconds(smartRequesting);
   const { quota: smartQuota, reload: reloadSmartQuota } = useAiQuota("smart_log");
@@ -329,6 +317,20 @@ export default function LogPage() {
     }
   }
 
+  /** Lo que ha salido de una interpretación ya terminada: la propuesta con cada plato
+   * estimado entero, y la pregunta del modelo si algo importante estaba ambiguo. */
+  function showSmartLogResult(session: AiSession) {
+    if (session.status !== "succeeded") {
+      const detail = session.validation_errors?.[0]?.message;
+      setSmartError(detail ?? "No se ha podido interpretar el texto.");
+      return;
+    }
+    const payload = session.response_payload as SmartLogResult | null;
+    setSmartProposal(payload?.proposal ?? null);
+    setSmartQuestion(payload?.pregunta ?? null);
+    setSmartWarning(payload?.proposal ? null : (payload?.warning ?? "NO_MATCH"));
+  }
+
   /** Espera a que el worker termine de interpretar el texto. Devuelve una promesa que solo
    * se resuelve cuando la sesión deja de estar `running` — antes esta función se resolvía
    * tras el PRIMER sondeo (los siguientes iban por `setTimeout`), así que el botón volvía a
@@ -349,8 +351,8 @@ export default function LogPage() {
         if (session.status === "running") {
           if (smartPollCountRef.current >= SMART_LOG_MAX_POLL_ATTEMPTS) {
             setSmartError(
-              "La interpretación está tardando más de lo esperado. Vuelve a entrar en un " +
-                "momento: si termina, la verás aquí sin gastar otra petición.",
+              "La interpretación está tardando más de lo esperado. Vuelve a intentarlo en " +
+                "un momento.",
             );
             resolve();
             return;
@@ -358,25 +360,7 @@ export default function LogPage() {
           setTimeout(() => void tick(), SMART_LOG_POLL_INTERVAL_MS);
           return;
         }
-        if (session.status !== "succeeded") {
-          const detail = session.validation_errors?.[0]?.message;
-          setSmartError(detail ?? "No se ha podido interpretar el texto.");
-          resolve();
-          return;
-        }
-        const payload = session.response_payload as SmartLogResult | null;
-        const items = payload?.items ?? [];
-        setSmartReviewItems(
-          items.map((item) => ({
-            ...item,
-            gramsInput: String(item.grams),
-            mealType: mealType,
-          })),
-        );
-        setSmartWarning(items.length === 0 ? (payload?.warning ?? "NO_MATCH") : null);
-        setSmartQuestion(payload?.pregunta ?? null);
-        setSmartMissing(payload?.no_encontrados ?? []);
-        setSmartProposal(payload?.proposal ?? null);
+        showSmartLogResult(session);
         resolve();
       };
       void tick();
@@ -392,9 +376,8 @@ export default function LogPage() {
     setSmartError(null);
     setSmartWarning(null);
     setSmartQuestion(null);
-    setSmartMissing([]);
+    setSmartNotice(null);
     setSmartProposal(null);
-    setSmartReviewItems([]);
     try {
       if (smartConsent) {
         await apiFetch("/api/consents", {
@@ -410,7 +393,10 @@ export default function LogPage() {
           meal_type: mealType,
         }),
       });
-      await pollSmartLogSession(session.id);
+      // Si todo eran platos ya guardados en el catálogo, la respuesta viene hecha: no hay
+      // modelo al que esperar.
+      if (session.status === "running") await pollSmartLogSession(session.id);
+      else showSmartLogResult(session);
     } catch (err) {
       setSmartError(
         err instanceof ApiError && err.status === 429
@@ -423,77 +409,36 @@ export default function LogPage() {
     }
   }
 
-  /** La propuesta del respaldo web se acepta entera, como la del chat: son valores estimados
-   * que no vienen del catálogo, así que se enseñan juntos con su fuente y se confirman de una
-   * vez en vez de línea a línea. */
-  async function decideSmartProposal(decision: "approve" | "reject") {
+  /** La propuesta se acepta entera, igual que en el chat: un total y su desglose que se
+   * confirman de una vez. `saveToCatalog` son los platos que además se guardan en el catálogo
+   * para reutilizarlos la próxima vez sin volver a estimarlos. */
+  async function decideSmartProposal(decision: "approve" | "reject", saveToCatalog: number[]) {
     const proposal = smartProposal;
     if (!proposal) return;
     setSmartDeciding(true);
+    setSmartError(null);
     try {
       await apiFetch(`/api/ai/proposals/${proposal.ai_proposal_id}/${decision}`, {
         method: "POST",
+        ...(decision === "approve"
+          ? { body: JSON.stringify({ save_to_catalog: saveToCatalog }) }
+          : {}),
       });
       setSmartProposal(null);
-      if (decision === "approve") await loadDay(logDate);
+      setSmartQuestion(null);
+      if (decision === "approve") {
+        setSmartText("");
+        setSmartNotice(
+          saveToCatalog.length > 0
+            ? "Apuntado, y guardado en el catálogo: la próxima vez saldrá al momento."
+            : "Apuntado.",
+        );
+        await loadDay(logDate);
+      }
     } catch (err) {
       setSmartError(errorMessage(err));
     } finally {
       setSmartDeciding(false);
-    }
-  }
-
-  function updateSmartReviewItem(index: number, patch: Partial<SmartLogReviewItem>) {
-    setSmartReviewItems((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, ...patch } : item)),
-    );
-  }
-
-  function discardSmartReviewItem(index: number) {
-    setSmartReviewItems((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  /** Cambia el alimento por una de las alternativas que el modelo consideró, sin volver a
-   * escribir la frase ni gastar otra petición. Los gramos se conservan: la cantidad la dijo el
-   * usuario, no depende de qué alimento sea. */
-  function swapSmartReviewItem(index: number, alternative: SmartLogAlternative) {
-    setSmartReviewItems((prev) =>
-      prev.map((item, i) => {
-        if (i !== index) return item;
-        const rest = (item.alternativas ?? []).filter((a) => a.food_id !== alternative.food_id);
-        return {
-          ...item,
-          food_id: alternative.food_id,
-          name_es: alternative.name_es,
-          motivo: undefined,
-          alternativas: [{ food_id: item.food_id, name_es: item.name_es }, ...rest].slice(0, 2),
-        };
-      }),
-    );
-  }
-
-  async function confirmSmartReviewItem(index: number) {
-    const item = smartReviewItems[index];
-    setSmartConfirmingIndex(index);
-    setSmartError(null);
-    try {
-      await submitOrQueue({
-        userId: userId ?? "",
-        kind: "food",
-        label: `${item.name_es} — ${Number(item.gramsInput)} g (${MEAL_TYPE_LABELS[item.mealType]}, ${logDate})`,
-        payload: {
-          log_date: logDate,
-          meal_type: item.mealType,
-          food_id: item.food_id,
-          grams: Number(item.gramsInput),
-        },
-      });
-      discardSmartReviewItem(index);
-      await loadDay(logDate);
-    } catch (err) {
-      setSmartError(errorMessage(err));
-    } finally {
-      setSmartConfirmingIndex(null);
     }
   }
 
@@ -528,6 +473,11 @@ export default function LogPage() {
                 </div>
               ))}
             </div>
+            {day.food.some((e) => e.entry_source === "ai_estimate") && (
+              <p className="-mt-2 text-xs text-[var(--color-muted)]">
+                Hay platos estimados: los totales del día son aproximados.
+              </p>
+            )}
             {day.food.length === 0 ? (
               <EmptyState message="Todavía no hay entradas para este día." actionLabel="Escanear un producto" actionHref="/scan" />
             ) : (
@@ -557,6 +507,7 @@ export default function LogPage() {
                       <div className="flex flex-wrap items-end gap-3">
                         <span className="text-sm font-medium">
                           {entry.recipe_name ??
+                            entry.food_name ??
                             ((entry.food_id && foodNames[entry.food_id]) || "Alimento")}
                         </span>
                         <select
@@ -570,7 +521,7 @@ export default function LogPage() {
                             </option>
                           ))}
                         </select>
-                        {entry.food_id && (
+                        {(entry.food_id || entry.entry_source === "ai_estimate") && (
                           <input
                             type="number"
                             min={1}
@@ -608,19 +559,26 @@ export default function LogPage() {
                               ((entry.food_id && foodNames[entry.food_id]) || "Alimento")}
                             {entry.entry_source === "ai_estimate" && (
                               <span
-                                title="Este alimento no está en el catálogo: sus valores los estimó Claude."
+                                title="Estimación orientativa hecha por Claude: no es una medición ni un dato oficial."
                                 className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 dark:bg-amber-950 dark:text-amber-200"
                               >
-                                <Sparkles size={9} aria-hidden="true" /> estimado
+                                <Sparkles size={9} aria-hidden="true" /> estimación
                               </span>
                             )}
                           </p>
                           <p className="text-xs text-neutral-500">
-                                                        {entry.weighed_as === "cooked" && entry.entered_grams
+                            {entry.weighed_as === "cooked" && entry.entered_grams
                               ? `${entry.entered_grams} g cocinado (≈${entry.grams} g crudo)`
                               : `${entry.grams} g`}{" "}
-                            · {entry.kcal} kcal
+                            · {entry.entry_source === "ai_estimate" ? "aprox. " : ""}
+                            {entry.entry_source === "ai_estimate" ? Math.round(entry.kcal) : entry.kcal}{" "}
+                            kcal
                           </p>
+                          {entry.components && entry.components.length > 0 && (
+                            <p className="text-xs text-neutral-500">
+                              {entry.components.map((c) => c.name).join(" · ")}
+                            </p>
+                          )}
                         </div>
                         <div className="flex items-center gap-3 text-sm">
                           <button type="button" onClick={() => startEdit(entry)} className="underline">
@@ -764,17 +722,17 @@ export default function LogPage() {
           <QuotaBadge quota={smartQuota} />
         </div>
         <p className="mb-3 text-sm text-neutral-500">
-          Escribe lo que has comido como se lo contarías a alguien: &quot;hoy he almorzado
-          una porción de tortilla de patatas, otra de ensaladilla y 4 trozos de pan&quot;.
-          Claude entiende las cantidades de casa (porción, plato, trozo, vaso…) y si el plato
-          es casero o de paquete; los gramos y las calorías los pone el catálogo. Tú revisas y
-          ajustas antes de confirmar.
+          Escribe lo que has comido como se lo contarías a alguien: &quot;a media mañana una
+          marinera y una caña, y luego un bocadillo de pastrami con rúcula y mayonesa&quot;.
+          Claude estima cada plato entero, te dice de qué se compone y te da un total
+          aproximado; tú lo confirmas antes de que se apunte nada. Es lo mismo que hace el
+          chat cuando se lo dictas.
         </p>
         <form onSubmit={onSmartLogSubmit} className="flex flex-wrap items-end gap-3">
           <input
             type="text"
             required
-            placeholder="una porción de tortilla de patatas y 4 trozos de pan..."
+            placeholder="una marinera y una caña a media mañana..."
             className={`${inputClass} min-w-[16rem] flex-1`}
             value={smartText}
             onChange={(e) => setSmartText(e.target.value)}
@@ -786,7 +744,7 @@ export default function LogPage() {
             className="inline-flex items-center gap-2 rounded-full bg-[var(--color-primary)] px-4 py-2 text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
           >
             {smartRequesting && <ThinkingDots />}
-            {smartRequesting ? "Interpretando…" : "Interpretar"}
+            {smartRequesting ? "Estimando…" : "Estimar"}
           </button>
         </form>
         <label className="mt-2 flex items-start gap-2 text-sm text-neutral-600 dark:text-neutral-400">
@@ -808,139 +766,39 @@ export default function LogPage() {
         )}
         {!smartRequesting && smartQuota?.remaining === 0 && (
           <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
-            Has gastado tus {smartQuota.limit} interpretaciones de hoy. Vuelven a las 00:00 —
-            mientras tanto puedes registrar buscando el alimento aquí arriba.
+            Has gastado tus {smartQuota.limit} estimaciones de hoy. Vuelven a las 00:00 —
+            mientras tanto puedes registrar buscando el alimento aquí arriba, y los platos que
+            tengas guardados en el catálogo se siguen apuntando al momento.
           </p>
         )}
         {smartError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{smartError}</p>}
+        {smartNotice && (
+          <p role="status" className="mt-2 text-sm font-semibold text-[var(--color-primary)]">
+            {smartNotice}
+          </p>
+        )}
         {smartWarning && (
           <p className="mt-2 text-sm text-neutral-500">
-            No se ha encontrado ningún alimento parecido en el catálogo para ese texto.
+            No he sabido sacar ningún plato de ese texto. Prueba a decirlo de otra forma.
           </p>
         )}
         {smartQuestion && (
           <p className="mt-2 rounded-[var(--radius-control)] border border-amber-300 bg-amber-50 p-2 text-sm dark:border-amber-800 dark:bg-amber-950">
             <span className="font-medium">Para afinar: </span>
-            {smartQuestion} Añádelo al texto y vuelve a interpretarlo, o ajusta los gramos a
-            mano aquí abajo.
-          </p>
-        )}
-        {/* Si el respaldo web ya lo ha resuelto, mandar al chat sobra: ya está propuesto. */}
-        {smartMissing.length > 0 && !smartProposal && (
-          <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
-            No está en el catálogo: <span className="font-medium">{smartMissing.join(", ")}</span>.{" "}
-            <Link href="/chat" className="underline">
-              Díselo al chat
-            </Link>{" "}
-            — ese sí sabe estimar un plato que no tenemos fichado.
+            {smartQuestion} Si quieres, añádelo al texto y vuelve a estimarlo.
           </p>
         )}
 
         {smartProposal && (
           <div className="mt-4">
-            <p className="mb-2 text-sm text-neutral-600 dark:text-neutral-400">
-              Esto no estaba en el catálogo, así que se ha buscado en internet. Los valores son
-              una estimación y se apuntan marcados como tal:
-            </p>
             <DiaryProposalCard
+              key={smartProposal.ai_proposal_id}
               payload={smartProposal.payload}
               deciding={smartDeciding}
-              onDecide={(decision) => void decideSmartProposal(decision)}
+              onDecide={(decision, saveToCatalog) =>
+                void decideSmartProposal(decision, saveToCatalog)
+              }
             />
-          </div>
-        )}
-
-        {smartReviewItems.length > 0 && (
-          <div className="mt-4 flex flex-col gap-3">
-            {smartReviewItems.map((item, index) => (
-              <div
-                key={`${item.food_id}-${index}`}
-                className="flex flex-wrap items-end gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] p-3"
-              >
-                <div className="min-w-[12rem] flex-1">
-                  <p className="text-sm font-medium">{item.name_es}</p>
-                  <p className="text-xs text-neutral-500">
-                    &quot;{item.approx_quantity_text}&quot;
-                    {describeInterpretation(item) && <> · {describeInterpretation(item)}</>}
-                  </p>
-                  <div className="mt-1 flex flex-wrap items-center gap-1">
-                    {item.origen && item.origen !== "desconocido" && (
-                      <span className="rounded-full bg-[var(--color-primary-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-primary)]">
-                        {ORIGIN_LABELS[item.origen]}
-                      </span>
-                    )}
-                    {item.confianza === "baja" && (
-                      <span
-                        className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                        title="Revisa este con más cuidado"
-                      >
-                        poco seguro
-                      </span>
-                    )}
-                  </div>
-                  {item.motivo && (
-                    <p className="mt-1 text-xs text-neutral-500">{item.motivo}</p>
-                  )}
-                  {(item.alternativas?.length ?? 0) > 0 && (
-                    <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-neutral-500">
-                      ¿No era ese?
-                      {item.alternativas?.map((alt) => (
-                        <button
-                          key={alt.food_id}
-                          type="button"
-                          onClick={() => swapSmartReviewItem(index, alt)}
-                          className="rounded-full border border-[var(--color-border-strong)] px-2 py-0.5 font-medium hover:bg-[var(--color-surface-2)]"
-                        >
-                          {alt.name_es}
-                        </button>
-                      ))}
-                    </p>
-                  )}
-                </div>
-                <label className="flex flex-col gap-1 text-sm">
-                  Comida
-                  <select
-                    className={inputClass}
-                    value={item.mealType}
-                    onChange={(e) =>
-                      updateSmartReviewItem(index, { mealType: e.target.value as MealType })
-                    }
-                  >
-                    {MEAL_TYPES.map((mt) => (
-                      <option key={mt} value={mt}>
-                        {MEAL_TYPE_LABELS[mt]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  Gramos
-                  <input
-                    type="number"
-                    min={1}
-                    max={5000}
-                    className={inputClass}
-                    value={item.gramsInput}
-                    onChange={(e) => updateSmartReviewItem(index, { gramsInput: e.target.value })}
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={smartConfirmingIndex === index}
-                  onClick={() => void confirmSmartReviewItem(index)}
-                  className="rounded-full bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)] disabled:opacity-60 font-semibold hover:bg-[var(--color-primary-hover)]"
-                >
-                  Confirmar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => discardSmartReviewItem(index)}
-                  className="text-sm text-neutral-500 underline"
-                >
-                  Descartar
-                </button>
-              </div>
-            ))}
           </div>
         )}
       </section>

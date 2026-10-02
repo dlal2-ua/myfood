@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from myfood.config import get_settings
+from myfood.domain.food_taxonomy import food_type_for, nutrition_tags, supermarket_for_brand
 
 settings = get_settings()
 
@@ -131,3 +132,61 @@ async def search_foods(
         query, FoodFilters(kind=kind), limit=limit, offset=offset
     )
     return result.hits, result.total
+
+
+def _num(value) -> float | None:
+    return float(value) if value is not None else None
+
+
+def food_document(food, nutrients) -> dict:
+    """El documento de Meilisearch de un alimento, con los mismos campos que monta
+    `etl/index.py::build_document` para el catálogo entero. Si divergen no pasa nada grave:
+    la siguiente reindexación completa lo rehace desde Postgres."""
+    kcal, protein = _num(nutrients.kcal_100g), _num(nutrients.protein_100g)
+    fat, carbs = _num(nutrients.fat_100g), _num(nutrients.carbs_100g)
+    return {
+        "id": str(food.id),
+        "name_es": food.name_es,
+        "name_short": food.name_short,
+        "name_en": food.name_en,
+        "brand": food.brand,
+        "kind": food.kind,
+        "category": food.category,
+        "quality_rank": food.quality_rank,
+        "source": food.source,
+        "nutriscore_grade": food.nutriscore_grade,
+        "nova_group": food.nova_group,
+        "ecoscore_grade": food.ecoscore_grade,
+        "has_image": False,
+        "kcal_100g": kcal,
+        "protein_100g": protein,
+        "fat_100g": fat,
+        "carbs_100g": carbs,
+        "supermarket": supermarket_for_brand(food.brand),
+        "food_group": food_type_for(food.name_es, food.category),
+        "nutrition_tags": nutrition_tags(
+            kcal=kcal,
+            protein=protein,
+            fat=fat,
+            carbs=carbs,
+            saturated=_num(nutrients.saturated_100g),
+            sugars=_num(nutrients.sugars_100g),
+            fiber=_num(nutrients.fiber_100g),
+            salt=_num(nutrients.salt_100g),
+            nutriscore=food.nutriscore_grade,
+            nova=food.nova_group,
+        ),
+    }
+
+
+async def index_food(food, nutrients) -> None:
+    """Añade o actualiza UN alimento en el índice, sin esperar a la reindexación del ETL: un
+    plato que el usuario acaba de guardar tiene que salir en el buscador a la primera."""
+    async with httpx.AsyncClient(
+        base_url=settings.meili_url, headers=_headers(), timeout=5
+    ) as client:
+        resp = await client.post(
+            f"/indexes/{settings.meili_index}/documents?primaryKey=id",
+            json=[food_document(food, nutrients)],
+        )
+        resp.raise_for_status()

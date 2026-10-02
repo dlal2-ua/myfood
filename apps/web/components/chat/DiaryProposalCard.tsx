@@ -1,7 +1,8 @@
 "use client";
 
-import { Check, Sparkles, TriangleAlert, X } from "lucide-react";
-import { MEAL_TYPE_LABELS, type ChatDiaryPayload } from "@/lib/types";
+import { BookmarkCheck, Check, TriangleAlert, X } from "lucide-react";
+import { useState } from "react";
+import { MEAL_TYPE_LABELS, type ChatDiaryPayload, type DiaryProposalItem } from "@/lib/types";
 
 const MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
@@ -29,12 +30,24 @@ function n(value: number): string {
   return String(Math.round(value * 10) / 10).replace(".", ",");
 }
 
-/** Lo que el chat va a apuntar, antes de apuntarlo: la petición con las palabras del usuario,
- * cada ingrediente con sus gramos y sus calorías, y el total.
+/** «aprox. 260 kcal» para lo estimado, «260 kcal» para lo que viene del catálogo. Una
+ * estimación no se enseña nunca con la misma cara que un dato oficial. */
+function kcalLabel(kcal: number, estimated: boolean): string {
+  return `${estimated ? "aprox. " : ""}${Math.round(kcal)} kcal`;
+}
+
+/** Se puede guardar lo que ha estimado el modelo y todavía no tiene ficha en el catálogo. */
+function canSave(item: DiaryProposalItem): boolean {
+  return item.estimated && !item.food_id;
+}
+
+/** Lo que se va a apuntar, antes de apuntarlo: la petición con las palabras del usuario, cada
+ * plato con sus calorías y de qué se compone, y el total. La usan igual el chat (escrito o
+ * dictado) y el registro por texto del diario.
  *
  * Una sola confirmación para todo el mensaje (decisión del usuario): se acepta o se rechaza
- * el conjunto. Las líneas cuyos números puso el modelo, porque el ingrediente no está en el
- * catálogo, salen marcadas: así se ve qué parte del día no viene de un dato oficial. */
+ * el conjunto. Cada plato estimado se puede, además, guardar en el catálogo: la próxima vez
+ * que se nombre se reutiliza esa estimación en vez de volver a pedírsela al modelo. */
 export function DiaryProposalCard({
   payload,
   deciding,
@@ -42,21 +55,45 @@ export function DiaryProposalCard({
 }: {
   payload: ChatDiaryPayload;
   deciding: boolean;
-  onDecide: (decision: "approve" | "reject") => void;
+  /** `saveToCatalog`: posiciones de `payload.items` que el usuario quiere guardar. */
+  onDecide: (decision: "approve" | "reject", saveToCatalog: number[]) => void;
 }) {
+  const [toSave, setToSave] = useState<Set<number>>(new Set());
+
   const macros = [
     ["Proteína", payload.totals.protein_g, "var(--color-protein)"],
     ["Carbos", payload.totals.carbs_g, "var(--color-carbs)"],
     ["Grasa", payload.totals.fat_g, "var(--color-fat)"],
   ] as const;
 
+  // Si el mensaje reparte entre varias comidas, cada plato dice la suya.
+  const mealTypes = new Set(payload.items.map((item) => item.meal_type ?? payload.meal_type));
+  const splitAcrossMeals = mealTypes.size > 1;
+  const singleMeal = [...mealTypes][0] ?? payload.meal_type;
+  const anySavable = payload.items.some(canSave);
+
+  function toggleSave(index: number) {
+    setToSave((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }
+
   return (
     <div className="self-start w-full max-w-[95%] rounded-[var(--radius-card)] border border-[var(--color-primary)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]">
-      <p className="text-sm font-extrabold">¿Aceptas este cambio?</p>
-      {payload.meal_type && payload.items.length > 0 && (
+      <p className="text-sm font-extrabold">¿Lo apunto así?</p>
+      {singleMeal && payload.items.length > 0 && (
         <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-          Se apuntará en <b>{MEAL_TYPE_LABELS[payload.meal_type].toLowerCase()}</b> de{" "}
-          {niceDate(payload.date)}.
+          {splitAcrossMeals ? (
+            <>Se apuntará {niceDate(payload.date)}, cada plato en su comida.</>
+          ) : (
+            <>
+              Se apuntará en <b>{MEAL_TYPE_LABELS[singleMeal].toLowerCase()}</b> de{" "}
+              {niceDate(payload.date)}.
+            </>
+          )}
         </p>
       )}
       {payload.request && (
@@ -66,36 +103,74 @@ export function DiaryProposalCard({
       )}
 
       {payload.items.length > 0 && (
-      <ul className="mt-3 divide-y divide-[var(--color-border)]">
-        {payload.items.map((item, i) => (
-          <li key={`${item.name}-${i}`} className="flex flex-wrap items-baseline gap-x-2 py-2">
-            <span className="min-w-0 flex-1 text-sm font-semibold">
-              {item.name}
-              {item.estimated && (
-                <span
-                  title="Este ingrediente no está en el catálogo: los valores los ha estimado Claude."
-                  className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 dark:bg-amber-950 dark:text-amber-200"
-                >
-                  <Sparkles size={9} aria-hidden="true" /> estimado
+        <ul className="mt-3 divide-y divide-[var(--color-border)]">
+          {payload.items.map((item, i) => (
+            <li key={`${item.name}-${i}`} className="py-2">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span className="min-w-0 flex-1 text-sm font-semibold">
+                  {item.name}
+                  {item.quantity != null && item.quantity !== 1 && (
+                    <span className="ml-1 font-normal text-[var(--color-muted)]">
+                      ×{n(item.quantity)}
+                    </span>
+                  )}
+                  {item.from_catalog && (
+                    <span
+                      title="Este plato ya estaba guardado en el catálogo: se usan sus números."
+                      className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-[var(--color-primary-soft)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--color-primary)]"
+                    >
+                      <BookmarkCheck size={9} aria-hidden="true" /> guardado
+                    </span>
+                  )}
                 </span>
+                {item.source_url && (
+                  <a
+                    href={item.source_url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="text-[11px] text-[var(--color-muted)] underline"
+                    title={item.source_url}
+                  >
+                    {hostOf(item.source_url)}
+                  </a>
+                )}
+                <span className="text-xs text-[var(--color-muted)]">{n(item.grams)} g</span>
+                <span className="text-right text-sm font-bold">
+                  {kcalLabel(item.kcal, item.estimated)}
+                </span>
+              </div>
+
+              {splitAcrossMeals && item.meal_type && (
+                <p className="text-[11px] font-semibold text-[var(--color-primary)]">
+                  {MEAL_TYPE_LABELS[item.meal_type]}
+                </p>
               )}
-            </span>
-            {item.source_url && (
-              <a
-                href={item.source_url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="text-[11px] text-[var(--color-muted)] underline"
-                title={item.source_url}
-              >
-                {hostOf(item.source_url)}
-              </a>
-            )}
-            <span className="text-xs text-[var(--color-muted)]">{n(item.grams)} g</span>
-            <span className="w-16 text-right text-sm font-bold">{Math.round(item.kcal)} kcal</span>
-          </li>
-        ))}
-      </ul>
+
+              {item.components && item.components.length > 0 && (
+                <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[var(--color-muted)]">
+                  {item.components.map((component, ci) => (
+                    <li key={`${component.name}-${ci}`}>
+                      {component.name}
+                      {component.kcal != null && <> · {Math.round(component.kcal)} kcal</>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {canSave(item) && (
+                <label className="mt-1.5 flex min-h-6 items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={toSave.has(i)}
+                    onChange={() => toggleSave(i)}
+                    disabled={deciding}
+                  />
+                  Guardar «{item.name}» en el catálogo
+                </label>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
 
       {payload.edits && payload.edits.length > 0 && (
@@ -134,33 +209,38 @@ export function DiaryProposalCard({
       )}
 
       {payload.items.length > 0 && (
-      <div className="mt-2 rounded-[var(--radius-control)] bg-[var(--color-primary-soft)] px-3 py-2">
-        <p className="flex items-baseline justify-between">
-          <span className="text-sm font-bold text-[var(--color-primary)]">Total</span>
-          <span className="text-xl font-extrabold tracking-tight text-[var(--color-primary)]">
-            {Math.round(payload.totals.kcal)} kcal
-          </span>
-        </p>
-        <ul className="mt-1 flex flex-wrap gap-x-4 text-xs">
-          {macros.map(([label, value, color]) => (
-            <li key={label} className="flex items-center gap-1">
-              <span
-                aria-hidden="true"
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ background: color }}
-              />
-              {label} <b>{n(value)} g</b>
-            </li>
-          ))}
-        </ul>
-      </div>
+        <div className="mt-2 rounded-[var(--radius-control)] bg-[var(--color-primary-soft)] px-3 py-2">
+          <p className="flex items-baseline justify-between">
+            <span className="text-sm font-bold text-[var(--color-primary)]">Total</span>
+            <span className="text-xl font-extrabold tracking-tight text-[var(--color-primary)]">
+              {kcalLabel(payload.totals.kcal, payload.has_estimates)}
+            </span>
+          </p>
+          <ul className="mt-1 flex flex-wrap gap-x-4 text-xs">
+            {macros.map(([label, value, color]) => (
+              <li key={label} className="flex items-center gap-1">
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ background: color }}
+                />
+                {label} <b>{n(value)} g</b>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {payload.has_estimates && (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-300">
           <TriangleAlert size={13} aria-hidden="true" className="mt-px shrink-0" />
-          Hay ingredientes que no están en el catálogo: esos números los ha estimado Claude y
-          quedarán marcados en tu diario.
+          <span>
+            Es una estimación orientativa, no una medición ni un dato oficial: sirve para ver
+            la tendencia de tus semanas, no para clavar cada comida.
+            {anySavable && (
+              <> Lo que guardes en el catálogo se reutiliza la próxima vez que lo nombres.</>
+            )}
+          </span>
         </p>
       )}
 
@@ -168,7 +248,7 @@ export function DiaryProposalCard({
         <button
           type="button"
           disabled={deciding}
-          onClick={() => onDecide("reject")}
+          onClick={() => onDecide("reject", [])}
           className="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full border border-[var(--color-border-strong)] text-sm font-semibold disabled:opacity-60"
         >
           <X size={15} aria-hidden="true" /> No
@@ -176,11 +256,11 @@ export function DiaryProposalCard({
         <button
           type="button"
           disabled={deciding}
-          onClick={() => onDecide("approve")}
+          onClick={() => onDecide("approve", [...toSave].sort((a, b) => a - b))}
           className="inline-flex min-h-11 flex-[2] items-center justify-center gap-1.5 rounded-full bg-[var(--color-primary)] text-sm font-bold text-[var(--color-on-primary)] disabled:opacity-60"
         >
           <Check size={15} aria-hidden="true" />
-          {deciding ? "Apuntando…" : "Sí, apúntalo"}
+          {deciding ? "Apuntando…" : toSave.size > 0 ? "Sí, apúntalo y guárdalo" : "Sí, apúntalo"}
         </button>
       </div>
     </div>

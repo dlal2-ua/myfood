@@ -371,7 +371,11 @@ export function TodayDashboard({ displayName }: { displayName: string }) {
                       <span className="block truncate font-medium">{entryName(e)}</span>
                       <span className="text-xs text-[var(--color-muted)]">{e.grams} g</span>
                     </span>
-                    <span className="shrink-0 text-xs font-semibold text-[var(--color-muted)]">{Math.round(e.kcal)} kcal</span>
+                    <span className="shrink-0 text-xs font-semibold text-[var(--color-muted)]">
+                      {/* Lo estimado no se enseña con la misma cara que un dato de catálogo. */}
+                      {e.entry_source === "ai_estimate" ? "aprox. " : ""}
+                      {Math.round(e.kcal)} kcal
+                    </span>
                   </li>
                 ))}
               </ul>

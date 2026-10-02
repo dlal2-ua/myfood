@@ -314,6 +314,85 @@ def build_estimate_foods_tool(sink: list[dict]) -> SdkMcpTool[Any]:
 
     return _estimate_foods
 
+ESTIMATE_MEAL_TOOL_NAME = "estimate_meal"
+
+# Un plato tal y como se comió, estimado ENTERO con el conocimiento general del modelo. Es el
+# formato que comparten el registro por texto (`estimate_meal`) y el chat
+# (`propose_diary_entries`), para que escribir en el diario y dictarle al chat den lo mismo.
+#
+# Aquí el modelo SÍ pone gramos y calorías. Es una decisión del usuario y no un descuido: con
+# el catálogo como punto de partida, «un bocadillo de pastrami» acababa despiezado en cinco
+# alimentos sueltos que no eran lo que se había comido. A cambio, todo lo que entra por aquí
+# se marca como estimación y la app lo enseña como «aprox.», nunca como dato oficial.
+#
+# Los valores son de UNA unidad y `cantidad` dice cuántas: así el plato se puede guardar en
+# el catálogo como una ración, y «dos marineras» no obliga al modelo a multiplicar.
+DISH_PROPERTIES: dict[str, Any] = {
+    "nombre": {
+        "type": "string",
+        "maxLength": 80,
+        "description": "Como lo llamaría quien lo comió: «marinera», «caña de cerveza».",
+    },
+    "cantidad": {"type": "number", "description": "Cuántas unidades o raciones. 1 si no se dice."},
+    "gramos": {"type": "number", "description": "Peso de UNA unidad (ml si es bebida)."},
+    "kcal": {"type": "number", "description": "De UNA unidad."},
+    "proteina_g": {"type": "number"},
+    "grasa_g": {"type": "number"},
+    "carbos_g": {"type": "number"},
+    "componentes": {
+        "type": "array",
+        "maxItems": 8,
+        "description": "De qué se compone un plato compuesto. Sus kcal suman las del plato.",
+        "items": {
+            "type": "object",
+            "required": ["nombre"],
+            "properties": {
+                "nombre": {"type": "string", "maxLength": 60},
+                "gramos": {"type": "number"},
+                "kcal": {"type": "number"},
+            },
+        },
+    },
+    "comida": {
+        "type": "string",
+        "enum": _MEAL_TYPES,
+        "description": "Solo si se dice en qué comida fue ESTE plato.",
+    },
+}
+
+ESTIMATE_MEAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["platos"],
+    "properties": {
+        "platos": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {"type": "object", "required": ["nombre"], "properties": DISH_PROPERTIES},
+        },
+        "pregunta": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Una sola pregunta si algo que cambia mucho el resultado es ambiguo.",
+        },
+    },
+}
+
+
+def build_estimate_meal_tool(sink: list[dict]) -> SdkMcpTool[Any]:
+    """Registro por texto: lo que se ha comido, plato a plato, con su estimación."""
+
+    @tool(
+        ESTIMATE_MEAL_TOOL_NAME,
+        "Devuelve lo que se ha comido, un elemento por plato, con su estimación y desglose.",
+        ESTIMATE_MEAL_SCHEMA,
+    )
+    async def _estimate_meal(args: dict[str, Any]) -> dict[str, Any]:
+        sink.append(args)
+        return {"content": [{"type": "text", "text": "Estimación recibida."}]}
+
+    return _estimate_meal
+
+
 SUGGEST_SUPPLEMENTS_TOOL_NAME = "suggest_supplements"
 
 

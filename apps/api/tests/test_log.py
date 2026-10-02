@@ -313,3 +313,78 @@ async def test_los_dias_que_no_han_llegado_se_distinguen(registered_client):
     client, _ = registered_client
     week = (await client.get("/api/log/week?date=2099-01-06")).json()
     assert all(d["is_past"] is False for d in week["days"])
+
+
+# --- platos estimados (migración 0026) -------------------------------------------------------
+
+
+async def _log_estimated_dish(user_id, *, day) -> None:
+    from myfood.db.session import AdminSessionLocal
+    from myfood.domain import diary_proposal
+
+    async with AdminSessionLocal() as session:
+        payload = await diary_proposal.build_payload(
+            session,
+            {
+                "date": day.isoformat(),
+                "meal_type": "lunch",
+                "items": [
+                    {
+                        "nombre": "bocadillo de pastrami",
+                        "gramos": 200,
+                        "kcal": 500,
+                        "proteina_g": 20,
+                        "componentes": [
+                            {"nombre": "pan", "gramos": 100, "kcal": 260},
+                            {"nombre": "pastrami", "gramos": 100, "kcal": 240},
+                        ],
+                    }
+                ],
+            },
+            alias_to_candidate={},
+            today=day,
+        )
+        await diary_proposal.materialize(session, user_id, payload)
+        await session.commit()
+
+
+async def test_an_estimated_dish_shows_its_breakdown_and_can_be_resized(registered_client):
+    """«El bocadillo era la mitad»: se reescala lo que se aceptó, desglose incluido. Antes una
+    entrada sin alimento del catálogo no dejaba cambiar la cantidad."""
+    client, user_id = registered_client
+    today = date.today()
+    await _log_estimated_dish(user_id, day=today)
+
+    (entry,) = (await client.get("/api/log", params={"date": today.isoformat()})).json()["food"]
+    assert entry["entry_source"] == "ai_estimate"
+    assert entry["food_name"] == "Bocadillo de pastrami"
+    assert [c["name"] for c in entry["components"]] == ["pan", "pastrami"]
+
+    resp = await client.patch(f"/api/log/food/{entry['id']}", json={"grams": 100})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert (body["grams"], body["kcal"], body["protein_g"]) == (100, 250, 10)
+    assert body["components"] == [
+        {"name": "pan", "grams": 50, "kcal": 130},
+        {"name": "pastrami", "grams": 50, "kcal": 120},
+    ]
+
+
+async def test_copying_a_day_keeps_estimated_dishes_and_their_mark(registered_client):
+    """Copiar un día con un plato estimado daba un 500: la copia perdía el nombre, que es lo
+    único que identifica a una entrada sin alimento del catálogo."""
+    client, user_id = registered_client
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    await _log_estimated_dish(user_id, day=today)
+
+    resp = await client.post(
+        "/api/log/copy-day",
+        params={"from_date": today.isoformat(), "to_date": tomorrow.isoformat()},
+    )
+    assert resp.status_code == 201
+
+    (copy,) = (await client.get("/api/log", params={"date": tomorrow.isoformat()})).json()["food"]
+    assert copy["food_name"] == "Bocadillo de pastrami"
+    assert copy["entry_source"] == "ai_estimate"
+    assert copy["kcal"] == 500

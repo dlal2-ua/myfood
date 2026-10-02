@@ -1,21 +1,26 @@
-"""Lo que el chat propone apuntar en el diario, y cómo se aplica al aceptarlo.
+"""Lo que el chat y el registro por texto proponen apuntar en el diario, y cómo se aplica.
 
-El chat no escribe nunca directamente (R1): describe lo que ha entendido y deja una propuesta
-pendiente. Esta capa la construye con los números ya calculados, para que la confirmación diga
+Ninguno de los dos escribe directamente: describen lo que han entendido y dejan una propuesta
+pendiente. Esta capa la construye con los números ya resueltos, para que la confirmación diga
 exactamente qué se va a guardar — petición, calorías y macros — antes de tocar nada.
 
-Un plato compuesto («tostada de tomate con queso manchego») se descompone en ingredientes:
-- el que existe en el catálogo entra por su alias, y sus valores salen del dato oficial con
-  los gramos resueltos por `quantity_text`, los mismos que en cualquier otro registro;
-- el que no existe entra con los valores que pone el modelo, marcado como estimación
-  (`entry_source='ai_estimate'`), para que se vea siempre qué parte de los números del día no
-  viene de una fuente oficial.
+Lo normal es que cada línea sea un PLATO entero estimado por el modelo («marinera», «bocadillo
+de pastrami»), con su desglose al lado y marcado como estimación
+(`entry_source='ai_estimate'`): la app nunca lo enseña como dato oficial. Tres variantes:
+- si ese plato ya está guardado en el catálogo (`domain/estimated_dishes.py`), se usan los
+  números guardados en vez de los que diga el modelo esta vez: la misma marinera pesa lo mismo
+  todos los días;
+- si el usuario nombró un producto concreto y el chat lo buscó, entra por su alias y sus
+  valores salen del catálogo, con los gramos resueltos por `quantity_text`;
+- el formato anterior (valores por 100 g que pone el modelo) lo sigue usando el respaldo web
+  del registro por foto.
 """
 
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from collections.abc import Collection
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from uuid import UUID
 
@@ -23,7 +28,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from myfood.db.models import Food, FoodLog, FoodNutrient, ShoppingListItem, WaterLog
+from myfood.domain import estimated_dishes
 from myfood.domain.diet_engine import CandidateFood
+from myfood.domain.estimated_dishes import SavedDish
 from myfood.domain.quantity_text import resolve_grams
 from myfood.errors import AppError
 
@@ -35,6 +42,8 @@ MAX_GRAMS = 5000
 # Por encima de esto no es un alimento: es un error de interpretación (el aceite, lo más
 # calórico que se come, ronda las 900 kcal/100 g).
 MAX_KCAL_100G = 900
+MAX_QUANTITY = 20
+MAX_COMPONENTS = 8
 # El chat apunta lo que ya has comido, así que no escribe en el futuro (decisión del usuario).
 MAX_DAYS_BACK = 366
 
@@ -57,6 +66,14 @@ class ProposedItem:
     # De dónde salió el número cuando vino de una búsqueda web. Se enseña al usuario: si un
     # dato no viene del ETL, que se vea de dónde viene (R9).
     source_url: str | None = None
+    # Cuántas unidades o raciones; `grams`, `kcal` y los macros ya son el total de todas.
+    quantity: float = 1.0
+    # De qué se compone el plato, por el total de lo comido: `[{name, grams, kcal}]`.
+    components: list[dict] = field(default_factory=list)
+    # La comida de ESTA línea cuando el mensaje reparte entre varias («desayuné… y cené…»).
+    meal_type: str | None = None
+    # El plato ya estaba guardado en el catálogo y se han usado sus números.
+    from_catalog: bool = False
 
 
 def _round(value: float, digits: int = 1) -> float:
@@ -155,6 +172,121 @@ def _from_estimate(entry: dict) -> ProposedItem:
     )
 
 
+def _number(value: object) -> float | None:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_dish(entry: dict) -> bool:
+    """Una línea con el formato de plato estimado (`ai/tools.py::DISH_PROPERTIES`)."""
+    return "nombre" in entry
+
+
+def _display_name(name: str) -> str:
+    return name[:1].upper() + name[1:]
+
+
+def _item_meal_type(entry: dict) -> str | None:
+    meal_type = entry.get("comida")
+    return meal_type if meal_type in MEAL_TYPES else None
+
+
+def _from_saved_dish(dish: SavedDish, quantity: float, entry: dict) -> ProposedItem:
+    """Plato que ya está en el catálogo: mandan sus números, no los que diga hoy el modelo."""
+    return ProposedItem(
+        name=dish.name,
+        grams=_round(dish.grams * quantity),
+        kcal=_round(dish.kcal * quantity),
+        protein_g=_round(dish.protein_g * quantity),
+        fat_g=_round(dish.fat_g * quantity),
+        carbs_g=_round(dish.carbs_g * quantity),
+        food_id=dish.food_id,
+        estimated=True,
+        quantity=quantity,
+        components=[
+            {
+                "name": c["name"],
+                "grams": _round(c["grams"] * quantity) if c.get("grams") is not None else None,
+                "kcal": _round(c["kcal"] * quantity) if c.get("kcal") is not None else None,
+            }
+            for c in dish.components
+        ],
+        meal_type=_item_meal_type(entry),
+        from_catalog=True,
+    )
+
+
+def _from_dish(entry: dict, saved: dict[str, SavedDish]) -> ProposedItem:
+    """Un plato tal y como se comió, estimado entero por el modelo.
+
+    Los valores llegan por UNA unidad y aquí se multiplican por `cantidad`. Si el plato trae
+    desglose, sus calorías son la suma de las partes: así lo que se enseña debajo cuadra
+    siempre con el total, que es justo lo que el usuario va a mirar. Todo se acota, igual que
+    en `_from_estimate`, para que un error de interpretación no meta un número imposible."""
+    name = str(entry.get("nombre") or "").strip()
+    if not name:
+        raise AppError("MISSING_NAME", "Falta el nombre de un plato.", 422)
+    quantity = _number(entry.get("cantidad")) or 1.0
+    quantity = max(0.1, min(quantity, MAX_QUANTITY))
+
+    dish = saved.get(estimated_dishes.normalize_name(name))
+    if dish is not None:
+        return _from_saved_dish(dish, quantity, entry)
+
+    grams = _number(entry.get("gramos"))
+    kcal = _number(entry.get("kcal"))
+    components = []
+    for raw in (entry.get("componentes") or [])[:MAX_COMPONENTS]:
+        if not isinstance(raw, dict) or not str(raw.get("nombre") or "").strip():
+            continue
+        components.append(
+            {
+                "name": str(raw["nombre"]).strip(),
+                "grams": _number(raw.get("gramos")),
+                "kcal": _number(raw.get("kcal")),
+            }
+        )
+    if components and all(c["kcal"] is not None and c["kcal"] >= 0 for c in components):
+        kcal = sum(c["kcal"] for c in components)
+    if grams is None or kcal is None:
+        raise AppError("INVALID_ESTIMATE", f"No entendí las cantidades de «{name}».", 422)
+    if (
+        not 0 < grams * quantity <= MAX_GRAMS
+        or kcal < 0
+        or kcal / grams * 100 > MAX_KCAL_100G
+    ):
+        raise AppError(
+            "IMPLAUSIBLE_ESTIMATE", f"Los valores que salen para «{name}» no son plausibles.", 422
+        )
+
+    def macro(key: str) -> float:
+        # Ningún macro puede pesar más que el propio plato.
+        return max(0.0, min(_number(entry.get(key)) or 0.0, grams))
+
+    return ProposedItem(
+        name=_display_name(name),
+        grams=_round(grams * quantity),
+        kcal=_round(kcal * quantity),
+        protein_g=_round(macro("proteina_g") * quantity),
+        fat_g=_round(macro("grasa_g") * quantity),
+        carbs_g=_round(macro("carbos_g") * quantity),
+        food_id=None,
+        estimated=True,
+        quantity=quantity,
+        components=[
+            {
+                "name": c["name"],
+                "grams": _round(c["grams"] * quantity) if c["grams"] is not None else None,
+                "kcal": _round(c["kcal"] * quantity) if c["kcal"] is not None else None,
+            }
+            for c in components
+        ],
+        meal_type=_item_meal_type(entry),
+    )
+
+
 async def build_payload(
     session: AsyncSession,
     args: dict,
@@ -176,6 +308,9 @@ async def build_payload(
     if len(raw_items) > MAX_ITEMS:
         raise AppError("TOO_MANY_ITEMS", "Son demasiados alimentos de una vez.", 422)
 
+    # Solo se cargan si hay algún plato estimado: una propuesta hecha entera con alias del
+    # catálogo no los necesita.
+    saved: dict[str, SavedDish] | None = None
     items: list[ProposedItem] = []
     for entry in raw_items:
         if not isinstance(entry, dict):
@@ -186,11 +321,18 @@ async def build_payload(
             items.append(
                 await _from_catalog(session, candidate, str(entry.get("quantity_text") or ""))
             )
+        elif _is_dish(entry):
+            if saved is None:
+                saved = await estimated_dishes.load_saved(session)
+            items.append(_from_dish(entry, saved))
         else:
             items.append(_from_estimate(entry))
 
     if not items:
         raise AppError("NO_ITEMS", "No hay nada que apuntar.", 422)
+
+    for item in items:
+        item.meal_type = item.meal_type or meal_type
 
     return {
         "date": day.isoformat(),
@@ -207,12 +349,51 @@ async def build_payload(
     }
 
 
-async def materialize(session: AsyncSession, user_id: UUID, payload: dict) -> int:
+def summary_text(payload: dict) -> str | None:
+    """La propuesta contada con palabras: el total y una línea por plato con su desglose.
+
+    Es lo que queda escrito en la conversación. Sale de los mismos números que la tarjeta de
+    confirmación —y no de lo que redacte el modelo— para que no puedan decir cosas distintas,
+    y para que el siguiente mensaje («el bocadillo era la mitad») tenga a qué referirse."""
+    items = payload.get("items") or []
+    if not items:
+        return None
+    lines = []
+    for item in items:
+        prefix = "aprox. " if item.get("estimated") else ""
+        line = f"• {item['name']}"
+        if (item.get("quantity") or 1) != 1:
+            line += f" ×{_round(item['quantity']):g}"
+        line += f": {prefix}{round(item['kcal'])} kcal"
+        names = [c["name"] for c in item.get("components") or []]
+        if names:
+            line += f" ({', '.join(names)})"
+        lines.append(line)
+    approx = "Aprox. " if payload.get("has_estimates") else ""
+    total = f"{approx}{round(payload['totals']['kcal'])} kcal en total".capitalize()
+    text = f"{total}:\n" + "\n".join(lines)
+    if payload.get("has_estimates"):
+        text += "\nEs una estimación orientativa, no una medición."
+    return text
+
+
+async def materialize(
+    session: AsyncSession,
+    user_id: UUID,
+    payload: dict,
+    *,
+    save_to_catalog: Collection[int] = (),
+    saved_food_ids: list[uuid.UUID] | None = None,
+) -> int:
     """Aplica TODO lo que el usuario acaba de aceptar: lo que se apunta, lo que se corrige o
     se borra, el agua y la lista de la compra. Devuelve cuántas líneas se apuntaron.
 
     Se guarda el snapshot ya calculado en la propuesta, no se recalcula: el usuario aceptó
-    unos números concretos y son esos los que tienen que quedar."""
+    unos números concretos y son esos los que tienen que quedar.
+
+    `save_to_catalog` son las posiciones de las líneas estimadas que el usuario ha pedido
+    guardar como plato del catálogo; sus ids se añaden a `saved_food_ids` para que quien llama
+    pueda indexarlos en el buscador una vez confirmada la transacción."""
     if payload.get("edits"):
         await materialize_edits(session, user_id, payload["edits"])
     if payload.get("water"):
@@ -226,14 +407,20 @@ async def materialize(session: AsyncSession, user_id: UUID, payload: dict) -> in
     day = date.fromisoformat(payload["date"])
     meal_type = payload["meal_type"]
     rows = []
-    for item in payload["items"]:
+    for index, item in enumerate(payload["items"]):
+        food_id = uuid.UUID(item["food_id"]) if item.get("food_id") else None
+        if food_id is None and item.get("estimated") and index in save_to_catalog:
+            food_id = await estimated_dishes.save_dish(session, user_id, item)
+            if saved_food_ids is not None:
+                saved_food_ids.append(food_id)
         rows.append(
             FoodLog(
                 user_id=user_id,
                 log_date=day,
-                meal_type=meal_type,
-                food_id=uuid.UUID(item["food_id"]) if item.get("food_id") else None,
-                custom_name=None if item.get("food_id") else item["name"],
+                meal_type=item.get("meal_type") or meal_type,
+                food_id=food_id,
+                custom_name=None if food_id else item["name"],
+                components=item.get("components") or None,
                 grams=item["grams"],
                 entry_source=AI_ESTIMATE_SOURCE if item.get("estimated") else CHAT_SOURCE,
                 kcal=item["kcal"],
