@@ -1394,3 +1394,47 @@ async def test_an_empty_recording_is_refused_before_reaching_whisper(registered_
     async with AdminSessionLocal() as session:
         await session.execute(text("DELETE FROM ai_credentials"))
         await session.commit()
+
+
+def test_several_diary_calls_in_a_turn_become_one_proposal():
+    """Encontrado con un audio real: al dictar el día entero el modelo hizo una llamada por
+    comida y solo sobrevivía la cena."""
+    from myfood.chat.agent_loop import merge_diary_calls
+
+    day = "2026-10-02"
+    merged = merge_diary_calls(
+        [
+            {"date": day, "meal_type": "breakfast", "request": "café y tostada",
+             "items": [{"nombre": "café con leche"}, {"nombre": "tostada"}]},
+            {"date": day, "meal_type": "lunch", "request": "lentejas",
+             "items": [{"nombre": "lentejas con chorizo"},
+                       {"nombre": "postre", "comida": "dinner"}]},
+            {"date": day, "meal_type": "dinner", "items": [{"nombre": "huevos fritos"}]},
+        ]
+    )
+    assert [(i["nombre"], i["comida"]) for i in merged["items"]] == [
+        ("café con leche", "breakfast"),
+        ("tostada", "breakfast"),
+        ("lentejas con chorizo", "lunch"),
+        ("postre", "dinner"),  # lo que el plato ya decía no se pisa
+        ("huevos fritos", "dinner"),
+    ]
+    assert merged["date"] == day
+    assert merged["request"] == "café y tostada · lentejas"
+    assert "skipped_dates" not in merged
+
+
+def test_a_repeated_call_for_the_same_meal_is_a_correction_and_another_day_is_reported():
+    from myfood.chat.agent_loop import merge_diary_calls
+
+    first = {"date": "2026-10-02", "meal_type": "lunch", "items": [{"nombre": "paella"}]}
+    fixed = {"date": "2026-10-02", "meal_type": "lunch", "items": [{"nombre": "fideuá"}]}
+    # Una sola llamada, o la misma comida repetida: se devuelve tal cual la última.
+    assert merge_diary_calls([first]) is first
+    assert merge_diary_calls([first, fixed]) is fixed
+    assert merge_diary_calls([]) is None
+
+    yesterday = {"date": "2026-10-01", "meal_type": "dinner", "items": [{"nombre": "sopa"}]}
+    merged = merge_diary_calls([yesterday, fixed])
+    assert [i["nombre"] for i in merged["items"]] == ["fideuá"]
+    assert merged["skipped_dates"] == ["2026-10-01"]

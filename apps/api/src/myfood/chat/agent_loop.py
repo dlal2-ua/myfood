@@ -55,6 +55,42 @@ class ChatTurnResult:
     output_tokens: int | None = None
 
 
+def merge_diary_calls(calls: list[dict]) -> dict | None:
+    """Todas las llamadas a `propose_diary_entries` de un turno, en una sola propuesta.
+
+    Al dictar el día entero («he desayunado… para comer… y de cena…») el modelo tiende a
+    hacer una llamada por comida, aunque se le pida una. Quedarse con la última —que es lo que
+    se hace con el resto de herramientas— tiraba el desayuno y la comida sin decir nada: se
+    encontró con un audio real. Aquí cada plato se queda con la comida de su llamada.
+
+    Dos llamadas para la MISMA comida del mismo día sí son una corrección, y ahí vale la
+    última. Una propuesta solo tiene una fecha: manda la de la última llamada y las de otros
+    días se devuelven en `skipped_dates` para poder decírselo al usuario."""
+    calls = [call for call in calls if isinstance(call, dict)]
+    if not calls:
+        return None
+    by_meal: dict[tuple[object, object], dict] = {}
+    for call in calls:
+        by_meal[(call.get("date"), call.get("meal_type"))] = call
+    last = calls[-1]
+    same_day = [call for (day, _), call in by_meal.items() if day == last.get("date")]
+    skipped = sorted({str(day) for day, _ in by_meal if day != last.get("date")})
+    if len(same_day) == 1 and not skipped:
+        return last
+
+    items = [
+        {**item, "comida": item.get("comida") or call.get("meal_type")}
+        for call in same_day
+        for item in call.get("items") or []
+        if isinstance(item, dict)
+    ]
+    requests = [str(call["request"]).strip() for call in same_day if call.get("request")]
+    merged = {**last, "items": items, "request": " · ".join(dict.fromkeys(requests)) or None}
+    if skipped:
+        merged["skipped_dates"] = skipped
+    return merged
+
+
 _WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
 
@@ -115,7 +151,8 @@ async def run_chat_turn(
         # — mismo criterio que el resto de flujos sink-based (`sink[-1]`).
         day_change_args=day_change_sink[-1] if day_change_sink else None,
         pantry_args=pantry_sink[-1] if pantry_sink else None,
-        diary_args=diary_sink[-1] if diary_sink else None,
+        # Salvo el diario: ahí varias llamadas suelen ser varias comidas, no una corrección.
+        diary_args=merge_diary_calls(diary_sink),
         edit_args=edit_sink[-1] if edit_sink else None,
         water_args=water_sink[-1] if water_sink else None,
         shopping_args=shopping_sink[-1] if shopping_sink else None,

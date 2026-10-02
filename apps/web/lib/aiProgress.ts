@@ -11,8 +11,9 @@ export const TYPICAL_SECONDS = {
   /** Estimar un texto de comida: una llamada, que escribe cada plato con su desglose. Si
    * todo son platos ya guardados no se llama al modelo y esto ni se llega a ver. */
   smart_log: 16,
-  /** Un turno de chat: unos 5 s sin herramientas, más si tiene que consultar tu día. */
-  chat: 10,
+  /** Un turno de chat: unos 5 s si solo responde, entre 15 y 20 cuando estima lo que has
+   * comido (escribe cada plato con su desglose) o tiene que consultar tu día. */
+  chat: 15,
   /** Foto del plato: son DOS llamadas al modelo, mirar la foto y cuadrarla con el catálogo. */
   plate_photo: 22,
 } as const;
