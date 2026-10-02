@@ -24,6 +24,7 @@ principal.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -52,6 +53,12 @@ _KCAL_TOLERANCE = 0.20
 _KCAL_ABS_TOLERANCE = 8.0
 _EXTRA_TOKEN_PENALTY = 0.08
 _MAX_EXTRA_PENALTY = 0.6
+# Con más palabras de más que estas, lo del catálogo ya es otra cosa: «patatas fritas» no se
+# confirma con unas «patatas ralladas fritas con mantequilla y cebolla».
+_MAX_ORDINARY_EXTRAS = 2
+# Lo que el modelo pone entre paréntesis es una aclaración suya («pan (medio baguette)»), no
+# parte del nombre: con ella dentro no se confirmaba ni el pan.
+_PARENTHETICAL_RE = re.compile(r"\([^)]*\)")
 _CACHE_SECONDS = 1800
 
 _STOPWORDS = frozenset(
@@ -128,7 +135,7 @@ class CatalogIndex:
         - sus calorías por 100 g coinciden con las que esperaba el modelo. Sin esa estimación
           con la que contrastar, solo vale que se llame exactamente igual.
         """
-        wanted = significant_tokens(name)
+        wanted = significant_tokens(_PARENTHETICAL_RE.sub(" ", name))
         identity = [t for t in wanted if t not in _COOKED]
         if not identity:
             return None
@@ -152,10 +159,11 @@ class CatalogIndex:
             extra = food.tokens - wanted_set
             variants = extra & _VARIANT_MARKERS
             plain = extra & _PLAIN_MARKERS
-            # Si está cocinado y el catálogo lo tiene cocinado de otra forma, es mejor que
-            # crudo, pero peor que el mismo método.
-            other_method = (extra & _COOKED) if is_cooked else frozenset()
-            ordinary = extra - variants - plain - other_method
+            # Cómo está cocinado no cuenta como palabra de más: si coincide con lo que se
+            # comió hay premio abajo, y si no, lo decide la diferencia de calorías.
+            ordinary = extra - variants - plain - _COOKED - _RAW
+            if len(ordinary) > _MAX_ORDINARY_EXTRAS:
+                continue
             score = (
                 (0.3 if food.first_token == head else 0.0)
                 + (0.3 if is_cooked and wanted_set & _COOKED & food.tokens else 0.0)

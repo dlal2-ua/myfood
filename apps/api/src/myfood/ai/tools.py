@@ -231,7 +231,7 @@ DISH_PROPERTIES: dict[str, Any] = {
                 "nombre": {
                     "type": "string",
                     "maxLength": 60,
-                    "description": "El ingrediente a secas: «pan», «jamón serrano».",
+                    "description": "Su nombre corriente: «pan», «ensaladilla rusa».",
                 },
                 "gramos": {"type": "number"},
                 "kcal": {"type": "number"},
