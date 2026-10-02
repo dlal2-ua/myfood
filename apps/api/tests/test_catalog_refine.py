@@ -50,6 +50,7 @@ INDEX = CatalogIndex(
         food("Sepia cruda", 79, "usda_sr"),
         food("Sepia cocida", 158, "usda_sr"),
         food("Cerveza", 43, "usda_sr"),
+        food("Patatas ralladas fritas con mantequilla y cebolla", 190, "usda_sr"),
     ]
 )
 
@@ -73,6 +74,8 @@ def match(name: str, kcal_100g: float | None) -> str | None:
         ("pechuga de pollo a la plancha", 163, "Pechuga de pollo sin piel, asada"),
         ("tomate", 20, "Tomate, crudo"),
         ("huevos fritos (2)", 180, None),
+        # Lo que va entre paréntesis es una aclaración del modelo, no parte del nombre.
+        ("pan (medio baguette)", 265, "Pan blanco de barra sin sal"),
         ("cerveza", 45, "Cerveza"),
     ],
 )
@@ -90,6 +93,7 @@ def test_the_catalog_confirms_the_same_food(name, kcal_100g, expected):
         ("caña de cerveza", 45, "«caña» no está en el catálogo"),
         ("ensaladilla rusa", 150, "no hay nada que se llame así"),
         ("oliva", 884, "el aceite no EMPIEZA por «oliva»... y sí: es el aceite, no la oliva"),
+        ("patatas fritas", 190, "con tantas palabras de más ya es otro plato"),
         ("", 100, "sin nombre no hay nada que buscar"),
         ("a la plancha", 100, "solo dice cómo está cocinado, no qué es"),
     ],

@@ -57,10 +57,11 @@ MEAL_ESTIMATE_RULES = """ESTIMAR LO COMIDO. Estimas tú, con lo que sabes de coc
   o compuesto (marinera, bocadillo de pastrami con rúcula y mayonesa, lentejas con chorizo) es
   UN elemento: nunca lo partas en ingredientes sueltos.
 - De cada uno, `gramos`, `kcal` y macros de UNA unidad o ración normal, y en `cantidad` cuántas.
-- En `componentes`, de qué se compone un plato compuesto (bocadillo de jamón → pan, jamón
-  serrano, aceite de oliva), con gramos, kcal y macros de cada parte, que suman los del plato.
-  Nombra cada parte como el ingrediente a secas y no olvides el aceite, la salsa o el aliño
-  que lleve. Un alimento simple (una manzana, una caña) no lleva componentes.
+- En `componentes`, de qué se compone un plato compuesto, con gramos, kcal y macros de cada
+  parte, que suman los del plato: bocadillo de jamón → pan, jamón serrano, aceite de oliva;
+  marinera → rosquilla, ensaladilla rusa, anchoa. Cada parte con su nombre corriente, sin
+  paréntesis, y sin olvidar el aceite, la salsa o el aliño que lleve. Un alimento simple (una
+  manzana, una caña) no lleva componentes.
 - Son aproximaciones: redondea, sin fingir precisión.
 - Si un plato viene en `platos_guardados`, usa ese nombre tal cual y no des cifras."""
 
