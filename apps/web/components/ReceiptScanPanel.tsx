@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { apiFetch, errorMessage } from "@/lib/api";
+import { ApiError, apiFetch, errorMessage } from "@/lib/api";
+import { AiConsentPrompt } from "@/components/AiConsentPrompt";
 import type { AiSession, ReceiptScanItem, ReceiptScanResult } from "@/lib/types";
 
 const MAX_POLL_ATTEMPTS = 30; // 30 × 2s = 60s
@@ -13,7 +14,10 @@ interface ReviewItem extends ReceiptScanItem {
 
 export function ReceiptScanPanel({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = useState(false);
-  const [consent, setConsent] = useState(false);
+  // Solo cuando el servidor dice que falta el consentimiento para usar la IA; el ticket se
+  // guarda mientras tanto para no tener que volver a fotografiarlo.
+  const [needsConsent, setNeedsConsent] = useState(false);
+  const pendingFileRef = useRef<File | null>(null);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
@@ -57,25 +61,30 @@ export function ReceiptScanPanel({ onAdded }: { onAdded: () => void }) {
   async function onFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    await scan(file);
+  }
+
+  async function scan(file: File) {
     setScanning(true);
     setError(null);
+    setNeedsConsent(false);
     setReviewItems([]);
     try {
-      if (consent) {
-        await apiFetch("/api/consents", {
-          method: "POST",
-          body: JSON.stringify({ kind: "ai_processing", version: "v1" }),
-        });
-      }
       const form = new FormData();
       form.append("file", file);
       const session = await apiFetch<AiSession>("/api/receipts/scan", {
         method: "POST",
         body: form,
       });
+      pendingFileRef.current = null;
       await pollSession(session.id);
     } catch (err) {
-      setError(errorMessage(err));
+      if (err instanceof ApiError && err.code === "AI_CONSENT_REQUIRED") {
+        pendingFileRef.current = file;
+        setNeedsConsent(true);
+      } else {
+        setError(errorMessage(err));
+      }
     } finally {
       setScanning(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -127,19 +136,25 @@ export function ReceiptScanPanel({ onAdded }: { onAdded: () => void }) {
             Sube una foto del ticket — se reconoce el texto y se proponen los alimentos que
             aparecen, para revisar antes de añadirlos a la despensa.
           </p>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            Acepto que el texto del ticket se envíe a iafood para interpretarlo
-          </label>
           <input
             ref={fileInputRef}
             type="file"
             accept="image/*"
             capture="environment"
             onChange={onFileSelected}
-            disabled={scanning || !consent}
+            disabled={scanning}
             className="text-sm"
           />
+          {needsConsent && (
+            <AiConsentPrompt
+              what="el texto del ticket"
+              onAccepted={() => {
+                const pending = pendingFileRef.current;
+                if (pending) void scan(pending);
+                else setNeedsConsent(false);
+              }}
+            />
+          )}
           {scanning && <p className="text-sm text-neutral-500">Leyendo el ticket…</p>}
           {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 

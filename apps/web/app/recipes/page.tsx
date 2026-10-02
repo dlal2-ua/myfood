@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { apiFetch, errorMessage } from "@/lib/api";
+import { ApiError, apiFetch, errorMessage } from "@/lib/api";
+import { AiConsentPrompt } from "@/components/AiConsentPrompt";
 import { LogRecipeForm } from "@/components/LogRecipeForm";
 import { RecipeCatalog } from "@/components/recipes/RecipeCatalog";
 import { UserImageUpload } from "@/components/UserImageUpload";
@@ -58,7 +59,7 @@ export default function RecipesPage() {
 
   // --- importar desde URL ---
   const [importUrl, setImportUrl] = useState("");
-  const [importConsent, setImportConsent] = useState(false);
+  const [importNeedsConsent, setImportNeedsConsent] = useState(false);
   const [importRequesting, setImportRequesting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importDraft, setImportDraft] = useState<DraftIngredientRow[] | null>(null);
@@ -246,26 +247,29 @@ export default function RecipesPage() {
     await tick();
   }
 
-  async function onImportSubmit(e: React.FormEvent) {
+  function onImportSubmit(e: React.FormEvent) {
     e.preventDefault();
+    void importFromUrl();
+  }
+
+  async function importFromUrl() {
     setImportRequesting(true);
     setImportError(null);
+    setImportNeedsConsent(false);
     setImportDraft(null);
     setImportMeta(null);
     try {
-      if (importConsent) {
-        await apiFetch("/api/consents", {
-          method: "POST",
-          body: JSON.stringify({ kind: "ai_processing", version: "v1" }),
-        });
-      }
       const session = await apiFetch<AiSession>("/api/recipes/import-url", {
         method: "POST",
         body: JSON.stringify({ url: importUrl }),
       });
       await pollImportSession(session.id);
     } catch (err) {
-      setImportError(errorMessage(err));
+      if (err instanceof ApiError && err.code === "AI_CONSENT_REQUIRED") {
+        setImportNeedsConsent(true);
+      } else {
+        setImportError(errorMessage(err));
+      }
     } finally {
       setImportRequesting(false);
     }
@@ -360,15 +364,12 @@ export default function RecipesPage() {
             {importRequesting ? "Importando…" : "Importar"}
           </button>
         </form>
-        <label className="mt-2 flex items-start gap-2 text-sm text-neutral-600 dark:text-neutral-400">
-          <input
-            type="checkbox"
-            checked={importConsent}
-            onChange={(e) => setImportConsent(e.target.checked)}
-            className="mt-0.5"
+        {importNeedsConsent && (
+          <AiConsentPrompt
+            what="el contenido de esa página"
+            onAccepted={() => void importFromUrl()}
           />
-          Acepto que el contenido de esa página se envíe a Claude para interpretarlo.
-        </label>
+        )}
 
         {importError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{importError}</p>}
 
